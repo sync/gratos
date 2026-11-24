@@ -1,0 +1,36 @@
+import { GraphQLSchema, GraphQLObjectType, GraphQLString } from "graphql";
+import { me as queryMeResolver } from "./index.js";
+export function getSchema(): GraphQLSchema {
+    const UserType: GraphQLObjectType = new GraphQLObjectType({
+        name: "User",
+        fields() {
+            return {
+                hello: {
+                    name: "hello",
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.NOT_THIS;
+                    }
+                }
+            };
+        }
+    });
+    const QueryType: GraphQLObjectType = new GraphQLObjectType({
+        name: "Query",
+        fields() {
+            return {
+                me: {
+                    name: "me",
+                    type: UserType,
+                    resolve() {
+                        return queryMeResolver();
+                    }
+                }
+            };
+        }
+    });
+    return new GraphQLSchema({
+        query: QueryType,
+        types: [QueryType, UserType]
+    });
+}
