@@ -96,24 +96,131 @@ const compareValues = (a: number | string | undefined, b: number | string | unde
   return a < b ? -1 : 1;
 };
 
-const flattenForCompare = (text: string | DiagnosticMessageChain): string =>
-  typeof text === "string" ? text : flattenDiagnosticMessageText(text, "\n");
+// TypeScript 5.9.2's compareDiagnostics (src/compiler/utilities.ts) sorts, and its
+// diagnosticsEqualityComparer deduplicates. Among diagnostics that differ only in their message
+// chain or related information, the richer one sorts first and is the one kept.
 
-const compareDiagnostics = (a: Diagnostic, b: Diagnostic): number =>
+type MessageChains = ReadonlyArray<DiagnosticMessageChain> | undefined;
+
+const headMessageOf = (text: string | DiagnosticMessageChain): string =>
+  typeof text === "string" ? text : text.messageText;
+
+const chainOf = (text: string | DiagnosticMessageChain): MessageChains =>
+  typeof text === "string" ? undefined : text.next;
+
+const compareMessageChainSize = (a: MessageChains, b: MessageChains): number => {
+  if (a === undefined && b === undefined) {
+    return 0;
+  }
+  if (a === undefined) {
+    return 1;
+  }
+  if (b === undefined) {
+    return -1;
+  }
+  const result = compareValues(b.length, a.length);
+  if (result !== 0) {
+    return result;
+  }
+  for (let i = 0; i < b.length; i++) {
+    const size = compareMessageChainSize(a[i]?.next, b[i]?.next);
+    if (size !== 0) {
+      return size;
+    }
+  }
+  return 0;
+};
+
+const compareMessageChainContent = (
+  a: ReadonlyArray<DiagnosticMessageChain>,
+  b: ReadonlyArray<DiagnosticMessageChain>,
+): number => {
+  for (let i = 0; i < b.length; i++) {
+    const result = compareValues(a[i]?.messageText, b[i]?.messageText);
+    if (result !== 0) {
+      return result;
+    }
+    const next = a[i]?.next;
+    if (next === undefined) {
+      continue;
+    }
+    const content = compareMessageChainContent(next, b[i]?.next ?? []);
+    if (content !== 0) {
+      return content;
+    }
+  }
+  return 0;
+};
+
+const compareMessageChain = (a: MessageChains, b: MessageChains): number => {
+  if (a === undefined && b === undefined) {
+    return 0;
+  }
+  if (a === undefined) {
+    return 1;
+  }
+  if (b === undefined) {
+    return -1;
+  }
+  return compareMessageChainSize(a, b) || compareMessageChainContent(a, b);
+};
+
+const compareMessageText = (a: Diagnostic, b: Diagnostic): number =>
+  compareValues(headMessageOf(a.messageText), headMessageOf(b.messageText)) ||
+  compareMessageChain(chainOf(a.messageText), chainOf(b.messageText));
+
+const compareDiagnosticsSkipRelatedInformation = (a: Diagnostic, b: Diagnostic): number =>
   compareValues(a.file?.fileName, b.file?.fileName) ||
   compareValues(a.start, b.start) ||
   compareValues(a.length, b.length) ||
   compareValues(a.code, b.code) ||
-  compareValues(flattenForCompare(a.messageText), flattenForCompare(b.messageText));
+  compareMessageText(a, b);
+
+const compareRelatedInformation = (a: Diagnostic, b: Diagnostic): number => {
+  const aRelated = a.relatedInformation;
+  const bRelated = b.relatedInformation;
+  if (aRelated === undefined && bRelated === undefined) {
+    return 0;
+  }
+  if (aRelated !== undefined && bRelated !== undefined) {
+    const result = compareValues(bRelated.length, aRelated.length);
+    if (result !== 0) {
+      return result;
+    }
+    for (const [index, info] of aRelated.entries()) {
+      const other = bRelated[index];
+      const related = other === undefined ? 0 : compareDiagnostics(info, other);
+      if (related !== 0) {
+        return related;
+      }
+    }
+    return 0;
+  }
+  return aRelated !== undefined ? -1 : 1;
+};
+
+const compareDiagnostics = (a: Diagnostic, b: Diagnostic): number =>
+  compareDiagnosticsSkipRelatedInformation(a, b) || compareRelatedInformation(a, b);
+
+/** Equal for deduplication: same place, code and head message, whatever the rest. */
+const diagnosticsEqual = (a: Diagnostic, b: Diagnostic): boolean =>
+  a.file?.fileName === b.file?.fileName &&
+  a.start === b.start &&
+  a.length === b.length &&
+  a.code === b.code &&
+  headMessageOf(a.messageText) === headMessageOf(b.messageText);
 
 export const sortAndDeduplicateDiagnostics = (
   diagnostics: ReadonlyArray<Diagnostic>,
 ): Array<Diagnostic> => {
-  const sorted = diagnostics.toSorted(compareDiagnostics);
-  return sorted.filter(
-    (diagnostic, index) =>
-      index === 0 || compareDiagnostics(sorted[index - 1] ?? diagnostic, diagnostic) !== 0,
-  );
+  const deduplicated: Array<Diagnostic> = [];
+  for (const diagnostic of diagnostics.toSorted(compareDiagnostics)) {
+    const last = deduplicated.at(-1);
+    if (last === undefined || !diagnosticsEqual(diagnostic, last)) {
+      deduplicated.push(diagnostic);
+    }
+  }
+  return deduplicated;
 };
 
 // ---- formatDiagnosticsWithColorAndContext, ported from TypeScript 5.9.2 ----
