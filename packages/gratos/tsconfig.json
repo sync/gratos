@@ -9,7 +9,13 @@
     "strictNullChecks": true,
     "strictPropertyInitialization": true,
     "noUncheckedIndexedAccess": false,
-    "exactOptionalPropertyTypes": false
+    "exactOptionalPropertyTypes": false,
+    // The engine (src/upstream) imports TypeScript as `#typescript` and keeps typechecking
+    // against TypeScript 5.9.2's declarations, which the facade in src/ts/ implements on
+    // TypeScript 7 at runtime (package.json `imports`). See src/ts/index.ts.
+    "paths": {
+      "#typescript": ["./node_modules/typescript-baseline/lib/typescript.d.ts"]
+    }
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "*.ts"],
   "exclude": [

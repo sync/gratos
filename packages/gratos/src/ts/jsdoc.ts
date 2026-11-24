@@ -1,0 +1,288 @@
+// TypeScript 5.9.2's JSDoc lookup (src/compiler/utilities.ts and utilitiesPublic.ts), ported to
+// TypeScript 7 nodes. TypeScript 7 ships its own getJSDocTags, but it does not check
+// canHaveJSDoc and walks parents differently (for example it returns a property's tags for the
+// property's type node), so the engine would see tags on more nodes than on TypeScript 5.
+import {
+  isBinaryExpression,
+  isExpressionStatement,
+  isIdentifier,
+  isJSDoc,
+  isJSDocOverloadTag,
+  isJSDocParameterTag,
+  isJSDocSatisfiesTag,
+  isJSDocTemplateTag,
+  isJSDocTypeTag,
+  isModuleDeclaration,
+  isParenthesizedExpression,
+  isVariableStatement,
+  SyntaxKind,
+} from "typescript/unstable/ast";
+import type {
+  BinaryExpression,
+  JSDoc,
+  JSDocTag,
+  Node,
+  ParameterDeclaration,
+  TypeParameterDeclaration,
+} from "typescript/unstable/ast";
+
+const JSDOC_HOST_KINDS: ReadonlySet<SyntaxKind> = new Set([
+  SyntaxKind.ArrowFunction,
+  SyntaxKind.BinaryExpression,
+  SyntaxKind.Block,
+  SyntaxKind.BreakStatement,
+  SyntaxKind.CallSignature,
+  SyntaxKind.CaseClause,
+  SyntaxKind.ClassDeclaration,
+  SyntaxKind.ClassExpression,
+  SyntaxKind.ClassStaticBlockDeclaration,
+  SyntaxKind.Constructor,
+  SyntaxKind.ConstructorType,
+  SyntaxKind.ConstructSignature,
+  SyntaxKind.ContinueStatement,
+  SyntaxKind.DebuggerStatement,
+  SyntaxKind.DoStatement,
+  SyntaxKind.ElementAccessExpression,
+  SyntaxKind.EmptyStatement,
+  SyntaxKind.EndOfFile,
+  SyntaxKind.EnumDeclaration,
+  SyntaxKind.EnumMember,
+  SyntaxKind.ExportAssignment,
+  SyntaxKind.ExportDeclaration,
+  SyntaxKind.ExportSpecifier,
+  SyntaxKind.ExpressionStatement,
+  SyntaxKind.ForInStatement,
+  SyntaxKind.ForOfStatement,
+  SyntaxKind.ForStatement,
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.FunctionExpression,
+  SyntaxKind.FunctionType,
+  SyntaxKind.GetAccessor,
+  SyntaxKind.Identifier,
+  SyntaxKind.IfStatement,
+  SyntaxKind.ImportDeclaration,
+  SyntaxKind.ImportEqualsDeclaration,
+  SyntaxKind.IndexSignature,
+  SyntaxKind.InterfaceDeclaration,
+  SyntaxKind.JSDocSignature,
+  SyntaxKind.LabeledStatement,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.MethodSignature,
+  SyntaxKind.ModuleDeclaration,
+  SyntaxKind.NamedTupleMember,
+  SyntaxKind.NamespaceExportDeclaration,
+  SyntaxKind.ObjectLiteralExpression,
+  SyntaxKind.Parameter,
+  SyntaxKind.ParenthesizedExpression,
+  SyntaxKind.PropertyAccessExpression,
+  SyntaxKind.PropertyAssignment,
+  SyntaxKind.PropertyDeclaration,
+  SyntaxKind.PropertySignature,
+  SyntaxKind.ReturnStatement,
+  SyntaxKind.SemicolonClassElement,
+  SyntaxKind.SetAccessor,
+  SyntaxKind.ShorthandPropertyAssignment,
+  SyntaxKind.SpreadAssignment,
+  SyntaxKind.SwitchStatement,
+  SyntaxKind.ThrowStatement,
+  SyntaxKind.TryStatement,
+  SyntaxKind.TypeAliasDeclaration,
+  SyntaxKind.TypeParameter,
+  SyntaxKind.VariableDeclaration,
+  SyntaxKind.VariableStatement,
+  SyntaxKind.WhileStatement,
+  SyntaxKind.WithStatement,
+]);
+
+const VARIABLE_LIKE_KINDS: ReadonlySet<SyntaxKind> = new Set([
+  SyntaxKind.BindingElement,
+  SyntaxKind.EnumMember,
+  SyntaxKind.Parameter,
+  SyntaxKind.PropertyAssignment,
+  SyntaxKind.PropertyDeclaration,
+  SyntaxKind.PropertySignature,
+  SyntaxKind.ShorthandPropertyAssignment,
+  SyntaxKind.VariableDeclaration,
+]);
+
+const canHaveJSDoc = (node: Node): boolean => JSDOC_HOST_KINDS.has(node.kind);
+
+const jsDocNodesOf = (node: Node): ReadonlyArray<JSDoc> =>
+  canHaveJSDoc(node) ? (node.jsDoc ?? []).filter(isJSDoc) : [];
+
+/** A child node by property name, for the handful of node shapes this port inspects. */
+const childOf = (node: Node, key: "initializer" | "body" | "name"): Node | undefined => {
+  const value: unknown = Reflect.get(node, key);
+  return value !== null && typeof value === "object" && "kind" in value
+    ? (value as Node)
+    : undefined;
+};
+
+const ownsJSDocTag = (hostNode: Node, tag: JSDocTag): boolean =>
+  !(isJSDocTypeTag(tag) || isJSDocSatisfiesTag(tag)) ||
+  !isJSDoc(tag.parent) ||
+  !isParenthesizedExpression(tag.parent.parent) ||
+  tag.parent.parent === hostNode;
+
+/** As TypeScript 5: the last comment contributes itself (all tags owned) or its owned tags. */
+const filterOwnedJSDocTags = (
+  hostNode: Node,
+  comments: ReadonlyArray<JSDoc>,
+): Array<JSDoc | JSDocTag> => {
+  const lastJSDoc = comments.at(-1);
+  return comments.flatMap((jsDoc): Array<JSDoc | JSDocTag> => {
+    const tags = [...(jsDoc.tags ?? [])];
+    if (jsDoc === lastJSDoc) {
+      const owned = tags.filter((tag) => ownsJSDocTag(hostNode, tag));
+      return owned.length === tags.length ? [jsDoc] : owned;
+    }
+    return tags.filter(isJSDocOverloadTag);
+  });
+};
+
+const isAssignmentExpression = (node: Node): node is BinaryExpression =>
+  isBinaryExpression(node) &&
+  node.operatorToken.kind >= SyntaxKind.FirstAssignment &&
+  node.operatorToken.kind <= SyntaxKind.LastAssignment;
+
+const singleVariableOfVariableStatement = (node: Node): Node | undefined =>
+  isVariableStatement(node) ? node.declarationList.declarations[0] : undefined;
+
+const singleInitializerOfVariableStatementOrPropertyDeclaration = (
+  node: Node,
+): Node | undefined => {
+  switch (node.kind) {
+    case SyntaxKind.VariableStatement: {
+      const variable = singleVariableOfVariableStatement(node);
+      return variable === undefined ? undefined : childOf(variable, "initializer");
+    }
+    case SyntaxKind.PropertyDeclaration:
+    case SyntaxKind.PropertyAssignment:
+      return childOf(node, "initializer");
+    default:
+      return undefined;
+  }
+};
+
+const nestedModuleDeclaration = (node: Node): Node | undefined => {
+  if (!isModuleDeclaration(node)) {
+    return undefined;
+  }
+  const body = childOf(node, "body");
+  return body?.kind === SyntaxKind.ModuleDeclaration ? body : undefined;
+};
+
+/** A simplified getAssignmentDeclarationKind: TS files have no JS-style assignment declarations. */
+const sourceOfDefaultedAssignment = (node: Node): Node | undefined =>
+  isExpressionStatement(node) &&
+  isAssignmentExpression(node.expression) &&
+  isBinaryExpression(node.expression.right) &&
+  (node.expression.right.operatorToken.kind === SyntaxKind.BarBarToken ||
+    node.expression.right.operatorToken.kind === SyntaxKind.QuestionQuestionToken)
+    ? node.expression.right.right
+    : undefined;
+
+const nextJSDocCommentLocation = (node: Node): Node | undefined => {
+  const parent = node.parent;
+  if (
+    parent.kind === SyntaxKind.PropertyAssignment ||
+    parent.kind === SyntaxKind.ExportAssignment ||
+    parent.kind === SyntaxKind.PropertyDeclaration ||
+    (parent.kind === SyntaxKind.ExpressionStatement &&
+      node.kind === SyntaxKind.PropertyAccessExpression) ||
+    parent.kind === SyntaxKind.ReturnStatement ||
+    nestedModuleDeclaration(parent) !== undefined ||
+    isAssignmentExpression(node)
+  ) {
+    return parent;
+  }
+  const grandparent = parent.parent as Node | undefined;
+  if (
+    grandparent !== undefined &&
+    (singleVariableOfVariableStatement(grandparent) === node || isAssignmentExpression(parent))
+  ) {
+    return grandparent;
+  }
+  const greatGrandparent = grandparent?.parent;
+  if (
+    greatGrandparent !== undefined &&
+    (singleVariableOfVariableStatement(greatGrandparent) !== undefined ||
+      singleInitializerOfVariableStatementOrPropertyDeclaration(greatGrandparent) === node ||
+      sourceOfDefaultedAssignment(greatGrandparent) !== undefined)
+  ) {
+    return greatGrandparent;
+  }
+  return undefined;
+};
+
+const parameterTags = (param: ParameterDeclaration): Array<JSDocTag> => {
+  const name = param.name;
+  const parentTags = getJSDocTags(param.parent);
+  if (isIdentifier(name)) {
+    return parentTags.filter(
+      (tag) => isJSDocParameterTag(tag) && isIdentifier(tag.name) && tag.name.text === name.text,
+    );
+  }
+  const parameters: ReadonlyArray<Node> = Reflect.get(param.parent, "parameters") ?? [];
+  const index = parameters.indexOf(param);
+  const tag = parentTags.filter(isJSDocParameterTag)[index];
+  return index > -1 && tag !== undefined ? [tag] : [];
+};
+
+const typeParameterTags = (param: TypeParameterDeclaration): Array<JSDocTag> => {
+  const name = param.name.text;
+  return getJSDocTags(param.parent).filter(
+    (tag) =>
+      isJSDocTemplateTag(tag) &&
+      [...tag.typeParameters].some((typeParameter) => typeParameter.name.text === name),
+  );
+};
+
+/** TypeScript 5's getJSDocCommentsAndTags: JSDoc comments and tags that apply to `hostNode`. */
+export const getJSDocCommentsAndTags = (hostNode: Node): Array<JSDoc | JSDocTag> => {
+  const result: Array<JSDoc | JSDocTag> = [];
+  if (VARIABLE_LIKE_KINDS.has(hostNode.kind)) {
+    const initializer = childOf(hostNode, "initializer");
+    if (initializer !== undefined) {
+      const initializerJSDoc = jsDocNodesOf(initializer);
+      if (initializerJSDoc.length > 0) {
+        result.push(...filterOwnedJSDocTags(hostNode, initializerJSDoc));
+      }
+    }
+  }
+  let node: Node | undefined = hostNode;
+  while (node?.parent !== undefined) {
+    const jsDoc = jsDocNodesOf(node);
+    if (jsDoc.length > 0) {
+      result.push(...filterOwnedJSDocTags(hostNode, jsDoc));
+    }
+    if (node.kind === SyntaxKind.Parameter) {
+      result.push(...parameterTags(node as ParameterDeclaration));
+      break;
+    }
+    if (node.kind === SyntaxKind.TypeParameter) {
+      result.push(...typeParameterTags(node as TypeParameterDeclaration));
+      break;
+    }
+    node = nextJSDocCommentLocation(node);
+  }
+  return result;
+};
+
+const tagsCache = new WeakMap<Node, ReadonlyArray<JSDocTag>>();
+
+/** TypeScript 5's getJSDocTags, cached per node as TypeScript 5 caches it on the node. */
+export const getJSDocTags = (node: Node): ReadonlyArray<JSDocTag> => {
+  if (!canHaveJSDoc(node)) {
+    return [];
+  }
+  const cached = tagsCache.get(node);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const tags = getJSDocCommentsAndTags(node).flatMap((entry) =>
+    isJSDoc(entry) ? [...(entry.tags ?? [])] : [entry],
+  );
+  tagsCache.set(node, tags);
+  return tags;
+};

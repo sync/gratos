@@ -198,6 +198,9 @@ catalogs:
     graphql:
       specifier: 17.1.0
       version: 17.1.0
+    jsonc-parser:
+      specifier: 3.3.1
+      version: 3.3.1
     oxfmt:
       specifier: 0.80.0
       version: 0.80.0
@@ -291,12 +294,18 @@ importers:
       commander:
         specifier: 14.0.1
         version: 14.0.1
+      effect:
+        specifier: 'catalog:'
+        version: 4.1.5
       graphql:
         specifier: 'catalog:'
         version: 17.1.0
-      typescript-baseline:
-        specifier: npm:typescript@5.9.2
-        version: typescript@5.9.2
+      jsonc-parser:
+        specifier: 'catalog:'
+        version: 3.3.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
     devDependencies:
       '@effect/vitest':
         specifier: 'catalog:'
@@ -304,15 +313,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      effect:
-        specifier: 'catalog:'
-        version: 4.1.5
       grats-upstream:
         specifier: npm:grats@0.0.36
         version: grats@0.0.36
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
+      typescript-baseline:
+        specifier: npm:typescript@5.9.2
+        version: typescript@5.9.2
       vite:
         specifier: 'catalog:'
         version: 8.3.8(@types/node@26.6.6)
@@ -1057,6 +1063,9 @@ packages:
     engines: {node: '>=20 <=24'}
     hasBin: true
 
+  jsonc-parser@3.3.1:
+    resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
+
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
     engines: {node: '>= 12.0.0'}
@@ -1729,6 +1738,8 @@ snapshots:
       graphql: 16.15.0
       semver: 7.8.6
       typescript: 5.9.2
+
+  jsonc-parser@3.3.1: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true
