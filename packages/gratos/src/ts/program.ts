@@ -27,7 +27,8 @@ export interface CompilerHost {
 
 export interface ParsedCommandLine {
   readonly options: CompilerOptions;
-  readonly fileNames: ReadonlyArray<string>;
+  /** A mutable copy, as in TypeScript 5: changing it does not change the parsed config. */
+  readonly fileNames: Array<string>;
   readonly errors: ReadonlyArray<Diagnostic>;
   readonly raw: unknown;
   /** Not in TypeScript 5's shape: the program opened for this config, which createProgram reuses. */
@@ -214,6 +215,10 @@ export const getPreEmitDiagnostics = (
 interface ParsedConfig {
   readonly configPath: string;
   readonly session: Session;
+  /**
+   * The root file names as returned, frozen and separate from the returned array, to tell
+   * whether a caller changed the roots since (even by mutating that array).
+   */
   readonly fileNames: ReadonlyArray<string>;
   /** The options as returned, to tell whether a caller changed them since. */
   readonly optionsJson: string;
@@ -480,16 +485,17 @@ export const getParsedCommandLineOfConfigFile = (
     ...Object.fromEntries(Object.entries(program.project.compilerOptions)),
     configFilePath: configPath,
   };
+  const fileNames = program.project.rootFiles;
   parsedConfigs.set(options, {
     configPath,
     session,
-    fileNames: program.project.rootFiles,
+    fileNames: Object.freeze([...fileNames]),
     optionsJson: JSON.stringify(options),
     program,
   });
   return {
     options,
-    fileNames: program.project.rootFiles,
+    fileNames: [...fileNames],
     errors: program.getConfigFileParsingDiagnostics(),
     raw,
     program,

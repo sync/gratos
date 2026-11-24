@@ -1,8 +1,8 @@
 // The TypeScript 7 facade's programs and config reading on real tsconfigs in temporary
 // directories: program reuse, edits between parses, config diagnostics and byte order marks.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { afterAll, describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ const project = (files: Record<string, string>): string => {
   const directory = mkdtempSync(join(tmpdir(), "gratos-facade-"));
   directories.push(directory);
   for (const [name, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(directory, name)), { recursive: true });
     writeFileSync(join(directory, name), text);
   }
   return directory;
@@ -32,9 +33,14 @@ afterAll(() => {
   }
 });
 
-/** A strict tsconfig, optionally with a `target`. */
-const tsconfig = (compilerOptions: { readonly target?: string } = {}): string =>
-  JSON.stringify({ compilerOptions: { strict: true, ...compilerOptions } }, null, 2);
+/** A strict tsconfig, optionally with other compiler options. */
+const tsconfig = (
+  compilerOptions: {
+    readonly target?: string;
+    readonly noImplicitAny?: boolean;
+    readonly paths?: Readonly<Record<string, ReadonlyArray<string>>>;
+  } = {},
+): string => JSON.stringify({ compilerOptions: { strict: true, ...compilerOptions } }, null, 2);
 
 const sourceFileNames = (program: FacadeProgram): Array<string> =>
   program.getSourceFiles().map((sourceFile) => sourceFile.fileName);
@@ -92,6 +98,19 @@ describe("createProgram with the options of a parsed config", () => {
     const parsed = getParsedCommandLineOfConfigFile(join(directory, "tsconfig.json"));
     const program = createProgram(parsed.fileNames, { ...parsed.options, noImplicitAny: false });
     expect(program.getSemanticDiagnostics()).toEqual([]);
+  });
+
+  it("loads only the remaining roots after the caller removed some from the parsed file names", () => {
+    const directory = project({
+      "tsconfig.json": tsconfig(),
+      "a.ts": "export const a = 1;\n",
+      "b.ts": "export const b = 2;\n",
+    });
+    const parsed = getParsedCommandLineOfConfigFile(join(directory, "tsconfig.json"));
+    parsed.fileNames.splice(1);
+
+    const program = createProgram(parsed.fileNames, parsed.options);
+    expect(sourceFileNames(program)).toEqual([join(directory, "a.ts")]);
   });
 });
 
