@@ -23,6 +23,7 @@ import {
   defaultSessionList,
   openProject,
   openSessionList,
+  tsgoProcess,
 } from "../src/ts/session.ts";
 import type { Session } from "../src/ts/session.ts";
 
@@ -154,6 +155,33 @@ describe("generate", () => {
         }),
       );
       expect(openSessionList()).toEqual(before);
+    }).pipe(Effect.provide(memoryFileSystem({ [smokeTsconfig]: smokeConfig }).layer)),
+  );
+
+  it.effect("kills its tsgo process outright, so tsgo cannot log while it shuts down", () =>
+    Effect.gen(function* () {
+      const before = openSessionList();
+      const child = yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* generate(smokeTsconfig);
+          const [session] = sessionsSince(before);
+          const process = tsgoProcess(session?.api);
+          // TypeScript's internals still lead to the child; otherwise the kill would be a no-op.
+          assert.isDefined(process);
+          return process;
+        }),
+      );
+      const signal = yield* Effect.promise(
+        () =>
+          new Promise<NodeJS.Signals | null>((resolve) => {
+            if (child.exitCode !== null || child.signalCode !== null) {
+              resolve(child.signalCode);
+            } else {
+              child.once("exit", (_code, exitSignal) => resolve(exitSignal));
+            }
+          }),
+      );
+      expect(signal).toBe("SIGKILL");
     }).pipe(Effect.provide(memoryFileSystem({ [smokeTsconfig]: smokeConfig }).layer)),
   );
 
