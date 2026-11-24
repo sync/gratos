@@ -2,7 +2,7 @@
 // per row.
 import { describe, expect, it } from "vitest";
 
-import { createServer, gqlError } from "../src/index.ts";
+import { createServer, gqlError, httpStatusOf } from "../src/index.ts";
 import { gql, post, send, URL_ } from "./support/http.ts";
 import { basicSchema } from "./support/schema.ts";
 
@@ -229,4 +229,32 @@ describe("gqlError(message, status)", () => {
     expect(sent.status).toBe(200);
     expect(sent.body?.data).toEqual({ count: 1, fails: null });
   });
+
+  it("ignores a status that cannot carry a JSON body, or is not 200–599", () => {
+    for (const status of [204, 205, 304, 100, 199, 600, 200.5]) {
+      expect(httpStatusOf(gqlError("Nope", status))).toBeUndefined();
+    }
+    for (const status of [200, 401, 403, 418, 503, 599]) {
+      expect(httpStatusOf(gqlError("Nope", status))).toBe(status);
+    }
+  });
+
+  it.each([204, 205, 304])(
+    "a %s gqlError keeps the GraphQL error and gets the fallback status, not a 500",
+    async (status) => {
+      const bodiless = createServer({
+        schema: basicSchema({
+          Query: {
+            failsNonNull: () => {
+              throw gqlError("No body allowed", status);
+            },
+          },
+        }),
+      });
+      const sent = await gql(bodiless, "{ failsNonNull }");
+      expect(sent.status).toBe(200);
+      expect(sent.body?.data).toBeNull();
+      expect(sent.error?.message).toBe("No body allowed");
+    },
+  );
 });
