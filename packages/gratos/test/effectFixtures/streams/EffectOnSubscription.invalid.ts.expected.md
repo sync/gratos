@@ -16,7 +16,7 @@ export function greeting(): Effect.Effect<string> {
 ### Error Report
 
 ```text
-test/effectFixtures/streams/EffectOnSubscription.invalid.ts:4:43 - error: Expected fields on `Subscription` to return an `AsyncIterable` or an Effect `Stream.Stream`. Fields on `Subscription` model a subscription, which is a stream of events. Grats expects fields on `Subscription` to return an `AsyncIterable` or a `Stream.Stream` which can be used to model this stream.
+test/effectFixtures/streams/EffectOnSubscription.invalid.ts:4:43 - error: Expected a field on `Subscription` not to return `Effect.Effect`. An Effect is not a subscription source: a subscription's events come from a `Stream.Stream`. Return the `Stream.Stream` instead, and build it with `Stream.unwrap` if it needs an Effect to set up.
 
 4 export function greeting(): Effect.Effect<string> {
                                             ~~~~~~

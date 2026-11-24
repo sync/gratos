@@ -24,5 +24,8 @@ export const effectDerivedContext = (wrapper: EffectWrapper): string =>
 export const streamOutsideSubscription = (): string =>
   "Expected `Stream.Stream` only on fields of `Subscription` (`@gqlSubscriptionField`). On any other type GraphQL would treat the Stream as a list and fail at runtime. Return `Effect.Effect<ReadonlyArray<A>>` for a list, or move the field to `Subscription`.";
 
+export const effectOnSubscription = (): string =>
+  "Expected a field on `Subscription` not to return `Effect.Effect`. An Effect is not a subscription source: a subscription's events come from a `Stream.Stream`. Return the `Stream.Stream` instead, and build it with `Stream.unwrap` if it needs an Effect to set up.";
+
 export const bareEffectType = (): string =>
   'Expected `Effect.Effect`, not a bare `Effect`. Gratos only recognizes the qualified name, so `Effect<A>` imported from `effect` is not unwrapped. Import the module with `import { Effect } from "effect"` and write `Effect.Effect<A>`.';

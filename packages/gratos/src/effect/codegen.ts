@@ -59,9 +59,17 @@ export const alwaysResolveMethods = (): boolean => isCodegenDeltaEnabled("method
 /**
  * Whether the field's semantic non-null check belongs to the Effect layer rather than to a
  * generated `assertNonNull` (its resolver returns `Effect.Effect`).
+ *
+ * Never for a subscription's per-event `resolve(payload)`: it receives each event, not the value
+ * of an Effect, so it keeps upstream's `assertNonNull` whatever the source is annotated with.
  */
-export const isEffectSemanticNonNull = (field: GraphQLField<unknown, unknown>): boolean =>
-  isCodegenDeltaEnabled("effectSemanticNonNull") && field.astNode?.returnsEffect === true;
+export const isEffectSemanticNonNull = (
+  field: GraphQLField<unknown, unknown>,
+  subscriptionEvent = false,
+): boolean =>
+  !subscriptionEvent &&
+  isCodegenDeltaEnabled("effectSemanticNonNull") &&
+  field.astNode?.returnsEffect === true;
 
 export interface GratosMarkers {
   readonly jit?: false;
@@ -86,7 +94,7 @@ export const gratosFieldMarkers = (
     resolver !== undefined &&
     resolver.kind !== "property" &&
     (resolver.arguments ?? []).some((argument) => argument.kind === "information");
-  const semanticNonNull = hasSemanticNonNull && !isSubscription && isEffectSemanticNonNull(field);
+  const semanticNonNull = hasSemanticNonNull && isEffectSemanticNonNull(field, isSubscription);
   if (!usesInfo && !semanticNonNull) {
     return null;
   }
