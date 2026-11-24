@@ -109,6 +109,21 @@ interface TrackedMutation {
   readonly done: Promise<void>;
 }
 
+const noop = (): void => {};
+
+/** What the executor call gave: its result (maybe a Promise), or what it threw. */
+type Outcome =
+  | { readonly ok: true; readonly result: PromiseOrValue<ExecutorResult> }
+  | { readonly ok: false; readonly error: unknown };
+
+/** An execution that went past the gate (or failed before it), with its completion. */
+interface Dispatched {
+  readonly _tag: "dispatched";
+  readonly outcome: Outcome;
+  /** Publishes a mutation's completion; a no-op for other operations. */
+  readonly finish: () => void;
+}
+
 /** An early answer: a Response to send as is. */
 interface Answer {
   readonly _tag: "answer";
@@ -337,13 +352,14 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
    * The gate, executor choice and executor call, in one synchronous step: onExecute picks the
    * executor, the drain gate and the no-late-start check run, the mutation is published as
    * started and registered in the tracked set, and the executor is called. Every mutation is
-   * therefore either tracked or never started.
+   * therefore either tracked or never started. The caller publishes its completion (`finish`)
+   * once the result hooks have run.
    */
   const startExecution = (
     run: Run,
     input: ExecuteInput,
     args: ExecutionArgs,
-  ): Answer | { readonly _tag: "started"; readonly result: PromiseOrValue<ExecutorResult> } => {
+  ): Answer | Dispatched => {
     let executor: Executor | undefined;
     try {
       for (const hook of onExecute) {
@@ -357,7 +373,8 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
       if (error instanceof GraphQLError) {
         return answer(respond(run, errorResult([error])));
       }
-      throw error;
+      // Any other throw is a failure of the request, before anything started.
+      return { _tag: "dispatched", outcome: { ok: false, error }, finish: noop };
     }
     const execute = executor ?? defaultExecutor(input.operation, args);
     const { mutation } = run;
@@ -367,35 +384,74 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
     if (run.controller.signal.aborted) {
       return answer(new Response(null, { status: CLIENT_CLOSED_REQUEST }));
     }
-    if (mutation === undefined) {
-      return { _tag: "started", result: execute() };
+    let finish = noop;
+    if (mutation !== undefined) {
+      const { promise: done, resolve } = Promise.withResolvers<undefined>();
+      const entry: TrackedMutation = {
+        name: input.operation.name?.value ?? "anonymous",
+        start: performance.now(),
+        done,
+      };
+      tracked.add(entry);
+      mutation.start();
+      finish = () => {
+        mutation.settle();
+        tracked.delete(entry);
+        resolve(undefined);
+      };
     }
-    const { promise: done, resolve } = Promise.withResolvers<undefined>();
-    const entry: TrackedMutation = {
-      name: input.operation.name?.value ?? "anonymous",
-      start: performance.now(),
-      done,
-    };
-    tracked.add(entry);
-    mutation.start();
-    const finish = (): void => {
-      mutation.settle();
-      tracked.delete(entry);
-      resolve(undefined);
-    };
-    let result: PromiseOrValue<ExecutorResult>;
     try {
-      result = execute();
+      return { _tag: "dispatched", outcome: { ok: true, result: execute() }, finish };
     } catch (error) {
-      finish();
-      throw error;
+      return { _tag: "dispatched", outcome: { ok: false, error }, finish };
     }
-    if (isPromiseLike(result)) {
-      result.then(finish, finish);
+  };
+
+  /** execute (await the executor) and encode: the result hooks, then the Response. */
+  const encode = async (
+    run: Run,
+    outcome: Outcome,
+    ctx: Ctx,
+    isMutation: boolean,
+  ): Promise<Response> => {
+    let result: ExecutorResult | undefined;
+    let failure: { readonly error: unknown } | undefined;
+    if (outcome.ok) {
+      try {
+        result = await settle(outcome.result);
+      } catch (error) {
+        failure = { error };
+      }
     } else {
-      finish();
+      failure = { error: outcome.error };
     }
-    return { _tag: "started", result };
+    if (failure !== undefined || result === undefined) {
+      const error = failure?.error;
+      // Only an aborted execution takes the cancellation path. A mutation never gets the signal,
+      // so its failure is a real one (a write that failed), processed and reported as usual even
+      // when the client has left.
+      if (
+        error instanceof AbortedGraphQLExecutionError ||
+        (!isMutation && run.controller.signal.aborted)
+      ) {
+        // The client left: nothing is reported, and the terminal path (onResponse) still runs.
+        return new Response(null, { status: CLIENT_CLOSED_REQUEST });
+      }
+      result = errorResult([unexpected(error)]);
+    }
+    if (!isSingleResult(result)) {
+      await closeStreamed(result);
+      return requestError(
+        run,
+        "This operation streams its result, which needs a streaming Accept type.",
+        406,
+      );
+    }
+    let payload = result;
+    for (const hook of onResult) {
+      payload = hook(payload, ctx, run.request) ?? payload;
+    }
+    return respond(run, payload);
   };
 
   const process = async (run: Run): Promise<Response> => {
@@ -470,41 +526,17 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
         reportPhase(request, name, start, end);
       },
     };
-    let result: ExecutorResult;
+    const dispatched = startExecution(run, input, args);
+    if (dispatched._tag === "answer") {
+      return dispatched.response;
+    }
     try {
-      const started = startExecution(run, input, args);
-      if (started._tag === "answer") {
-        return started.response;
-      }
-      result = await settle(started.result);
-    } catch (error) {
-      // Only an aborted execution takes the cancellation path. A mutation never gets the signal,
-      // so its failure is a real one (a write that failed), processed and reported as usual even
-      // when the client has left.
-      if (
-        error instanceof AbortedGraphQLExecutionError ||
-        (!isMutation && run.controller.signal.aborted)
-      ) {
-        // The client left: nothing is reported, and the terminal path (onResponse) still runs.
-        return new Response(null, { status: CLIENT_CLOSED_REQUEST });
-      }
-      result = errorResult([unexpected(error)]);
+      return await encode(run, dispatched.outcome, ctx, isMutation);
+    } finally {
+      // A mutation's completion (mutationOf(req).settled, the drain) is published only once the
+      // result hooks have seen its result, never on body consumption.
+      dispatched.finish();
     }
-
-    // encode
-    if (!isSingleResult(result)) {
-      await closeStreamed(result);
-      return requestError(
-        run,
-        "This operation streams its result, which needs a streaming Accept type.",
-        406,
-      );
-    }
-    let payload = result;
-    for (const hook of onResult) {
-      payload = hook(payload, ctx, request) ?? payload;
-    }
-    return respond(run, payload);
   };
 
   const handle = async (request: Request): Promise<Response> => {

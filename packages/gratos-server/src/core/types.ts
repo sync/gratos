@@ -213,6 +213,10 @@ export interface MutationState {
    * calls it (refused while draining, client gone before the start, a failing context factory…).
    */
   readonly started: Promise<boolean>;
-  /** Resolves when the mutation's execution has settled, or at once when it never started. */
+  /**
+   * Resolves once the mutation's execution has settled and the result hooks (`onResult`) have
+   * seen its result or error, so a continuation (a span end) observes them; at once when it never
+   * started. It never waits for the response body. The drain waits for it.
+   */
   readonly settled: Promise<void>;
 }

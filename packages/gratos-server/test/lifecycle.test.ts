@@ -342,6 +342,44 @@ describe("a started mutation that fails after the client left", () => {
   });
 });
 
+describe("completion of a disconnected mutation", () => {
+  it("settled and the drain wait until onResult has seen the result", async () => {
+    const hold = gate();
+    let errors = 0;
+    const seen: Array<string> = [];
+    const server = createServer({
+      schema: basicSchema({
+        Mutation: {
+          bump: async () => {
+            await hold.promise;
+            throw new Error("write failed");
+          },
+        },
+      }),
+      plugins: [
+        {
+          onResult: (payload) => {
+            errors += payload.errors?.length ?? 0;
+            return undefined;
+          },
+        },
+      ],
+    });
+    const client = new AbortController();
+    const request = post({ query: "mutation { bump }" }, { signal: client.signal });
+    const pending = server.handle(request);
+    await flush();
+    // An M5-style span finalizer: it ends the span with the errors onResult counted.
+    void mutationOf(request)?.settled.then(() => seen.push(`settled:${errors}`));
+    const drained = server.control.drain().then(() => seen.push(`drained:${errors}`));
+    client.abort();
+    hold.resolve();
+    await drained;
+    await pending;
+    expect(seen).toEqual(["settled:1", "drained:1"]);
+  });
+});
+
 /** A server whose mutation has two serial async fields, each held by its own gate. */
 const twoFieldServer = (
   options: { slowContext?: Promise<void>; warn?: (...args: Array<unknown>) => void } = {},
