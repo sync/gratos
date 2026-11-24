@@ -59,6 +59,14 @@ const toLocal = (upstreamPath: string): string | undefined => {
 const gitBlobSha = (content: Buffer): string =>
   createHash("sha1").update(`blob ${content.length}\0`).update(content).digest("hex");
 
+const isSymlink = (path: string): boolean => {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+
 /** Every non-directory entry under `dir`, without following symlinks; a symlink counts as an entry. */
 const listEntries = (dir: string): Array<string> =>
   readdirSync(dir, { recursive: true, withFileTypes: true })
@@ -98,14 +106,18 @@ const main = async (): Promise<number> => {
 
   const problems: Array<string> = [];
   for (const [local, sha] of expected) {
-    let content: Buffer;
-    try {
-      content = readFileSync(join(packageRoot, local));
-    } catch {
+    const absolute = join(packageRoot, local);
+    if (!existsSync(absolute) && !isSymlink(absolute)) {
       problems.push(`missing: ${local}`);
       continue;
     }
-    if (gitBlobSha(content) !== sha) {
+    // Upstream has no symlinks in the vendored set, so a symlink is always a change.
+    // Checking with lstat keeps readFileSync from hashing a link target instead.
+    if (isSymlink(absolute)) {
+      problems.push(`changed: ${local} (now a symlink)`);
+      continue;
+    }
+    if (gitBlobSha(readFileSync(absolute)) !== sha) {
       problems.push(`changed: ${local}`);
     }
   }
