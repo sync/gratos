@@ -4,7 +4,15 @@
 // typechecks with tsc and Node executes it, the committed smoke schema is exactly what the CLI
 // generates, and the CLI never loads the TypeScript 5.9.2 baseline.
 import { execFileSync, spawnSync } from "node:child_process";
-import { accessSync, constants, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import { Schema } from "effect";
@@ -37,6 +45,12 @@ const gratos = (args: ReadonlyArray<string>, options: { cwd?: string; record?: b
   );
 
 const mtimeOf = (path: string): number => statSync(path).mtimeMs;
+/** stderr is exactly one line (and its newline), starting with `prefix`. */
+const expectOneLine = (stderr: string, prefix: string): void => {
+  expect(stderr.endsWith("\n")).toBe(true);
+  expect(stderr.slice(0, -1)).not.toContain("\n");
+  expect(stderr.startsWith(prefix)).toBe(true);
+};
 
 let firstRun: ReturnType<typeof gratos>;
 beforeAll(() => {
@@ -130,6 +144,35 @@ describe("gratos CLI", () => {
       expect(run.status).toBe(1);
       expect(run.stderr).toBe("Gratos: `schema.ts` is out of date. Run `gratos`.\n");
     } finally {
+      writeFileSync(tsPath, original);
+    }
+  });
+
+  it("exits 1 with a clean message when an output file cannot be read", () => {
+    const sdlPath = project.path("schema.graphql");
+    chmodSync(sdlPath, 0o000);
+    try {
+      for (const args of [["--check"], []]) {
+        const run = gratos([...args, "--tsconfig", tsconfig]);
+        expect(run.status).toBe(1);
+        expectOneLine(run.stderr, `Gratos: Could not read \`${sdlPath}\`: PermissionDenied: `);
+      }
+    } finally {
+      chmodSync(sdlPath, 0o644);
+    }
+  });
+
+  it("exits 1 with a clean message when an output file cannot be written", () => {
+    const tsPath = project.path("schema.ts");
+    const original = readFileSync(tsPath, "utf8");
+    writeFileSync(tsPath, `${original}//`);
+    chmodSync(tsPath, 0o444);
+    try {
+      const run = gratos(["--tsconfig", tsconfig]);
+      expect(run.status).toBe(1);
+      expectOneLine(run.stderr, `Gratos: Could not write \`${tsPath}\`: PermissionDenied: `);
+    } finally {
+      chmodSync(tsPath, 0o644);
       writeFileSync(tsPath, original);
     }
   });

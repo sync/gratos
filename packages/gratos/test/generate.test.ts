@@ -13,6 +13,7 @@ import {
   ConfigError,
   DiagnosticsError,
   generate,
+  OutputError,
   StaleFilesError,
 } from "../src/generate.ts";
 import {
@@ -33,31 +34,40 @@ const tsPath = join(smokeDir, "schema.ts");
 const committedSdl = readFileSync(sdlPath, "utf8");
 const committedTs = readFileSync(tsPath, "utf8");
 
-const notFound = (method: string, path: string) =>
-  PlatformError.systemError({
-    _tag: "NotFound",
-    module: "FileSystem",
-    method,
-    pathOrDescriptor: path,
-  });
+const systemError = (_tag: "NotFound" | "PermissionDenied", method: string, path: string) =>
+  PlatformError.systemError({ _tag, module: "FileSystem", method, pathOrDescriptor: path });
 
-/** An in-memory FileSystem holding `files`, recording every write. */
-const memoryFileSystem = (files: Record<string, string>) => {
+/**
+ * An in-memory FileSystem holding `files`, recording every write. Reading a path in `unreadable`,
+ * or writing one in `unwritable`, fails with PermissionDenied.
+ */
+const memoryFileSystem = (
+  files: Record<string, string>,
+  denied: {
+    readonly unreadable?: ReadonlyArray<string>;
+    readonly unwritable?: ReadonlyArray<string>;
+  } = {},
+) => {
   const contents = new Map(Object.entries(files));
   const writes: Array<string> = [];
   const layer = FileSystem.layerNoop({
     exists: (path) => Effect.succeed(contents.has(path)),
     readFileString: (path) => {
+      if (denied.unreadable?.includes(path) === true) {
+        return Effect.fail(systemError("PermissionDenied", "readFileString", path));
+      }
       const content = contents.get(path);
       return content === undefined
-        ? Effect.fail(notFound("readFileString", path))
+        ? Effect.fail(systemError("NotFound", "readFileString", path))
         : Effect.succeed(content);
     },
     writeFileString: (path, data) =>
-      Effect.sync(() => {
-        writes.push(path);
-        contents.set(path, data);
-      }),
+      denied.unwritable?.includes(path) === true
+        ? Effect.fail(systemError("PermissionDenied", "writeFileString", path))
+        : Effect.sync(() => {
+            writes.push(path);
+            contents.set(path, data);
+          }),
   });
   return { layer, writes, contents };
 };
@@ -243,6 +253,45 @@ describe("check", () => {
         "Gratos: `schema.graphql` is out of date. Run `gratos`.\nGratos: `schema.ts` is out of date. Run `gratos`.",
       );
       expect(fs.writes).toEqual([]);
+    }).pipe(Effect.provide(fs.layer));
+  });
+});
+
+describe("output files that cannot be read or written", () => {
+  it.effect("check() reports an unreadable file as an OutputError, not as stale", () => {
+    const fs = memoryFileSystem(
+      { [smokeTsconfig]: smokeConfig, [sdlPath]: committedSdl, [tsPath]: committedTs },
+      { unreadable: [sdlPath] },
+    );
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(Effect.scoped(check(smokeTsconfig)));
+      assert.instanceOf(error, OutputError);
+      expect(error.path).toBe(sdlPath);
+      expect(error.message).toBe(
+        `Gratos: Could not read \`${sdlPath}\`: ${systemError("PermissionDenied", "readFileString", sdlPath).message}`,
+      );
+    }).pipe(Effect.provide(fs.layer));
+  });
+
+  it.effect("generate() reports an unreadable file as an OutputError and writes nothing", () => {
+    const fs = memoryFileSystem({ [smokeTsconfig]: smokeConfig }, { unreadable: [tsPath] });
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(Effect.scoped(generate(smokeTsconfig)));
+      assert.instanceOf(error, OutputError);
+      expect(error.path).toBe(tsPath);
+      expect(fs.writes).toEqual([]);
+    }).pipe(Effect.provide(fs.layer));
+  });
+
+  it.effect("generate() reports a denied write as an OutputError, not a defect", () => {
+    const fs = memoryFileSystem({ [smokeTsconfig]: smokeConfig }, { unwritable: [tsPath] });
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(Effect.scoped(generate(smokeTsconfig)));
+      assert.instanceOf(error, OutputError);
+      expect(error.path).toBe(tsPath);
+      expect(error.message).toContain(`Gratos: Could not write \`${tsPath}\`: `);
+      expect(error.message).toContain("PermissionDenied");
+      expect(fs.writes).toEqual([sdlPath]);
     }).pipe(Effect.provide(fs.layer));
   });
 });

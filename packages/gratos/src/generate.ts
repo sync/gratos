@@ -8,7 +8,8 @@
 // missing or out of date.
 import { dirname, relative, resolve } from "node:path";
 
-import { Data, Effect, FileSystem, Result } from "effect";
+import { Data, Effect, FileSystem, Option, Result } from "effect";
+import type { PlatformError } from "effect";
 import type { Scope } from "effect";
 
 import { getParsedCommandLineOfConfigFile, sys } from "#typescript";
@@ -49,7 +50,13 @@ export class StaleFilesError extends Data.TaggedError("StaleFilesError")<{
   readonly message: string;
 }> {}
 
-export type GratsError = ConfigError | DiagnosticsError | StaleFilesError;
+/** A generated file could not be read (other than because it does not exist yet) or written. */
+export class OutputError extends Data.TaggedError("OutputError")<{
+  readonly path: string;
+  readonly message: string;
+}> {}
+
+export type GratsError = ConfigError | DiagnosticsError | StaleFilesError | OutputError;
 
 export interface GeneratedFile {
   /** Absolute path. */
@@ -176,6 +183,22 @@ const outputs = (
   return files;
 };
 
+const outputError =
+  (verb: "read" | "write", path: string) =>
+  (error: PlatformError.PlatformError): OutputError =>
+    new OutputError({ path, message: `Gratos: Could not ${verb} \`${path}\`: ${error.message}` });
+
+/**
+ * A generated file's current content, or None when it does not exist yet. Any other failure
+ * (such as permission denied) is an OutputError: it does not mean the file is out of date.
+ */
+const readOutput = (fs: FileSystem.FileSystem, path: string) =>
+  fs.readFileString(path).pipe(
+    Effect.map(Option.some),
+    Effect.catchReason("PlatformError", "NotFound", () => Effect.succeedNone),
+    Effect.mapError(outputError("read", path)),
+  );
+
 /** Builds every output for `tsconfig` and compares each with the file on disk. */
 const build = Effect.fnUntraced(function* (tsconfig: string) {
   const fs = yield* FileSystem.FileSystem;
@@ -198,11 +221,11 @@ const build = Effect.fnUntraced(function* (tsconfig: string) {
   }
   const files: Array<GeneratedFile> = [];
   for (const output of outputs(configPath, config, result.value)) {
-    const existing = yield* fs.readFileString(output.path).pipe(Effect.option);
+    const existing = yield* readOutput(fs, output.path);
     files.push({
       ...output,
       name: relative(dirname(configPath), output.path),
-      upToDate: existing._tag === "Some" && existing.value === output.content,
+      upToDate: Option.isSome(existing) && existing.value === output.content,
     });
   }
   const [sdl, tsSchema] = files;
@@ -226,7 +249,9 @@ export const generate = (
     const result = yield* build(tsconfig);
     for (const file of result.files) {
       if (!file.upToDate) {
-        yield* fs.writeFileString(file.path, file.content).pipe(Effect.orDie);
+        yield* fs
+          .writeFileString(file.path, file.content)
+          .pipe(Effect.mapError(outputError("write", file.path)));
       }
     }
     return result;
