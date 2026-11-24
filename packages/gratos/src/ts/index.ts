@@ -29,7 +29,7 @@ import {
   isParameterDeclaration,
   isPropertySignatureDeclaration,
 } from "typescript/unstable/ast/is";
-import { DiagnosticCategory, SymbolFlags } from "typescript/unstable/sync";
+import { DiagnosticCategory, ModuleKind, SymbolFlags } from "typescript/unstable/sync";
 
 // The node guards the engine calls (TypeScript 7 has the same names and semantics).
 export {
@@ -88,6 +88,7 @@ export {
   getTextOfJSDocComment,
   isTokenKind,
   LanguageVariant,
+  ModuleKind,
   NodeFlags,
   ScriptKind,
   ScriptTarget,
@@ -107,6 +108,14 @@ export const SyntaxKind = {
 /** TypeScript 5's ListFormat, for the one format the engine prints. */
 export const ListFormat = { MultiLine: 1 } as const;
 export const NewLineKind = { CarriageReturnLineFeed: 0, LineFeed: 1 } as const;
+/** TypeScript 5's ModuleResolutionKind values, which TypeScript 7 keeps but does not export. */
+export const ModuleResolutionKind = {
+  Classic: 1,
+  Node10: 2,
+  Node16: 3,
+  NodeNext: 99,
+  Bundler: 100,
+} as const;
 
 // TypeScript 7 renamed these guards.
 export const isPropertySignature = isPropertySignatureDeclaration;
