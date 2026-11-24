@@ -126,7 +126,12 @@ export interface Plugin<Ctx = unknown> {
    * not typecheck.
    */
   readonly onPhase?: (phase: Phase, request: Request) => undefined;
-  /** After the context factory, once the operation is known, before anything executes. */
+  /**
+   * After the context factory, once the operation is known, before anything executes. A throw
+   * here, or from the context factory, stops the operation before it starts, with the same
+   * precedence as an onExecute refusal: 503 SERVER_DRAINING for a mutation once the drain has
+   * begun, else 499 once the client has left, else the GraphQLError (or a masked 500).
+   */
   readonly onContext?: (
     ctx: Ctx,
     request: Request,

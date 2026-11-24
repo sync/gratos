@@ -272,11 +272,20 @@ const serve = <Ctx>(
   const drainRefuses = (run: Run): boolean => run.mutation !== undefined && draining;
 
   /**
-   * A refusal from a hook (context or onExecute). A mutation that has not started is refused with
-   * 503 SERVER_DRAINING instead once the drain has begun, whichever refusal came first.
+   * The answer for an operation stopped before it started (a context or onExecute refusal, or a
+   * context failure), with one precedence: the drain (503 SERVER_DRAINING for an unstarted
+   * mutation), then a disconnect (499, a cancellation: nothing to send), then the refusal itself,
+   * or a masked 500 for an error that is not a GraphQLError.
    */
-  const refuse = (run: Run, error: GraphQLError): Response =>
-    respond(run, errorResult([drainRefuses(run) ? serverDraining() : error]));
+  const notStarted = (run: Run, error: unknown): Response => {
+    if (drainRefuses(run)) {
+      return respond(run, errorResult([serverDraining()]));
+    }
+    if (run.controller.signal.aborted) {
+      return new Response(null, { status: CLIENT_CLOSED_REQUEST });
+    }
+    return respond(run, errorResult([error instanceof GraphQLError ? error : unexpected(error)]));
+  };
 
   const requestError = (run: Run, message: string, status: number): Response =>
     respond(run, errorResult([new GraphQLError(message)]), status);
@@ -365,14 +374,10 @@ const serve = <Ctx>(
       }
       return { _tag: "context", ctx };
     } catch (error) {
-      if (error instanceof GraphQLError) {
-        return answer(refuse(run, error));
+      if (!(error instanceof GraphQLError)) {
+        logger.error("gratos-server: the context phase failed.", error);
       }
-      logger.error("gratos-server: the context phase failed.", error);
-      // A mutation that never started is refused once the drain has begun, whatever stopped it.
-      return answer(
-        respond(run, errorResult([drainRefuses(run) ? serverDraining() : unexpected(error)])),
-      );
+      return answer(notStarted(run, error));
     }
   };
 
@@ -398,16 +403,13 @@ const serve = <Ctx>(
         }
       }
     } catch (error) {
-      if (error instanceof GraphQLError) {
-        // Precedence for an operation that never started: drain (an unstarted mutation, inside
-        // `refuse`), then disconnect (a cancellation, like an ordinary failure below), then the
-        // refusal itself.
-        if (!drainRefuses(run) && run.controller.signal.aborted) {
-          return answer(new Response(null, { status: CLIENT_CLOSED_REQUEST }));
-        }
-        return answer(refuse(run, error));
+      // A refusal, or an unstarted mutation once the drain has begun, answers here (notStarted's
+      // precedence: drain, disconnect, refusal).
+      if (error instanceof GraphQLError || drainRefuses(run)) {
+        return answer(notStarted(run, error));
       }
-      // Any other throw is a failure of the request, before anything started.
+      // Any other throw is a failure of the request, before anything started: encode reports it,
+      // or cancels it once the client has left.
       return {
         _tag: "dispatched",
         outcome: { ok: false, error },

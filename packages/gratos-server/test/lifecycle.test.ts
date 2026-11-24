@@ -373,6 +373,36 @@ describe("a mutation that fails before dispatch after the client left", () => {
   });
 });
 
+describe("a context failure after the client left", () => {
+  it.each([
+    ["a refusal (GraphQLError)", gqlError("Not allowed", 403)],
+    ["an ordinary Error", new Error("session store down")],
+  ])("%s is a cancellation (499)", async (_name, failure) => {
+    const context = gate();
+    const onResult = vi.fn();
+    const server = createServer({
+      schema: basicSchema(),
+      logger: silent,
+      context: () =>
+        context.promise.then(() => {
+          throw failure;
+        }),
+      plugins: [{ onResult }],
+    });
+    const client = new AbortController();
+    const request = post({ query: "mutation { bump }" }, { signal: client.signal });
+    const pending = server.handle(request);
+    await flush();
+    client.abort();
+    context.resolve();
+    const response = await pending;
+    expect(response.status).toBe(CLIENT_CLOSED_REQUEST);
+    expect(response.body).toBeNull();
+    expect(onResult).not.toHaveBeenCalled();
+    expect(await mutationOf(request)?.started).toBe(false);
+  });
+});
+
 describe("an onExecute refusal after the client left", () => {
   it.each([
     ["a query", "{ count }"],
@@ -675,6 +705,29 @@ describe("control.drain", () => {
       const sent = await pending;
       expect(sent.status).toBe(503);
       expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
+    });
+
+    it("an onExecute hook that fails with an ordinary Error during the drain is a 503", async () => {
+      const log = vi.fn();
+      const server = createServer({
+        schema: basicSchema(),
+        logger: silent,
+        plugins: [
+          reportErrors(log),
+          {
+            onExecute: () => {
+              void server.control.drain();
+              throw new Error("hook failed");
+            },
+          },
+        ],
+      });
+      const request = post({ query: "mutation { bump }" });
+      const sent = await send(server, request);
+      expect(sent.status).toBe(503);
+      expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
+      expect(log).not.toHaveBeenCalled();
+      expect(await mutationOf(request)?.started).toBe(false);
     });
 
     it("a context factory that fails with an ordinary Error during the drain is a 503 (logged)", async () => {
