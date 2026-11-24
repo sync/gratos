@@ -10,6 +10,7 @@ import {
   CLIENT_CLOSED_REQUEST,
   createServer,
   gqlError,
+  isSelectionSafe,
   jit,
   maxDepth,
   readOnly,
@@ -472,6 +473,66 @@ describe("regression: a @oneOf variable past the jit threshold", () => {
     });
     expect(sent.status).toBe(200);
     expect(phases.compiled).toHaveLength(1);
+  });
+});
+
+/** A recursive interface with three implementations; `C.secret` is marked jit: false. */
+const chainSchema = () =>
+  makeSchema(
+    `
+      interface Node { id: ID next: Node }
+      type A implements Node { id: ID next: Node }
+      type B implements Node { id: ID next: Node }
+      type C implements Node { id: ID next: Node secret: String }
+      type Query { node: Node }
+    `,
+    {},
+    { C: { secret: NO_JIT } },
+  );
+
+/** `{ node { next { … { id <leaf> } … } } }`, `depth` fields deep. */
+const chainQuery = (depth: number, leaf = "") =>
+  `{ node ${"{ next ".repeat(depth - 1)}{ id ${leaf} }${" }".repeat(depth - 1)} }`;
+
+const isChainSafe = (schema: ReturnType<typeof chainSchema>, query: string): boolean => {
+  const document = parse(query);
+  const operation = getOperationAST(document);
+  if (operation === null || operation === undefined) {
+    throw new Error("no operation");
+  }
+  return isSelectionSafe(schema, document, operation, () => true);
+};
+
+describe("the selection walk over a recursive interface", () => {
+  it("walks each (selection set, parent type) once, not once per implementation", () => {
+    const schema = chainSchema();
+    let lookups = 0;
+    for (const name of ["Node", "A", "B", "C"]) {
+      const type = schema.getType(name);
+      if (type === undefined || !("getFields" in type)) {
+        throw new Error(`${name} has no fields`);
+      }
+      const getFields = type.getFields.bind(type);
+      Object.assign(type, {
+        getFields: () => {
+          lookups += 1;
+          return getFields();
+        },
+      });
+    }
+    expect(isChainSafe(schema, chainQuery(8))).toBe(true);
+    // Four types per field selection, a handful of selections per level: linear in the depth.
+    // Without memoization it is 4^8 walks.
+    expect(lookups).toBeLessThan(100);
+  });
+
+  it("finishes a 30-level selection at once, and still declines a jit: false field deep inside", () => {
+    const schema = chainSchema();
+    const start = performance.now();
+    expect(isChainSafe(schema, chainQuery(30))).toBe(true);
+    expect(isChainSafe(schema, chainQuery(30, "... on C { secret }"))).toBe(false);
+    expect(isChainSafe(schema, chainQuery(30, "...F") + " fragment F on C { secret }")).toBe(false);
+    expect(performance.now() - start).toBeLessThan(1000);
   });
 });
 

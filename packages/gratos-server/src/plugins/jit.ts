@@ -140,8 +140,17 @@ export const isSelectionSafe = (
   }
   const visitedFragments = new Set<string>();
   const checked = new Set<string>();
+  // The (selection set, parent type) pairs already walked without finding an unsafe field. A
+  // field on an interface is walked once per possible type, and its children usually share the
+  // interface's field type, so without this a recursive selection (`next: Node` on an interface
+  // with k implementations) would be walked (k + 1)^depth times. A walk that finds an unsafe field
+  // ends the whole check, so only safe walks are remembered.
+  const walked = new Map<SelectionSetNode, Set<GraphQLCompositeType>>();
 
   const walk = (selectionSet: SelectionSetNode, parent: GraphQLCompositeType): boolean => {
+    if (walked.get(selectionSet)?.has(parent) === true) {
+      return true;
+    }
     for (const selection of selectionSet.selections) {
       switch (selection.kind) {
         case Kind.FIELD: {
@@ -206,6 +215,12 @@ export const isSelectionSafe = (
           break;
         }
       }
+    }
+    const parents = walked.get(selectionSet);
+    if (parents === undefined) {
+      walked.set(selectionSet, new Set([parent]));
+    } else {
+      parents.add(parent);
     }
     return true;
   };
