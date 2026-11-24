@@ -16,7 +16,7 @@ import type { Node, SourceFile } from "typescript/unstable/ast";
 
 import { fromTs7Diagnostic, sortAndDeduplicateDiagnostics } from "./diagnostics.ts";
 import type { Diagnostic, DiagnosticFile } from "./diagnostics.ts";
-import { defaultSession, openProject } from "./session.ts";
+import { defaultSession, openProject, restartDefaultSession } from "./session.ts";
 import type { Session } from "./session.ts";
 
 export type CompilerOptions = Record<string, unknown>;
@@ -214,7 +214,8 @@ export const getPreEmitDiagnostics = (
 /** A config read by getParsedCommandLineOfConfigFile, and the program last opened for it. */
 interface ParsedConfig {
   readonly configPath: string;
-  readonly session: Session;
+  /** The blanking mode of its session. A later parse may replace that session with a new one. */
+  readonly blankThirdParty: boolean;
   /**
    * The root file names as returned, frozen and separate from the returned array, to tell
    * whether a caller changed the roots since (even by mutating that array).
@@ -348,15 +349,17 @@ const sameFileNames = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): bool
 /**
  * The program for a config read by getParsedCommandLineOfConfigFile. Its own program is reused
  * only while it is still the session's open project and the caller kept its roots and options.
- * After another project was opened on the session, the config is reopened. With other roots or
- * options, a virtual tsconfig extends it with exactly those roots and the changed options.
+ * After another project was opened, or another config parsed, the config is reopened. With
+ * other roots or options, a virtual tsconfig extends it with exactly those roots and the changed
+ * options.
  */
 const programForParsedConfig = (
   parsed: ParsedConfig,
   rootNames: ReadonlyArray<string>,
   options: CompilerOptions,
 ): FacadeProgram => {
-  const { session, configPath } = parsed;
+  const { configPath } = parsed;
+  const session = defaultSession(parsed.blankThirdParty);
   const sameOptions = JSON.stringify(options) === parsed.optionsJson;
   if (sameOptions && sameFileNames(rootNames, parsed.fileNames)) {
     if (session.current?.project !== parsed.program.project) {
@@ -471,6 +474,11 @@ const reportsTypeScriptErrors = (raw: unknown): boolean => {
  * TypeScript 5's getParsedCommandLineOfConfigFile. It opens the project right away: TypeScript
  * 7 reports config errors only on a project. A later createProgram with the returned options
  * and file names reuses that project while it is open (see programForParsedConfig).
+ *
+ * Every call opens the project on a new tsgo session, as TypeScript 5 reads the config, its
+ * root files and their sources again on every call. Reusing a session would keep the config's
+ * options, its root files and the third-party files blanked as they were when it was first
+ * read. The CLI parses once, so it starts one session either way.
  */
 export const getParsedCommandLineOfConfigFile = (
   configFile: string,
@@ -479,7 +487,8 @@ export const getParsedCommandLineOfConfigFile = (
 ): ParsedCommandLine => {
   const configPath = resolve(configFile);
   const raw = readRawConfig(configPath);
-  const session = defaultSession(!reportsTypeScriptErrors(raw));
+  const blankThirdParty = !reportsTypeScriptErrors(raw);
+  const session = restartDefaultSession(blankThirdParty);
   const program = makeProgram(session, openProject(session, configPath));
   const options = {
     ...Object.fromEntries(Object.entries(program.project.compilerOptions)),
@@ -488,7 +497,7 @@ export const getParsedCommandLineOfConfigFile = (
   const fileNames = program.project.rootFiles;
   parsedConfigs.set(options, {
     configPath,
-    session,
+    blankThirdParty,
     fileNames: Object.freeze([...fileNames]),
     optionsJson: JSON.stringify(options),
     program,

@@ -111,12 +111,15 @@ export const acquireSession = (
     (session) => Effect.sync(() => closeSession(session)),
   );
 
-// The synchronous, TS5-shaped facade needs sessions without an Effect context. They live in one
-// process-wide scope, closed by closeDefaultSessions(). A process that exits without closing it
-// leaves nothing behind: the TypeScript API kills its child processes on exit (closing them from
-// another exit handler races that and makes tsgo print "context canceled").
+// The synchronous, TS5-shaped facade needs sessions without an Effect context. Each lives in its
+// own child of one process-wide scope, closed by closeDefaultSessions(). A process that exits
+// without closing it leaves nothing behind: the TypeScript API kills its child processes on exit
+// (closing them from another exit handler races that and makes tsgo print "context canceled").
 let processScope = Effect.runSync(Scope.make());
-const defaultSessions = new Map<boolean, Session>();
+const defaultSessions = new Map<
+  boolean,
+  { readonly session: Session; readonly scope: Scope.Closeable }
+>();
 
 /** Closes every default session (their tsgo processes). Later calls start new ones. */
 export const closeDefaultSessions = (): void => {
@@ -126,19 +129,35 @@ export const closeDefaultSessions = (): void => {
   Effect.runSync(Scope.close(scope, Exit.void));
 };
 
-/** The process-wide session for a blanking mode, started on first use. */
-export const defaultSession = (blankThirdParty: boolean): Session => {
-  const existing = defaultSessions.get(blankThirdParty);
-  if (existing !== undefined) {
-    return existing;
-  }
-  const session = Effect.runSync(Scope.provide(processScope)(acquireSession({ blankThirdParty })));
-  defaultSessions.set(blankThirdParty, session);
+const startDefaultSession = (blankThirdParty: boolean): Session => {
+  const scope = Scope.forkUnsafe(processScope);
+  const session = Effect.runSync(Scope.provide(scope)(acquireSession({ blankThirdParty })));
+  defaultSessions.set(blankThirdParty, { session, scope });
   return session;
 };
 
+/** The process-wide session for a blanking mode, started on first use. */
+export const defaultSession = (blankThirdParty: boolean): Session =>
+  defaultSessions.get(blankThirdParty)?.session ?? startDefaultSession(blankThirdParty);
+
+/**
+ * Replaces the process-wide session for a blanking mode with a new tsgo process, closing the
+ * previous one and every program opened on it. tsgo keeps a config's options and root files,
+ * and the session keeps the files it blanked, across snapshots; a new session reads them all
+ * again.
+ */
+export const restartDefaultSession = (blankThirdParty: boolean): Session => {
+  const existing = defaultSessions.get(blankThirdParty);
+  if (existing !== undefined) {
+    defaultSessions.delete(blankThirdParty);
+    Effect.runSync(Scope.close(existing.scope, Exit.void));
+  }
+  return startDefaultSession(blankThirdParty);
+};
+
 /** Every default session started so far. */
-export const defaultSessionList = (): ReadonlyArray<Session> => [...defaultSessions.values()];
+export const defaultSessionList = (): ReadonlyArray<Session> =>
+  [...defaultSessions.values()].map(({ session }) => session);
 
 /**
  * Opens `configPath` (a real or virtual tsconfig) in a new snapshot, releasing the session's

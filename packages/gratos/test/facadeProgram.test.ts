@@ -1,6 +1,6 @@
 // The TypeScript 7 facade's programs and config reading on real tsconfigs in temporary
 // directories: program reuse, edits between parses, config diagnostics and byte order marks.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -127,6 +127,44 @@ describe("getParsedCommandLineOfConfigFile", () => {
     expect(getParsedCommandLineOfConfigFile(configPath).program.getSourceFile(fileName)?.text).toBe(
       "export const a = 2;\n",
     );
+  });
+
+  it("applies compiler options edited since the config was last parsed", () => {
+    const directory = project({
+      "tsconfig.json": tsconfig(),
+      "a.ts": "export const f = (x) => x;\n",
+    });
+    const configPath = join(directory, "tsconfig.json");
+    const codes = (): Array<number> =>
+      getParsedCommandLineOfConfigFile(configPath)
+        .program.getSemanticDiagnostics()
+        .map((diagnostic) => diagnostic.code);
+    expect(codes()).toEqual([7006]);
+
+    writeFileSync(configPath, tsconfig({ noImplicitAny: false }));
+    expect(codes()).toEqual([]);
+    expect(getParsedCommandLineOfConfigFile(configPath).options["noImplicitAny"]).toBe(false);
+  });
+
+  it("finds root files created or deleted since the config was last parsed", () => {
+    const directory = project({ "tsconfig.json": tsconfig(), "a.ts": "export const a = 1;\n" });
+    const configPath = join(directory, "tsconfig.json");
+    expect(getParsedCommandLineOfConfigFile(configPath).fileNames).toEqual([
+      join(directory, "a.ts"),
+    ]);
+
+    writeFileSync(join(directory, "b.ts"), "export const b = 2;\n");
+    const added = getParsedCommandLineOfConfigFile(configPath);
+    expect(added.fileNames).toEqual([join(directory, "a.ts"), join(directory, "b.ts")]);
+    expect(sourceFileNames(added.program)).toEqual([
+      join(directory, "a.ts"),
+      join(directory, "b.ts"),
+    ]);
+
+    unlinkSync(join(directory, "a.ts"));
+    const deleted = getParsedCommandLineOfConfigFile(configPath);
+    expect(deleted.fileNames).toEqual([join(directory, "b.ts")]);
+    expect(sourceFileNames(deleted.program)).toEqual([join(directory, "b.ts")]);
   });
 
   it("reports an invalid compiler option at its place in the tsconfig", () => {
