@@ -536,13 +536,16 @@ const sortErrors = (body: Sent["body"]) => ({
         ),
 });
 
-/** A graphql-js server and a jit({ after: 1 }) server, plus the jit compilations. */
-const servers = (): [Server, Server, Array<string>] => {
-  const phases = jitPhases();
+/**
+ * A graphql-js server and a jit({ after: 1 }) server, plus what jit did for each request (the
+ * jit phase alone would also fire for a compilation that failed and fell back to graphql-js).
+ */
+const servers = (): [Server, Server, ReadonlyArray<string>] => {
+  const watched = watchedJit({ after: 1 });
   return [
     createServer({ schema: shopSchema() }),
-    createServer({ schema: shopSchema(), plugins: [jit({ after: 1 }), phases.plugin] }),
-    phases.compiled,
+    createServer({ schema: shopSchema(), plugins: [watched.plugin] }),
+    watched.ran,
   ];
 };
 
@@ -581,10 +584,11 @@ describe("jit and default return deep-equal results", () => {
   ];
 
   it.each(suite)("%s", async (_name, query, variables) => {
-    const [plain, jitted, compiled] = servers();
+    const [plain, jitted, ran] = servers();
     const expected = await gql(plain, query, { variables });
     const actual = await gql(jitted, query, { variables });
-    expect(compiled).toHaveLength(1);
+    // The compiled query answered (not graphql-js after a failed compilation).
+    expect(ran).toEqual(["jit"]);
     expect(actual.status).toBe(expected.status);
     expect(sortErrors(actual.body)).toEqual(sortErrors(expected.body));
   });
@@ -598,10 +602,11 @@ describe("jit and default return deep-equal results", () => {
       { n: "x" },
     ],
   ])("variable-coercion errors match by count and path: %s", async (_name, query, variables) => {
-    const [plain, jitted, compiled] = servers();
+    const [plain, jitted, ran] = servers();
     const expected = await gql(plain, query, { variables });
     const actual = await gql(jitted, query, { variables });
-    expect(compiled).toHaveLength(1);
+    // The compiled query answered (not graphql-js after a failed compilation).
+    expect(ran).toEqual(["jit"]);
     expect(actual.status).toBe(expected.status);
     expect(actual.body?.data).toEqual(expected.body?.data);
     expect(errorPaths(actual)).toEqual(errorPaths(expected));
