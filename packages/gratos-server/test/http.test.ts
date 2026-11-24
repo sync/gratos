@@ -67,7 +67,9 @@ describe("415: unsupported Content-Type", () => {
   it.each([["text/plain"], ["application/x-www-form-urlencoded"], [null]])(
     "%s",
     async (contentType) => {
-      const sent = await send(server, post({ query: "{count}" }, { contentType }));
+      const request = post({ query: "{count}" }, { contentType });
+      expect(request.headers.get("content-type")).toBe(contentType);
+      const sent = await send(server, request);
       expect(sent.status).toBe(415);
       expect(sent.error?.message).toBe("Content-Type must be application/json.");
     },

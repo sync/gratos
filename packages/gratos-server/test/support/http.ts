@@ -9,7 +9,10 @@ export interface PostOptions {
   readonly signal?: AbortSignal;
 }
 
-/** A POST with a JSON body (or a raw string body). */
+/**
+ * A POST with a JSON body (or a raw string body). With `contentType: null` the body is sent as
+ * bytes, so the Request has no Content-Type at all (a string body would get `text/plain`).
+ */
 export const post = (body: unknown, options: PostOptions = {}): Request => {
   const headers = new Headers();
   const contentType = options.contentType === undefined ? "application/json" : options.contentType;
@@ -19,10 +22,11 @@ export const post = (body: unknown, options: PostOptions = {}): Request => {
   if (options.accept !== undefined && options.accept !== null) {
     headers.set("accept", options.accept);
   }
+  const text = typeof body === "string" ? body : JSON.stringify(body);
   const init: RequestInit = {
     method: "POST",
     headers,
-    body: typeof body === "string" ? body : JSON.stringify(body),
+    body: contentType === null ? new TextEncoder().encode(text) : text,
   };
   if (options.signal !== undefined) {
     init.signal = options.signal;
