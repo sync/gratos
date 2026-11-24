@@ -15,7 +15,7 @@ import {
   readOnly,
   sha256Hex,
 } from "../src/index.ts";
-import type { Executor, JsonObject, Plugin, Server } from "../src/index.ts";
+import type { Executor, JitOptions, JsonObject, Plugin, Server } from "../src/index.ts";
 import { gql, post, send } from "./support/http.ts";
 import type { Sent } from "./support/http.ts";
 import { basicSchema, makeSchema } from "./support/schema.ts";
@@ -117,6 +117,36 @@ const jitPhases = () => {
     },
   };
   return { compiled, plugin };
+};
+
+/**
+ * jit(options), recording for each request whether its compiled query ran ("jit"), it handed the
+ * operation on ("next": warm-up, a failed compilation or a decline at compile time), or it did
+ * not claim the operation at all ("declined").
+ */
+const watchedJit = (options: JitOptions) => {
+  const ran: Array<"jit" | "next" | "declined"> = [];
+  const inner = jit(options);
+  const plugin: Plugin = {
+    ...inner,
+    onExecute: (input, args) => {
+      const executor = inner.onExecute?.(input, args);
+      if (executor === undefined) {
+        ran.push("declined");
+        return undefined;
+      }
+      return (next) => {
+        let delegated = false;
+        const result = executor(() => {
+          delegated = true;
+          return next();
+        });
+        ran.push(delegated ? "next" : "jit");
+        return result;
+      };
+    },
+  };
+  return { plugin, ran };
 };
 
 const repeat = async (times: number, run: () => Promise<Sent>): Promise<Array<Sent>> => {
@@ -575,6 +605,55 @@ describe("jit and default return deep-equal results", () => {
     expect(actual.status).toBe(expected.status);
     expect(actual.body?.data).toEqual(expected.body?.data);
     expect(errorPaths(actual)).toEqual(errorPaths(expected));
+  });
+});
+
+// No resolvers: every field reads its source, and graphql-js' default resolver calls a
+// function-valued property with (args, context, info).
+const propertySchema = () =>
+  makeSchema(`
+    type Item { name: String, tags: [String!], price(currency: String): String }
+    type Query { hello(name: String): String, count: Int, item: Item, items: [Item!]! }
+  `);
+
+describe("default resolvers under jit", () => {
+  const rootValue = {
+    hello: (args: { name: string }) => `hello ${args.name}`,
+    count: () => 3,
+    item: () => ({
+      name: () => "pen",
+      tags: ["a"],
+      price: (args: { currency: string }) => `1 ${args.currency}`,
+    }),
+    items: [{ name: "cup", tags: () => ["b", "c"], price: "2 EUR" }],
+  };
+  const query =
+    '{ hello(name: "jit") count item { name tags price(currency: "USD") } items { name tags price } }';
+
+  it("a function-valued property is called, as graphql-js does", async () => {
+    const plain = createServer({ schema: propertySchema(), rootValue });
+    const watched = watchedJit({ after: 1 });
+    const jitted = createServer({ schema: propertySchema(), rootValue, plugins: [watched.plugin] });
+    const expected = await gql(plain, query);
+    expect(expected.body).toEqual({
+      data: {
+        hello: "hello jit",
+        count: 3,
+        item: { name: "pen", tags: ["a"], price: "1 USD" },
+        items: [{ name: "cup", tags: ["b", "c"], price: "2 EUR" }],
+      },
+    });
+    for (let use = 1; use <= 2; use += 1) {
+      expect((await gql(jitted, query)).body).toEqual(expected.body);
+    }
+    expect(watched.ran).toEqual(["jit", "jit"]);
+  });
+
+  it("leaves the schema's fields without a resolver", async () => {
+    const shared = propertySchema();
+    const server = createServer({ schema: shared, rootValue, plugins: [jit({ after: 1 })] });
+    await gql(server, query);
+    expect(shared.getQueryType()?.getFields()["hello"]?.resolve).toBeUndefined();
   });
 });
 
