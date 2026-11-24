@@ -1,7 +1,7 @@
 // The core plugins (docs/plan.html M4a, "Plugins"): apq(), reportErrors(log), maskErrors(), and
 // the tested references serverTiming(), maxDepth() and readOnly(). Also the body rule: a plugin
 // that replaces the Response keeps its body, so a body wrapper ends whatever the plugin order.
-import { GraphQLError } from "graphql";
+import { getOperationAST, GraphQLError, Kind, parse } from "graphql";
 import type { GraphQLResolveInfo } from "graphql";
 import { describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,7 @@ import {
   mutationOf,
   readOnly,
   reportErrors,
+  selectionDepth,
   serverTiming,
   sha256Hex,
   signalOf,
@@ -374,6 +375,62 @@ describe("maxDepth(limit)", () => {
       expect(sent.error?.extensions?.["code"]).toBe("MAX_DEPTH_EXCEEDED");
     }
     expect(resolve).not.toHaveBeenCalled();
+  });
+});
+
+/** F0 is one field deep; each F(n) reads `friend { ...F(n-1) }` and spreads F(n-1) again. */
+const doublingFragments = (count: number) => {
+  const fragments = ["fragment F0 on Person { name }"];
+  for (let n = 1; n < count; n += 1) {
+    fragments.push(`fragment F${n} on Person { friend { ...F${n - 1} } ...F${n - 1} }`);
+  }
+  return `{ me { ...F${count - 1} } } ${fragments.join(" ")}`;
+};
+
+const depthOf = (query: string, onFragmentRead = () => {}): number => {
+  const document = parse(query);
+  for (const definition of document.definitions) {
+    if (definition.kind === Kind.FRAGMENT_DEFINITION) {
+      const { selectionSet } = definition;
+      Object.defineProperty(definition, "selectionSet", {
+        get: () => {
+          onFragmentRead();
+          return selectionSet;
+        },
+      });
+    }
+  }
+  const operation = getOperationAST(document);
+  if (operation === null || operation === undefined) {
+    throw new Error("no operation");
+  }
+  return selectionDepth(document, operation.selectionSet);
+};
+
+describe("selectionDepth over repeated fragment spreads", () => {
+  it("measures each fragment once, not once per spread", () => {
+    let reads = 0;
+    expect(
+      depthOf(doublingFragments(12), () => {
+        reads += 1;
+      }),
+    ).toBe(13);
+    // Without memoization F0 is read 2^11 times.
+    expect(reads).toBe(12);
+  });
+
+  it("finishes 25 doubling fragments at once with the right depth", () => {
+    const start = performance.now();
+    expect(depthOf(doublingFragments(25))).toBe(26);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+
+  it("still stops at a fragment cycle", () => {
+    expect(
+      depthOf(
+        "{ me { ...A } } fragment A on Person { friend { ...B } } fragment B on Person { friend { ...A name } }",
+      ),
+    ).toBe(4);
   });
 });
 
