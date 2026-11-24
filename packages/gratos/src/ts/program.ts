@@ -312,13 +312,14 @@ const ENUM_OPTIONS: ReadonlyMap<string, ReadonlyMap<number, string>> = new Map([
     ]),
   ],
 ]);
-/** Options that only describe where a config came from, or only matter for emit. */
-const DROPPED_OPTIONS: ReadonlySet<string> = new Set([
-  "configFilePath",
-  "outDir",
-  "pathsBasePath",
-  "rootDir",
-]);
+/** Options that only describe where a config came from. */
+const DROPPED_OPTIONS: ReadonlySet<string> = new Set(["configFilePath", "pathsBasePath"]);
+
+/**
+ * Path options that TypeScript 5's createProgram resolves against the current directory. A virtual
+ * tsconfig may sit beside another config, so a relative one is made absolute before it is written.
+ */
+const CWD_RELATIVE_PATH_OPTIONS: ReadonlySet<string> = new Set(["outDir", "rootDir"]);
 
 /**
  * `paths` with relative substitutions made absolute. TypeScript resolves them against `baseUrl`,
@@ -365,6 +366,9 @@ const toTsconfigOptions = (options: CompilerOptions): CompilerOptions =>
       }
       if (key === "paths") {
         return [[key, absolutePaths(value, options)]];
+      }
+      if (CWD_RELATIVE_PATH_OPTIONS.has(key) && typeof value === "string") {
+        return [[key, resolve(value)]];
       }
       const names = ENUM_OPTIONS.get(key);
       if (names !== undefined && typeof value === "number") {

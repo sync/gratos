@@ -123,6 +123,28 @@ describe("createProgram with the options of a parsed config", () => {
     expect(sourceFileNames(program)).toEqual([join(directory, "a.ts")]);
   });
 
+  it("keeps the config's rootDir and outDir when the caller changes the roots", () => {
+    const directory = project({
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: { strict: true, rootDir: "./src", outDir: "./dist" },
+        include: ["src"],
+      }),
+      "src/a.ts": "export const a = 1;\n",
+      "outside.ts": "export const o = 2;\n",
+    });
+    const parsed = getParsedCommandLineOfConfigFile(join(directory, "tsconfig.json"));
+    expect(allDiagnosticCodes(parsed.program)).toEqual([]);
+
+    const program = createProgram(
+      [...parsed.fileNames, join(directory, "outside.ts")],
+      parsed.options,
+    );
+    expect(program.getCompilerOptions()["rootDir"]).toBe(join(directory, "src"));
+    expect(program.getCompilerOptions()["outDir"]).toBe(join(directory, "dist"));
+    // As in TypeScript 5, a root outside rootDir is an error (TS6059).
+    expect(allDiagnosticCodes(program)).toContain(6059);
+  });
+
   it("keeps relative path aliases of a nested tsconfig when the caller adds one", () => {
     // TypeScript resolves the aliases against the nested tsconfig's directory, not the current
     // directory, where the facade's virtual tsconfig lives.
