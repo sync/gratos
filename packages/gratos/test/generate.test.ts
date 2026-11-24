@@ -210,6 +210,25 @@ describe("generate", () => {
     }).pipe(Effect.provide(fs.layer));
   });
 
+  it.effect("rejects two outputs with the same path as a ConfigError, and writes nothing", () => {
+    // The metadata file is named by replacing a `.graphql` extension, so with `schema.gql` it
+    // would overwrite the SDL: every run would rewrite it, and --check could never pass.
+    const config = smokeConfig.replace(
+      '"graphqlSchema": "./schema.graphql",',
+      '"graphqlSchema": "./schema.gql", "EXPERIMENTAL__emitMetadata": true,',
+    );
+    expect(config).not.toBe(smokeConfig);
+    const fs = memoryFileSystem({ [smokeTsconfig]: config });
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(Effect.scoped(generate(smokeTsconfig)));
+      assert.instanceOf(error, ConfigError);
+      expect(error.message).toContain("Two generated files would both be written to `schema.gql`");
+      expect(fs.writes).toEqual([]);
+      const checked = yield* Effect.flip(Effect.scoped(check(smokeTsconfig)));
+      assert.instanceOf(checked, ConfigError);
+    }).pipe(Effect.provide(fs.layer));
+  });
+
   it.effect("reports a tsconfig that is not JSON with comments as a ConfigError", () => {
     const fs = memoryFileSystem({ [smokeTsconfig]: '{ "grats": { ' });
     return Effect.gen(function* () {

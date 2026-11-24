@@ -231,8 +231,21 @@ const build = Effect.fnUntraced(function* (tsconfig: string) {
   if (result.kind === "ERROR") {
     return yield* diagnosticsError(result.err);
   }
+  const planned = outputs(configPath, config, result.value);
+  const collision = planned.find(
+    (output, i) => planned.findIndex((other) => other.path === output.path) !== i,
+  );
+  if (collision !== undefined) {
+    // Writing both would leave whichever came last, so every run would rewrite the file and
+    // --check would never pass (for example `graphqlSchema: "schema.gql"` with metadata on,
+    // whose metadata file is named by replacing a `.graphql` extension).
+    return yield* new ConfigError({
+      path: configPath,
+      message: `Gratos: Two generated files would both be written to \`${relative(dirname(configPath), collision.path)}\`. Give \`graphqlSchema\`, \`tsSchema\` and \`tsClientEnums\` distinct paths (with \`EXPERIMENTAL__emitMetadata\`, \`graphqlSchema\` must end in \`.graphql\`).`,
+    });
+  }
   const files: Array<GeneratedFile> = [];
-  for (const output of outputs(configPath, config, result.value)) {
+  for (const output of planned) {
     const existing = yield* readOutput(fs, output.path);
     files.push({
       ...output,
