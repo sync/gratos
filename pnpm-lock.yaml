@@ -307,6 +307,9 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.1.5
+      grats-upstream:
+        specifier: npm:grats@0.0.36
+        version: grats@0.0.36
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -1041,9 +1044,18 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
+  graphql@16.15.0:
+    resolution: {integrity: sha512-32kz9FecohDiC/tgcViwnRXM7HFBVTPiW7pHO+DikKOI5KjhU/jNULOReXsrFqt2WAYbE9xFXsTffJw6iTO8qw==}
+    engines: {node: ^12.22.0 || ^14.16.0 || ^16.0.0 || >=17.0.0}
+
   graphql@17.1.0:
     resolution: {integrity: sha512-JKCOa7rSQNrket/JFhuua86hljUO+IIpyUHfKxlKD6FEfbrLX8jc1FDrA0KPKI+s8OspBCF/5npYccAICHXPpQ==}
     engines: {node: ^22.0.0 || ^24.0.0 || >=26.0.0}
+
+  grats@0.0.36:
+    resolution: {integrity: sha512-fp5uCLfMGm6n9ZFOnsaB6NXb4/mydfmN4ri1QJI7xPWPsNM1Q0rhgukWIScEG5JCZ7iwZInadhJwLUl6XHsoCQ==}
+    engines: {node: '>=20 <=24'}
+    hasBin: true
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -1174,6 +1186,11 @@ packages:
   rolldown@1.2.19:
     resolution: {integrity: sha512-QIiV1J9d0pzN4jeeTH4sjPy0AZ6cAy2cG0ExeoE1+U8Rvj+hR3gYkokx0YbeUNGlZqiQJJ2utcETe0oKXwzsuA==}
     engines: {node: ^20.19.0 || >=22.12.0}
+    hasBin: true
+
+  semver@7.8.6:
+    resolution: {integrity: sha512-9lpSSU4Mly3mrtruwLs1eLK6+gzbzqeBFwRNjIjE+9LuDpWdYctrQlQ3ej1Ilgi7gknpsTRnPoLP8DpCHqHIJw==}
+    engines: {node: '>=10'}
     hasBin: true
 
   source-map-js@1.2.4:
@@ -1702,7 +1719,16 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
+  graphql@16.15.0: {}
+
   graphql@17.1.0: {}
+
+  grats@0.0.36:
+    dependencies:
+      commander: 14.0.1
+      graphql: 16.15.0
+      semver: 7.8.6
+      typescript: 5.9.2
 
   lightningcss-android-arm64@1.33.0:
     optional: true
@@ -1838,6 +1864,8 @@ snapshots:
       '@rolldown/binding-wasm32-wasi': 1.2.19
       '@rolldown/binding-win32-arm64-msvc': 1.2.19
       '@rolldown/binding-win32-x64-msvc': 1.2.19
+
+  semver@7.8.6: {}
 
   source-map-js@1.2.4: {}
 
