@@ -42,6 +42,7 @@ import type {
   Executor,
   ExecutorResult,
   Logger,
+  NextExecutor,
   Params,
   Phase,
   PhaseName,
@@ -99,7 +100,7 @@ const unexpected = (originalError: unknown): GraphQLError =>
   });
 
 const defaultExecutor =
-  (operation: OperationDefinitionNode, args: ExecutionArgs): Executor =>
+  (operation: OperationDefinitionNode, args: ExecutionArgs): NextExecutor =>
   () =>
     operation.operation === "subscription" ? subscribe(args) : execute(args);
 
@@ -349,24 +350,24 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
   };
 
   /**
-   * The gate, executor choice and executor call, in one synchronous step: onExecute picks the
-   * executor, the drain gate and the no-late-start check run, the mutation is published as
-   * started and registered in the tracked set, and the executor is called. Every mutation is
-   * therefore either tracked or never started. The caller publishes its completion (`finish`)
-   * once the result hooks have run.
+   * The gate, executor choice and executor call, in one synchronous step: every onExecute hook
+   * runs (so a refusal anywhere in the list refuses), the first executor returned is chosen, the
+   * drain gate and the no-late-start check run, the mutation is published as started and
+   * registered in the tracked set, and the executor is called. Every mutation is therefore either
+   * tracked or never started. The caller publishes its completion (`finish`) once the result
+   * hooks have run.
    */
   const startExecution = (
     run: Run,
     input: ExecuteInput,
     args: ExecutionArgs,
   ): Answer | Dispatched => {
-    let executor: Executor | undefined;
+    let claims: Array<Executor> | undefined;
     try {
       for (const hook of onExecute) {
         const claimed = hook(input, args);
         if (claimed !== undefined) {
-          executor = claimed;
-          break;
+          (claims ??= []).push(claimed);
         }
       }
     } catch (error) {
@@ -376,7 +377,13 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
       // Any other throw is a failure of the request, before anything started.
       return { _tag: "dispatched", outcome: { ok: false, error }, finish: noop };
     }
-    const execute = executor ?? defaultExecutor(input.operation, args);
+    // The first claim runs; its `next` is the executor that would have run without it (the next
+    // claim in list order, else the default).
+    let execute: NextExecutor = defaultExecutor(input.operation, args);
+    for (const claim of claims?.toReversed() ?? []) {
+      const next = execute;
+      execute = () => claim(next);
+    }
     const { mutation } = run;
     if (mutation !== undefined && draining) {
       return answer(respond(run, errorResult([serverDraining()])));

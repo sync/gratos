@@ -37,11 +37,19 @@ export type ExecutorResult =
   | IncrementalResults
   | AsyncGenerator<ExecutionResult, void, void>;
 
+/** Runs the operation the way it would run without the current executor. */
+export type NextExecutor = () => PromiseOrValue<ExecutorResult>;
+
 /**
  * Runs the selected operation. `onExecute` hooks return one to claim the operation; the first
- * hook (in list order) that returns an executor wins, and the core's default runs otherwise.
+ * executor returned (in list order) wins, and the core's default runs when no hook claims it.
+ * The core calls it only once every onExecute hook has run without refusing and the gate (drain,
+ * no late start) has passed. `next` runs the operation as it would run without this executor:
+ * the next claim in list order, else the default. An executor that only sometimes takes over
+ * (jit during warm-up) delegates to it, and keeps its own bookkeeping (counting, compiling) in
+ * the executor, so an operation that is refused never touches it.
  */
-export type Executor = () => PromiseOrValue<ExecutorResult>;
+export type Executor = (next: NextExecutor) => PromiseOrValue<ExecutorResult>;
 
 /** The phases the core reports to `onPhase`. Plugins may report their own (jit reports `jit`). */
 export type PhaseName = "parse" | "validate" | "jit" | (string & {});
@@ -83,8 +91,10 @@ export interface ServerInit {
  * no plugin defines costs nothing. `onPhase`, `onExecute` and `onResult` run in the hot loop and
  * must be synchronous; every other hook may return a Promise.
  *
- * Ordering: `apq()` first; plugins that only observe return nothing from `onExecute`;
- * `reportErrors()` before `maskErrors()`, so the report sees the unmasked errors.
+ * Ordering: `apq()` first; plugins that only observe or refuse return nothing from `onExecute`;
+ * among executors the first claim wins (`incremental()` before `jit()`); `reportErrors()` before
+ * `maskErrors()`, so the report sees the unmasked errors. Refusals do not depend on order: every
+ * onExecute hook runs before any executor is called.
  *
  * Body rule: a plugin that replaces the Response in `onResponse` must keep `res.body`, either
  * reusing it (`new Response(res.body, …)`) or wrapping it in a pass-through stream. It must never
@@ -123,8 +133,12 @@ export interface Plugin<Ctx = unknown> {
     operation: OperationDefinitionNode,
   ) => PromiseOrValue<void>;
   /**
-   * Claims the operation by returning an executor, or returns nothing. Synchronous. A thrown
-   * GraphQLError refuses the operation with that error (status from `gqlError`, else 400).
+   * Claims the operation by returning an executor, or returns nothing. Synchronous. Every
+   * onExecute hook runs, in list order, before anything executes; the first executor returned is
+   * called (see `Executor`). A thrown GraphQLError refuses the operation with that error (status
+   * from `gqlError`, else 400), whatever executors earlier hooks returned: no executor runs.
+   * Because a later hook may still refuse, a hook keeps work that should happen only for an
+   * operation that runs inside the executor it returns.
    */
   readonly onExecute?: (input: ExecuteInput, args: ExecutionArgs) => Executor | undefined | void;
   /**

@@ -15,6 +15,7 @@ export type {
   JsonValue,
   Logger,
   MutationState,
+  NextExecutor,
   Params,
   Phase,
   PhaseName,

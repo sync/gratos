@@ -5,7 +5,16 @@ import { getOperationAST, GraphQLError, parse } from "graphql";
 import type { GraphQLResolveInfo } from "graphql";
 import { describe, expect, it, vi } from "vitest";
 
-import { apq, CLIENT_CLOSED_REQUEST, createServer, jit, sha256Hex } from "../src/index.ts";
+import {
+  apq,
+  CLIENT_CLOSED_REQUEST,
+  createServer,
+  gqlError,
+  jit,
+  maxDepth,
+  readOnly,
+  sha256Hex,
+} from "../src/index.ts";
 import type { Executor, JsonObject, Plugin, Server } from "../src/index.ts";
 import { gql, post, send } from "./support/http.ts";
 import type { Sent } from "./support/http.ts";
@@ -121,12 +130,25 @@ const repeat = async (times: number, run: () => Promise<Sent>): Promise<Array<Se
 describe("executor order", () => {
   it("apq passes through, jit wins on the third use, the default executor otherwise", async () => {
     const claims: Array<string> = [];
+    const ran: Array<string> = [];
     const record = (name: string, plugin: Plugin): Plugin => ({
       ...plugin,
       onExecute: (input, args) => {
         const executor = plugin.onExecute?.(input, args);
         claims.push(`${name}:${executor === undefined ? "pass" : "claim"}`);
-        return executor;
+        if (executor === undefined) {
+          return undefined;
+        }
+        // Records whether the claim ran the operation itself or handed it on (`next`).
+        return (next) => {
+          let delegated = false;
+          const result = executor(() => {
+            delegated = true;
+            return next();
+          });
+          ran.push(delegated ? "default" : name);
+          return result;
+        };
       },
     });
     const tail: Plugin = {
@@ -145,18 +167,11 @@ describe("executor order", () => {
     for (let use = 1; use <= 4; use += 1) {
       expect((await send(server, post(body))).body).toEqual({ data: { count: 1 } });
     }
-    expect(claims).toEqual([
-      "apq:pass",
-      "jit:pass",
-      "tail:reached",
-      "apq:pass",
-      "jit:pass",
-      "tail:reached",
-      "apq:pass",
-      "jit:claim",
-      "apq:pass",
-      "jit:claim",
-    ]);
+    // Every hook runs (a later refusal would still refuse); apq never claims.
+    expect(claims).toEqual(
+      Array.from({ length: 4 }, () => ["apq:pass", "jit:claim", "tail:reached"]).flat(),
+    );
+    expect(ran).toEqual(["default", "default", "jit", "jit"]);
   });
 
   it("an executor returned before jit wins, and jit never counts that use", async () => {
@@ -167,6 +182,64 @@ describe("executor order", () => {
     });
     expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 7 } });
     expect(phases.compiled).toEqual([]);
+  });
+});
+
+describe("refusals do not depend on plugin order", () => {
+  it("readOnly() listed after a warm jit() still refuses a mutation, which never runs", async () => {
+    const calls: Record<string, number> = {};
+    const phases = jitPhases();
+    const server = createServer({
+      schema: markedSchema(calls, []),
+      plugins: [jit({ after: 1 }), readOnly(), phases.plugin],
+    });
+    const sent = await repeat(3, () => gql(server, "mutation { bump }"));
+    expect(sent.map(({ status }) => status)).toEqual([403, 403, 403]);
+    expect(calls["bump"]).toBeUndefined();
+    expect(phases.compiled).toEqual([]);
+  });
+
+  it("maxDepth() listed after a warm jit() still refuses an over-depth query", async () => {
+    const phases = jitPhases();
+    const server = createServer({
+      schema: markedSchema({}, []),
+      plugins: [jit({ after: 1 }), maxDepth(1), phases.plugin],
+    });
+    const sent = await repeat(3, () => gql(server, "{ node { id } }"));
+    expect(sent.map(({ error }) => error?.extensions?.["code"])).toEqual([
+      "MAX_DEPTH_EXCEEDED",
+      "MAX_DEPTH_EXCEEDED",
+      "MAX_DEPTH_EXCEEDED",
+    ]);
+    expect(phases.compiled).toEqual([]);
+  });
+
+  it("jit counts and compiles only uses that ran, never refused ones", async () => {
+    let refuse = true;
+    const phases = jitPhases();
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        jit({ after: 2 }),
+        {
+          onExecute: () => {
+            if (refuse) {
+              throw gqlError("not now", 429);
+            }
+            return undefined;
+          },
+        },
+        phases.plugin,
+      ],
+    });
+    expect((await repeat(3, () => gql(server, "{ count }"))).map(({ status }) => status)).toEqual([
+      429, 429, 429,
+    ]);
+    refuse = false;
+    await gql(server, "{ count }");
+    expect(phases.compiled).toEqual([]);
+    await gql(server, "{ count }");
+    expect(phases.compiled).toHaveLength(1);
   });
 });
 

@@ -9,7 +9,10 @@
 //   since graphql-jit's info has no getAbortSignal()), or a field `isSafe` rejects. Abstract types
 //   are checked on every possible concrete type.
 // The use count and the compiled query live per operation (`operationKey`), so a document holding
-// a mutation and a query never shares a compilation.
+// a mutation and a query never shares a compilation. jit claims every operation it does not
+// decline, and counts and compiles inside its executor, which the core calls only when no
+// onExecute hook refused and the gate passed; until it takes over it hands the operation on
+// (`next`: a later claim, else the default executor).
 import {
   getNamedType,
   isAbstractType,
@@ -200,6 +203,8 @@ export const isSelectionSafe = (
   return root !== undefined && root !== null && walk(operation.selectionSet, root);
 };
 
+const DECLINED: JitState = { _tag: "declined" };
+
 export const jit = (options: JitOptions = {}): Plugin => {
   const after = Math.max(1, options.after ?? 3);
   const isSafe: FieldPredicate = options.isSafe ?? (() => true);
@@ -209,38 +214,41 @@ export const jit = (options: JitOptions = {}): Plugin => {
     onExecute: ({ operation, document, operationName, operationKey, phase }, args) => {
       let state = states.get(operationKey);
       if (state === undefined) {
-        state =
-          operation.operation === "subscription"
-            ? { _tag: "declined" }
-            : { _tag: "counting", uses: 0 };
+        state = operation.operation === "subscription" ? DECLINED : { _tag: "counting", uses: 0 };
         states.set(operationKey, state);
       }
-      if (state._tag === "counting") {
-        state.uses += 1;
-        if (state.uses < after) {
-          return undefined;
-        }
-        const { schema } = args;
-        if (
-          usesOneOfVariable(schema, operation) ||
-          !isSelectionSafe(schema, document, operation, isSafe)
-        ) {
-          state = { _tag: "declined" };
-        } else {
-          const start = performance.now();
-          const compiled = compileQuery(schema, document, operationName ?? undefined);
-          phase("jit", start, performance.now());
-          state = isCompiledQuery(compiled)
-            ? { _tag: "compiled", query: compiled }
-            : { _tag: "declined" };
-        }
-        states.set(operationKey, state);
-      }
-      if (state._tag !== "compiled") {
+      if (state._tag === "declined") {
         return undefined;
       }
-      const { query } = state;
-      return () => query.query(args.rootValue, args.contextValue, args.variableValues);
+      // jit claims the operation, but counts and compiles only when its executor is called: once
+      // every onExecute hook has run without refusing and the gate has passed. During warm-up (or
+      // when it declines) it runs the operation as it would run without jit (`next`).
+      return (next) => {
+        let current = states.get(operationKey) ?? DECLINED;
+        if (current._tag === "counting") {
+          current.uses += 1;
+          if (current.uses < after) {
+            return next();
+          }
+          const { schema } = args;
+          if (
+            usesOneOfVariable(schema, operation) ||
+            !isSelectionSafe(schema, document, operation, isSafe)
+          ) {
+            current = DECLINED;
+          } else {
+            const start = performance.now();
+            const compiled = compileQuery(schema, document, operationName ?? undefined);
+            phase("jit", start, performance.now());
+            current = isCompiledQuery(compiled) ? { _tag: "compiled", query: compiled } : DECLINED;
+          }
+          states.set(operationKey, current);
+        }
+        if (current._tag !== "compiled") {
+          return next();
+        }
+        return current.query.query(args.rootValue, args.contextValue, args.variableValues);
+      };
     },
   };
 };

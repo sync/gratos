@@ -11,6 +11,7 @@ import { basicSchema } from "./support/schema.ts";
 
 const silent = { warn: () => {}, error: () => {} };
 const answer42: Executor = () => ({ data: { count: 42 } });
+const delegate: Executor = (next) => next();
 
 describe("onServer", () => {
   it("runs once at startup with the schema and control", () => {
@@ -303,7 +304,7 @@ describe("onExecute", () => {
     expect(args.rootValue).toEqual({ root: true });
   });
 
-  it("runs in list order until one returns an executor; later hooks never run", async () => {
+  it("every hook runs in list order; the first executor returned wins", async () => {
     const calls: Array<string> = [];
     const server = createServer({
       schema: basicSchema(),
@@ -315,11 +316,44 @@ describe("onExecute", () => {
             return answer42;
           },
         },
-        { onExecute: () => void calls.push("third") },
+        {
+          onExecute: () => {
+            calls.push("third");
+            return () => ({ data: { count: 3 } });
+          },
+        },
       ],
     });
     expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 42 } });
-    expect(calls).toEqual(["first", "second"]);
+    expect(calls).toEqual(["first", "second", "third"]);
+  });
+
+  it("a refusal listed after a claim refuses, and no executor runs", async () => {
+    const executor = vi.fn(answer42);
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        { onExecute: () => executor },
+        {
+          onExecute: () => {
+            throw gqlError("refused", 403);
+          },
+        },
+      ],
+    });
+    const sent = await gql(server, "{ count }");
+    expect(sent.status).toBe(403);
+    expect(executor).not.toHaveBeenCalled();
+  });
+
+  it("next runs the next claim in list order, else the default executor", async () => {
+    const chained = createServer({
+      schema: basicSchema(),
+      plugins: [{ onExecute: () => delegate }, { onExecute: () => answer42 }],
+    });
+    expect((await gql(chained, "{ count }")).body).toEqual({ data: { count: 42 } });
+    const alone = createServer({ schema: basicSchema(), plugins: [{ onExecute: () => delegate }] });
+    expect((await gql(alone, "{ count }")).body).toEqual({ data: { count: 1 } });
   });
 
   it("the default executor runs when no hook claims the operation", async () => {
