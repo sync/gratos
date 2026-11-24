@@ -12,10 +12,8 @@
 // a mutation and a query never shares a compilation. jit claims every operation it does not
 // decline, and counts and compiles inside its executor, which the core calls only when no
 // onExecute hook refused and the gate passed; until it takes over it hands the operation on
-// (`next`: a later claim, else the default executor). Fields without a resolver keep graphql-js'
-// default-resolver semantics under jit (a function-valued property is called), see `compile`.
+// (`next`: a later claim, else the default executor).
 import {
-  defaultFieldResolver,
   getNamedType,
   isAbstractType,
   isInputObjectType,
@@ -207,43 +205,6 @@ export const isSelectionSafe = (
 
 const DECLINED: JitState = { _tag: "declined" };
 
-/**
- * Compiles the operation with graphql-js' default-resolver semantics. graphql-jit inlines a plain
- * property read for a field without a resolver, so a function-valued property (on the root value
- * or a source object) would be serialized as a function instead of being called with
- * (args, context, info) as graphql-js' default resolver does. During the (synchronous)
- * compilation every such field gets `defaultFieldResolver`, which graphql-jit captures; the schema
- * is restored before anything else can run. `undefined` when compilation fails.
- */
-const compile = (
-  schema: GraphQLSchema,
-  document: DocumentNode,
-  operationName: string | undefined,
-): CompiledQuery | undefined => {
-  const patched: Array<GraphQLField<unknown, unknown>> = [];
-  try {
-    for (const type of Object.values(schema.getTypeMap())) {
-      if (isObjectType(type) && !type.name.startsWith("__")) {
-        for (const field of Object.values(type.getFields())) {
-          if (field.resolve === undefined) {
-            field.resolve = defaultFieldResolver;
-            patched.push(field);
-          }
-        }
-      }
-    }
-    const compiled = compileQuery(schema, document, operationName);
-    return isCompiledQuery(compiled) ? compiled : undefined;
-  } catch {
-    // A frozen schema, or a compiler failure: graphql-js runs the operation.
-    return undefined;
-  } finally {
-    for (const field of patched) {
-      field.resolve = undefined;
-    }
-  }
-};
-
 export const jit = (options: JitOptions = {}): Plugin => {
   const after = Math.max(1, options.after ?? 3);
   const isSafe: FieldPredicate = options.isSafe ?? (() => true);
@@ -277,9 +238,9 @@ export const jit = (options: JitOptions = {}): Plugin => {
             current = DECLINED;
           } else {
             const start = performance.now();
-            const compiled = compile(schema, document, operationName ?? undefined);
+            const compiled = compileQuery(schema, document, operationName ?? undefined);
             phase("jit", start, performance.now());
-            current = compiled === undefined ? DECLINED : { _tag: "compiled", query: compiled };
+            current = isCompiledQuery(compiled) ? { _tag: "compiled", query: compiled } : DECLINED;
           }
           states.set(operationKey, current);
         }
