@@ -1,7 +1,13 @@
 // Effect-aware extraction (spec §4), called from two hook points in the vendored Extractor:
 // `typeReference` (before upstream's expectNameIdentifier, which rejects every qualified name)
 // and `recordDerivedContext`.
-import { isIdentifier, isTypeReferenceNode } from "#typescript";
+import {
+  isIdentifier,
+  isLiteralTypeNode,
+  isTypeReferenceNode,
+  isUnionTypeNode,
+  SyntaxKind,
+} from "#typescript";
 import type { Node, TypeNode, TypeReferenceNode } from "#typescript";
 import type { TypeNode as GraphQLTypeNode } from "graphql";
 
@@ -32,12 +38,29 @@ export interface EffectExtractor {
 const isPromiseReference = (type: TypeNode): type is TypeReferenceNode =>
   isTypeReferenceNode(type) && isIdentifier(type.typeName) && type.typeName.text === "Promise";
 
+/** Whether a union member only makes the type nullable (`null` or `undefined`). */
+const isNullish = (type: TypeNode): boolean =>
+  type.kind === SyntaxKind.UndefinedKeyword ||
+  (isLiteralTypeNode(type) && type.literal.kind === SyntaxKind.NullKeyword);
+
+/**
+ * The types an Effect can succeed with, parentheses removed: every non-nullish member of a
+ * union (`Promise<A> | null` holds a `Promise<A>`), or else the type itself.
+ */
+const successBranches = (success: TypeNode): ReadonlyArray<TypeNode> => {
+  const type = stripParentheses(success);
+  return isUnionTypeNode(type)
+    ? type.types.flatMap((member) => (isNullish(member) ? [] : successBranches(member)))
+    : [type];
+};
+
 /**
  * The GraphQL type for an `Effect.Effect` or `Stream.Stream` reference, `null` after reporting a
  * diagnostic, or `undefined` when the reference is neither (upstream handles it).
  *
  * - `Effect.Effect<A, E, R>` becomes the type of `A`, as `Promise<A>` does. It must be the field's
- *   outermost type, and `A` must not be a `Promise` or a `Stream.Stream`.
+ *   outermost type, and `A` must not be a `Promise` or a `Stream.Stream`, nor a nullable union
+ *   holding one.
  * - `Stream.Stream<A, E, R>` becomes an async iterable of `A`, as `AsyncIterable<A>` does, marked
  *   as an Effect stream so it is rejected outside `Subscription`.
  * - Neither is a valid input type.
@@ -62,12 +85,15 @@ export const effectTypeReference = (
     return extractor.report(node, effectWrapperMissingTypeArg(wrapper));
   }
   if (wrapper === "Effect") {
-    const success = stripParentheses(typeArgument);
-    if (effectWrapperOf(success) === "Stream") {
-      return extractor.report(success, streamInsideEffect());
-    }
-    if (isPromiseReference(success)) {
-      return extractor.report(success, promiseInsideEffect());
+    // Checked on each success branch: `Effect.Effect<Promise<A> | null>` must not slip through
+    // upstream's nullable-union handling as a nullable `A`.
+    for (const success of successBranches(typeArgument)) {
+      if (effectWrapperOf(success) === "Stream") {
+        return extractor.report(success, streamInsideEffect());
+      }
+      if (isPromiseReference(success)) {
+        return extractor.report(success, promiseInsideEffect());
+      }
     }
     return extractor.collectType(typeArgument, ctx);
   }
