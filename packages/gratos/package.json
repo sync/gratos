@@ -18,7 +18,6 @@
     "vendor:verify": "node scripts/verify-vendor.ts"
   },
   "dependencies": {
-    "commander": "14.0.1",
     "effect": "catalog:",
     "graphql": "catalog:",
     "jsonc-parser": "catalog:",

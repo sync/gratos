@@ -2,8 +2,8 @@
   "upstream": "captbaritone/grats@5ab66166446b4f80263cda1a13de7d3a69a1c2f8",
   "changes": {
     "src/upstream/cli.ts": {
-      "sha": "19f91fdae992a2c75e32d7ba09c6aa9e5d755c3a",
-      "reason": "M1b mechanical (see the other entries) + M1b cut: --watch, --fix and the locate command are removed (commander stays until M2 swaps in node:util parseArgs) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
+      "sha": "d50dfaa190647621bc187b0c98e6447e6c7c86f0",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: --watch, --fix and the locate command are removed (commander stays until M2 swaps in node:util parseArgs) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; the commander CLI parser is replaced by node:util parseArgs (same --tsconfig, --version/-V and --help/-h options, no new dependency), and readPackageVersion() accepts the package name `@dblechoc/gratos`"
     },
     "src/upstream/CodeActions.ts": {
       "removed": true,
