@@ -10,6 +10,7 @@ import {
   createServer,
   mutationOf,
   readOnly,
+  reportErrors,
   signalOf,
   startOf,
 } from "../src/index.ts";
@@ -307,6 +308,37 @@ describe("aborted execution", () => {
     const response = await pending;
     expect(committed).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(200);
+  });
+});
+
+describe("a started mutation that fails after the client left", () => {
+  it("is processed and reported (not a 499)", async () => {
+    const hold = gate();
+    const log = vi.fn();
+    const server = createServer({
+      schema: basicSchema(),
+      logger: silent,
+      plugins: [
+        reportErrors(log),
+        {
+          onExecute: () => async () => {
+            await hold.promise;
+            throw new Error("write failed");
+          },
+        },
+      ],
+    });
+    const client = new AbortController();
+    const request = post({ query: "mutation { bump }" }, { signal: client.signal });
+    const pending = server.handle(request);
+    await flush();
+    expect(await mutationOf(request)?.started).toBe(true);
+    client.abort();
+    hold.resolve();
+    const response = await pending;
+    expect(response.status).toBe(500);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]?.[0]).toMatchObject({ message: "Unexpected error." });
   });
 });
 

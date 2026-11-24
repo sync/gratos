@@ -478,7 +478,13 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
       }
       result = await settle(started.result);
     } catch (error) {
-      if (error instanceof AbortedGraphQLExecutionError || run.controller.signal.aborted) {
+      // Only an aborted execution takes the cancellation path. A mutation never gets the signal,
+      // so its failure is a real one (a write that failed), processed and reported as usual even
+      // when the client has left.
+      if (
+        error instanceof AbortedGraphQLExecutionError ||
+        (!isMutation && run.controller.signal.aborted)
+      ) {
         // The client left: nothing is reported, and the terminal path (onResponse) still runs.
         return new Response(null, { status: CLIENT_CLOSED_REQUEST });
       }
