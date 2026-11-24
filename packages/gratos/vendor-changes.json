@@ -78,8 +78,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/lib.ts": {
-      "sha": "5dfdba6dd71ade01412953447ba0b41bec2628f0",
-      "reason": "M1b mechanical (see the other entries) + M1b cut: the initTsPlugin export (language-service plugin) is removed + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; libraryImport: passes config.libraryImport to validateDuplicateContextOrInfo + M3: the validation pipeline runs validateEffectStreams (src/effect) just before validateAsyncIterable, so `Stream.Stream` is rejected outside Subscription"
+      "sha": "0a68f67a32f0d04808d21845737b72df073a7481",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: the initTsPlugin export (language-service plugin) is removed + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; libraryImport: passes config.libraryImport to validateDuplicateContextOrInfo + M3: the validation pipeline runs validateEffectStreams (src/effect) just before validateAsyncIterable, so `Stream.Stream` is rejected outside Subscription + M3 round 2 (S10): the validation pipeline runs validateEffectResolverMap (src/effect) just after validateEffectStreams, so Effect.Effect fields and Stream.Stream subscriptions are rejected when EXPERIMENTAL__emitResolverMap is on"
     },
     "src/upstream/Locate.ts": {
       "removed": true,

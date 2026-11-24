@@ -24,6 +24,7 @@ import { addInterfaceFields } from "./transforms/addInterfaceFields.ts";
 import { filterNonGqlInterfaces } from "./transforms/filterNonGqlInterfaces.ts";
 import { validateAsyncIterable } from "./validations/validateAsyncIterable.ts";
 import { validateEffectStreams } from "../effect/validateEffectStreams.ts";
+import { validateEffectResolverMap } from "../effect/validateEffectResolverMap.ts";
 import { applyDefaultNullability } from "./transforms/applyDefaultNullability.ts";
 import { mergeExtensions } from "./transforms/mergeExtensions.ts";
 import { sortSchemaAst } from "./transforms/sortSchemaAst.ts";
@@ -132,6 +133,8 @@ export function extractSchemaAndDoc(
         .map((definitions) => ({ kind: Kind.DOCUMENT, definitions }) as const)
         // Ensure Effect `Stream.Stream` is only returned by subscription fields.
         .andThen((doc) => validateEffectStreams(doc))
+        // Ensure no Effect or Stream field is emitted in a resolver map.
+        .andThen((doc) => validateEffectResolverMap(doc, config))
         // Ensure all subscription fields return an AsyncIterable.
         .andThen((doc) => validateAsyncIterable(doc))
         // Apply default nullability to fields and arguments, and detect any misuse of
