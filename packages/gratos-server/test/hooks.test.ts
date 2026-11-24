@@ -142,6 +142,26 @@ describe("onParams", () => {
     expect(sent.status).toBe(400);
     expect(sent.body).toEqual({ errors: [{ message: "nope", extensions: { code: "X" } }] });
   });
+
+  it("a throw is a 400 even when the error carries another status (gqlError)", async () => {
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        {
+          onParams: () => {
+            throw gqlError("Bad params", 422, { code: "BAD_PARAMS" });
+          },
+        },
+      ],
+    });
+    const sent = await gql(server, "{ count }");
+    expect(sent.status).toBe(400);
+    expect(sent.body).toEqual({
+      errors: [
+        { message: "Bad params", extensions: { code: "BAD_PARAMS", http: { status: 422 } } },
+      ],
+    });
+  });
 });
 
 describe("onPhase", () => {

@@ -21,7 +21,7 @@ import type {
 
 import { DocumentCache, operationEntry } from "./documents.ts";
 import type { DocumentEntry } from "./documents.ts";
-import { asGraphQLError, httpStatusOf, serverDraining } from "./errors.ts";
+import { asGraphQLError, serverDraining } from "./errors.ts";
 import {
   APPLICATION_JSON,
   errorResult,
@@ -268,7 +268,9 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
           error,
           error instanceof Error ? error.message : "Invalid request.",
         );
-        return answer(respond(run, errorResult([graphQLError]), httpStatusOf(graphQLError) ?? 400));
+        // Always a 400 (the plan's contract), whatever status the error carries; its extensions
+        // stay in the payload.
+        return answer(respond(run, errorResult([graphQLError]), 400));
       }
     }
     if (params.query === undefined || params.query === "") {

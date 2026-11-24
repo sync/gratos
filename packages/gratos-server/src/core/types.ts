@@ -103,7 +103,8 @@ export interface Plugin<Ctx = unknown> {
   readonly onRequest?: (request: Request) => PromiseOrValue<Response | undefined | void>;
   /**
    * After the body is read, before the "no query" check (so APQ hash-only requests get here).
-   * Returns replacement params, or nothing. A throw becomes a 400 GraphQL error response.
+   * Returns replacement params, or nothing. A throw becomes a 400 GraphQL error response
+   * (always 400, even for a `gqlError` with another status; the error's extensions are kept).
    */
   readonly onParams?: (
     params: Params,
