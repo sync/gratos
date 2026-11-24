@@ -9,7 +9,6 @@
 import { isAbsolute, relative, sep } from "node:path";
 
 import { computeLineStarts } from "typescript/unstable/ast";
-import type { SourceFile } from "typescript/unstable/ast";
 import { DiagnosticCategory } from "typescript/unstable/sync";
 import type { Diagnostic as Ts7Diagnostic } from "typescript/unstable/sync";
 
@@ -64,7 +63,7 @@ const messageTextOf = (diagnostic: Ts7Diagnostic): string | DiagnosticMessageCha
 /** Converts a TypeScript 7 API diagnostic to TypeScript 5's shape. */
 export const fromTs7Diagnostic = (
   diagnostic: Ts7Diagnostic,
-  fileOf: (fileName: string) => SourceFile | undefined,
+  fileOf: (fileName: string) => DiagnosticFile | undefined,
 ): Diagnostic => {
   const file = diagnostic.fileName === undefined ? undefined : fileOf(diagnostic.fileName);
   const related = diagnostic.relatedInformation;

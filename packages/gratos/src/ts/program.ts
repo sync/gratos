@@ -14,7 +14,7 @@ import type { Checker, Project, Symbol as Ts7Symbol, SymbolFlags } from "typescr
 import type { Node, SourceFile } from "typescript/unstable/ast";
 
 import { fromTs7Diagnostic, sortAndDeduplicateDiagnostics } from "./diagnostics.ts";
-import type { Diagnostic } from "./diagnostics.ts";
+import type { Diagnostic, DiagnosticFile } from "./diagnostics.ts";
 import { defaultSession, openProject } from "./session.ts";
 import type { Session } from "./session.ts";
 
@@ -139,8 +139,23 @@ const makeProgram = (session: Session, project: Project): FacadeProgram => {
     }
     return sourceFiles.get(fileName);
   };
+  // A diagnostic can point into a file that is not a program source file, such as the tsconfig
+  // for an invalid compiler option. It gets a diagnostic file backed by that file's text, so it
+  // keeps its file name, line and underline.
+  const textFiles = new Map<string, DiagnosticFile | undefined>();
+  const diagnosticFileOf = (fileName: string): DiagnosticFile | undefined => {
+    const sourceFile = sourceFileOf(fileName);
+    if (sourceFile !== undefined) {
+      return sourceFile;
+    }
+    if (!textFiles.has(fileName)) {
+      const text = session.virtualFiles.get(fileName) ?? sys.readFile(fileName);
+      textFiles.set(fileName, text === undefined ? undefined : { fileName, text: stripBom(text) });
+    }
+    return textFiles.get(fileName);
+  };
   const convert = (diagnostics: ReadonlyArray<Parameters<typeof fromTs7Diagnostic>[0]>) =>
-    diagnostics.map((diagnostic) => fromTs7Diagnostic(diagnostic, sourceFileOf));
+    diagnostics.map((diagnostic) => fromTs7Diagnostic(diagnostic, diagnosticFileOf));
   let checker: FacadeChecker | undefined;
   return {
     project,
