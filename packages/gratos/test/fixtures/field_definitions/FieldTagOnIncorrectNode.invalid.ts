@@ -1,0 +1,6 @@
+class SomeType {
+  /** @gqlField */
+  constructor() {
+    //
+  }
+}

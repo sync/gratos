@@ -11,6 +11,7 @@ export default defineConfig({
     "packages/gratos/src/upstream/**",
     "packages/gratos/test/fixtures/**",
     "packages/gratos/test/integrationFixtures/**",
+    "packages/gratos/test/configParserFixtures/**",
     ".agents/**",
   ],
 });

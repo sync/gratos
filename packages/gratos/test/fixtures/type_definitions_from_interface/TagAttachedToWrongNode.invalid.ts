@@ -1,0 +1,2 @@
+/** @gqlType */
+function MyFunc() {}

@@ -1,0 +1,2 @@
+/** @gqlScalar Matrix */
+function Foo() {}
