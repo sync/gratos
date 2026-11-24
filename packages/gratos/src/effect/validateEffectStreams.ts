@@ -51,17 +51,25 @@ const subscriptionEventType = (type: TypeNode): TypeNode | null => {
 
 export const validateEffectStreams = (doc: DocumentNode): DiagnosticsResult<DocumentNode> => {
   const errors: Array<DiagnosticWithLocation> = [];
+  // A field an interface adds to each implementation is the same node: report it once.
+  const reported = new Set<TypeNode>();
+  const report = (node: TypeNode, message: string) => {
+    if (!reported.has(node)) {
+      reported.add(node);
+      errors.push(gqlErr(node, message));
+    }
+  };
   const check = (typeName: string, fields: ReadonlyArray<FieldDefinitionNode> | undefined) => {
     if (typeName === "Subscription") {
       for (const field of fields ?? []) {
         if (field.returnsEffect === true) {
-          errors.push(gqlErr(field.type, effectOnSubscription()));
+          report(field.type, effectOnSubscription());
           continue;
         }
         const event = subscriptionEventType(field.type);
         const stream = event === null ? null : effectStreamIn(event);
         if (stream !== null) {
-          errors.push(gqlErr(stream, streamInSubscriptionEvent()));
+          report(stream, streamInSubscriptionEvent());
         }
       }
       return;
@@ -69,7 +77,7 @@ export const validateEffectStreams = (doc: DocumentNode): DiagnosticsResult<Docu
     for (const field of fields ?? []) {
       const stream = effectStreamIn(field.type);
       if (stream !== null) {
-        errors.push(gqlErr(stream, streamOutsideSubscription()));
+        report(stream, streamOutsideSubscription());
       }
     }
   };
