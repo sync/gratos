@@ -8,8 +8,10 @@
 // The generated schema.ts is compared live too, byte for byte, with Gratos' codegen deltas
 // (src/effect/codegen.ts: explicit method and Effect property resolvers, the jit and
 // semanticNonNull markers) turned off through the internal withUpstreamCodegen switch. Each delta
-// is then attributed: turned on alone, it changes exactly the fixtures it applies to, and
-// nothing else.
+// is then attributed: turned on alone, it changes exactly the fixtures it applies to, it adds one
+// node per field it applies to, and with exactly those nodes undone the output is the oracle's
+// byte for byte again (so an unrelated edit inside an attributed fixture still fails). The
+// shipped output, every delta on, must undo to the oracle's too.
 //
 // Query results are compared with upstream's own recordings: the integration fixtures'
 // `.expected.md` snapshots. The check below proves from vendor-changes.json that none of them
@@ -188,6 +190,127 @@ const appliesTo: Record<CodegenDelta, (mine: ReturnType<typeof ours>) => boolean
   effectResolvers: () => false,
 };
 
+/**
+ * The nodes each delta must add, one per field it applies to, from the engine's resolver
+ * metadata: for methodResolvers the method each explicit resolve calls, for jitMarker one marker
+ * per field (named by its resolver).
+ */
+const expectedNodes: Record<CodegenDelta, (mine: ReturnType<typeof ours>) => Array<string>> = {
+  methodResolvers: (mine) =>
+    Object.values(mine.resolvers.types).flatMap((fields) =>
+      Object.entries(fields).flatMap(([fieldName, field]) =>
+        isUpstreamDefaultMethod(fieldName, field.resolver) ? [fieldName] : [],
+      ),
+    ),
+  jitMarker: (mine) =>
+    mine.emitsResolverMap
+      ? []
+      : resolverDefinitions(mine.resolvers).flatMap((resolver) =>
+          resolver.kind !== "property" &&
+          (resolver.arguments ?? []).some((argument) => argument.kind === "information")
+            ? ["jit"]
+            : [],
+        ),
+  effectSemanticNonNull: () => [],
+  effectResolvers: () => [],
+};
+
+// A delta's nodes as codegen prints them, preceded by the comma it adds to the property before
+// and followed by `,` when another property follows. Undoing one removes it and that comma.
+const METHOD_RESOLVE =
+  /,\n( +)resolve\((source|source, args)\) \{\n\1 {4}return (.+);\n\1\}(,?)(?=\n)/g;
+const METHOD_CALL = /^(assertNonNull\()?source\.(\w+)\((|args)\)(\)?)$/;
+const JIT_MARKER =
+  /,\n( +)extensions: \{\n\1 {4}gratos: \{\n\1 {8}jit: false\n\1 {4}\}\n\1\}(,?)(?=\n)/g;
+const GRAPHQL_IMPORT = /^import \{ (.*) \} from "graphql";$/m;
+
+/** The `name` of the field config that a property at `indent`, at `offset`, belongs to. */
+const enclosingFieldName = (ts: string, offset: number, indent: string): string | undefined => {
+  const before = ts.slice(0, offset);
+  const nameLine = before.lastIndexOf(`\n${indent}name: "`);
+  return nameLine === -1
+    ? undefined
+    : /^name: "(\w+)",$/m.exec(before.slice(nameLine + 1 + indent.length))?.[1];
+};
+
+const graphqlImports = (ts: string): Array<string> =>
+  GRAPHQL_IMPORT.exec(ts)?.[1]?.split(", ") ?? [];
+
+interface UndoneDelta {
+  /** schema.ts with the delta's nodes undone. */
+  readonly ts: string;
+  /** The nodes undone: the called method of each explicit resolve, or "jit" per marker. */
+  readonly nodes: Array<string>;
+}
+
+/**
+ * `ts` with exactly the nodes `delta` adds put back as upstream prints them, and the nodes it
+ * found. An explicit method resolve goes; one wrapped in assertNonNull becomes upstream's
+ * `assertNonNull(defaultFieldResolver(…))` resolve again, whose import the delta dropped (the
+ * only other line it may change). Anything else the delta changed stays, so the result differs
+ * from the oracle's.
+ */
+const undoDelta = (delta: CodegenDelta, ts: string, oracleTs: string): UndoneDelta => {
+  const nodes: Array<string> = [];
+  switch (delta) {
+    case "methodResolvers": {
+      let restoredDefault = false;
+      const undone = ts.replaceAll(
+        METHOD_RESOLVE,
+        (
+          match,
+          indent: string,
+          params: string,
+          expression: string,
+          after: string,
+          offset: number,
+        ) => {
+          const call = METHOD_CALL.exec(expression);
+          const wrapped = call?.[1] !== undefined;
+          // Only the field's own method: upstream already resolves a renamed method explicitly.
+          if (
+            call === null ||
+            call[2] !== enclosingFieldName(ts, offset, indent) ||
+            wrapped !== (call[4] === ")") ||
+            (params === "source") !== (call[3] === "")
+          ) {
+            return match;
+          }
+          nodes.push(call[2] ?? "");
+          if (!wrapped) {
+            return after;
+          }
+          restoredDefault = true;
+          return `,\n${indent}resolve(source, args, context, info) {\n${indent}    return assertNonNull(defaultFieldResolver(source, args, context, info));\n${indent}}${after}`;
+        },
+      );
+      const ours = graphqlImports(undone);
+      const theirs = graphqlImports(oracleTs);
+      const droppedOnlyDefaultResolver =
+        restoredDefault &&
+        theirs.includes("defaultFieldResolver") &&
+        theirs.filter((name) => name !== "defaultFieldResolver").join(", ") === ours.join(", ");
+      return {
+        ts: droppedOnlyDefaultResolver
+          ? undone.replace(GRAPHQL_IMPORT, `import { ${theirs.join(", ")} } from "graphql";`)
+          : undone,
+        nodes,
+      };
+    }
+    case "jitMarker":
+      return {
+        ts: ts.replaceAll(JIT_MARKER, (_match, _indent: string, after: string) => {
+          nodes.push("jit");
+          return after;
+        }),
+        nodes,
+      };
+    case "effectSemanticNonNull":
+    case "effectResolvers":
+      return { ts, nodes };
+  }
+};
+
 const DELTAS: ReadonlyArray<CodegenDelta> = [
   "methodResolvers",
   "jitMarker",
@@ -228,14 +351,29 @@ describe("parity with grats@0.0.36", () => {
       // 5.9.2 printer, byte for byte.
       expect(mine.upstreamTs).toBe(reference.ts);
 
-      // Each delta, alone, changes schema.ts exactly when the fixture has a field it applies to.
+      // Each delta, alone, changes schema.ts exactly when the fixture has a field it applies to,
+      // and only by its own nodes: one per field it applies to, and with them undone the output
+      // is the oracle's again, byte for byte.
       for (const delta of DELTAS) {
-        const changed = mine.tsWith(delta) !== reference.ts;
+        const ts = mine.tsWith(delta);
+        const changed = ts !== reference.ts;
         expect({ delta, changed }).toEqual({ delta, changed: appliesTo[delta](mine) });
+        const undone = undoDelta(delta, ts, reference.ts);
+        expect({ delta, nodes: undone.nodes.toSorted() }).toEqual({
+          delta,
+          nodes: expectedNodes[delta](mine).toSorted(),
+        });
+        expect(undone.ts).toBe(reference.ts);
         if (changed) {
           changedBy[delta].add(fixture);
         }
       }
+      // The shipped output (every delta on) is the oracle's plus exactly those nodes.
+      const shipped = DELTAS.reduce(
+        (ts, delta) => undoDelta(delta, ts, reference.ts).ts,
+        mine.shippedTs,
+      );
+      expect(shipped).toBe(reference.ts);
       if (mine.shippedTs !== reference.ts) {
         changedBy.any.add(fixture);
       }
