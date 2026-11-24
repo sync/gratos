@@ -16,7 +16,7 @@ import { getParsedCommandLineOfConfigFile, sys } from "#typescript";
 import type { Diagnostic } from "#typescript";
 
 import { decodeGratsConfig } from "./effect/config.ts";
-import { withParseSession } from "./ts/program.ts";
+import { decodeFileText, withParseSession } from "./ts/program.ts";
 import { acquireSession } from "./ts/session.ts";
 import type { GratsConfig, ParsedCommandLineGrats } from "./upstream/gratsConfig.ts";
 import { buildSchemaAndDocResult } from "./upstream/lib.ts";
@@ -104,7 +104,8 @@ export const findTsconfig = Effect.fnUntraced(function* (directory: string) {
 
 const readConfig = Effect.fnUntraced(function* (configPath: string) {
   const fs = yield* FileSystem.FileSystem;
-  const text = yield* fs.readFileString(configPath).pipe(
+  // Bytes, decoded by their byte order mark (UTF-8, UTF-16 LE or BE) as TypeScript reads them.
+  const bytes = yield* fs.readFile(configPath).pipe(
     Effect.mapError(
       (error) =>
         new ConfigError({
@@ -113,7 +114,7 @@ const readConfig = Effect.fnUntraced(function* (configPath: string) {
         }),
     ),
   );
-  const decoded = decodeGratsConfig(text);
+  const decoded = decodeGratsConfig(decodeFileText(bytes));
   if (Result.isFailure(decoded)) {
     return yield* new ConfigError({
       path: configPath,

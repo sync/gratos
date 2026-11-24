@@ -467,9 +467,11 @@ const stripBom = (text: string): string => (text.startsWith("\uFEFF") ? text.sli
 
 /**
  * A file's text decoded by its byte order mark, without the mark, as TypeScript 5's sys.readFile
- * reads it: UTF-16 big or little endian, or else UTF-8.
+ * reads it: UTF-16 big or little endian, or else UTF-8. The Effect shell decodes the tsconfig
+ * bytes it reads through FileSystem with it too.
  */
-const decodeText = (bytes: Buffer): string => {
+export const decodeFileText = (data: Uint8Array): string => {
+  const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
   if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
     // Swap a copy's bytes, dropping an odd trailing byte as TypeScript 5 does.
     const swapped = Buffer.from(bytes.subarray(0, bytes.length & ~1));
@@ -489,7 +491,7 @@ export const sys = {
   fileExists: (path: string): boolean => existsSync(path),
   readFile: (path: string): string | undefined => {
     try {
-      return decodeText(readFileSync(path));
+      return decodeFileText(readFileSync(path));
     } catch {
       return undefined;
     }
@@ -524,7 +526,7 @@ export const findConfigFile = (
  */
 const parseRawConfig = (configFile: string): { readonly raw: unknown } | undefined => {
   const errors: Array<ParseError> = [];
-  const text = decodeText(readFileSync(configFile));
+  const text = decodeFileText(readFileSync(configFile));
   const raw: unknown = parseJsonc(text, errors, { allowTrailingComma: true });
   return errors.length > 0 ? undefined : { raw };
 };

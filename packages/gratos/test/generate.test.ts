@@ -2,7 +2,7 @@
 // TypeScript itself (tsgo) reads the project's sources from disk; every file the shell reads or
 // writes (the tsconfig and the generated files) goes through the FileSystem service, so a fake
 // one shows exactly which files it writes.
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { assert, describe, expect, it } from "@effect/vitest";
@@ -25,7 +25,7 @@ import {
 } from "../src/ts/session.ts";
 import type { Session } from "../src/ts/session.ts";
 
-import { scratchProject } from "./support/scratch.ts";
+import { scratchProject, smokeCopy } from "./support/scratch.ts";
 
 const smokeDir = join(import.meta.dirname, "smoke");
 const smokeTsconfig = join(smokeDir, "tsconfig.json");
@@ -42,7 +42,7 @@ const systemError = (_tag: "NotFound" | "PermissionDenied", method: string, path
  * or writing one in `unwritable`, fails with PermissionDenied.
  */
 const memoryFileSystem = (
-  files: Record<string, string>,
+  files: Record<string, string | Uint8Array>,
   denied: {
     readonly unreadable?: ReadonlyArray<string>;
     readonly unwritable?: ReadonlyArray<string>;
@@ -52,6 +52,16 @@ const memoryFileSystem = (
   const writes: Array<string> = [];
   const layer = FileSystem.layerNoop({
     exists: (path) => Effect.succeed(contents.has(path)),
+    // Strings are stored as UTF-8.
+    readFile: (path) => {
+      const content = contents.get(path);
+      if (content === undefined) {
+        return Effect.fail(systemError("NotFound", "readFile", path));
+      }
+      return Effect.succeed(
+        typeof content === "string" ? new TextEncoder().encode(content) : content,
+      );
+    },
     readFileString: (path) => {
       if (denied.unreadable?.includes(path) === true) {
         return Effect.fail(systemError("PermissionDenied", "readFileString", path));
@@ -59,7 +69,7 @@ const memoryFileSystem = (
       const content = contents.get(path);
       return content === undefined
         ? Effect.fail(systemError("NotFound", "readFileString", path))
-        : Effect.succeed(content);
+        : Effect.succeed(typeof content === "string" ? content : new TextDecoder().decode(content));
     },
     writeFileString: (path, data) =>
       denied.unwritable?.includes(path) === true
@@ -212,6 +222,27 @@ describe("generate", () => {
       expect(error.message).toContain("Could not read");
     }).pipe(Effect.provide(memoryFileSystem({}).layer)),
   );
+
+  for (const encoding of ["utf16le", "utf16be"] as const) {
+    it.effect(`reads a ${encoding} tsconfig with a byte order mark, as TypeScript does`, () => {
+      // TypeScript reads the tsconfig from disk, and the shell through FileSystem: both get the
+      // same bytes.
+      const bytes = Buffer.from(`\uFEFF${smokeConfig}`, "utf16le");
+      if (encoding === "utf16be") {
+        bytes.swap16();
+      }
+      const project = smokeCopy(`generate-${encoding}`);
+      writeFileSync(project.path("tsconfig.json"), bytes);
+      const tsconfig = project.path("tsconfig.json");
+      const fs = memoryFileSystem({ [tsconfig]: bytes });
+      return Effect.gen(function* () {
+        const result = yield* Effect.scoped(generate(tsconfig));
+        expect(result.sdl).toBe(committedSdl);
+        expect(result.ts).toBe(committedTs);
+        expect(fs.writes).toEqual([project.path("schema.graphql"), project.path("schema.ts")]);
+      }).pipe(Effect.provide(fs.layer), Effect.ensuring(Effect.sync(project.remove)));
+    });
+  }
 
   it.effect("warns about experimental options", () => {
     const withMetadata = smokeConfig.replace(
