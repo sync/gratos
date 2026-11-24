@@ -10,7 +10,11 @@ import { nullThrows } from "../utils/helpers.ts";
 import { type ResolverArgument, type ResolverDefinition, type Metadata } from "../metadata.ts";
 import TSAstBuilder from "./TSAstBuilder.ts";
 import { type ExportDefinition } from "../GraphQLAstExtensions.ts";
-import { alwaysResolveMethods, isEffectSemanticNonNull } from "../../effect/codegen.ts";
+import {
+  alwaysResolveEffect,
+  alwaysResolveMethods,
+  isEffectSemanticNonNull,
+} from "../../effect/codegen.ts";
 
 const RESOLVER_ARGS = ["source", "args", "context", "info"] as const;
 
@@ -36,9 +40,13 @@ export default class ResolverCodegen {
     methodName: string,
     parentTypeName: string,
     sourceExport: ExportDefinition | null,
+    field?: GraphQLField<unknown, unknown>,
   ): ts.MethodDeclaration | null {
     const { resolver } = this._resolvers.types[parentTypeName][fieldName];
-    if (this.isDefaultResolverSignature(fieldName, resolver)) {
+    if (
+      this.isDefaultResolverSignature(fieldName, resolver) &&
+      !alwaysResolveEffect(field)
+    ) {
       return null;
     }
 

@@ -669,6 +669,7 @@ class Codegen {
         "resolve",
         parentTypeName,
         sourceExport,
+        field,
       );
       return [
         this.resolvers.maybeApplySemanticNullRuntimeCheck(

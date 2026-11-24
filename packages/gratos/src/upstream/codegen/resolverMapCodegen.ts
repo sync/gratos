@@ -103,6 +103,7 @@ class Codegen {
         fieldName,
         typeName,
         nullThrows(graphQLType.astNode).exported || null,
+        graphQLType.getFields()[fieldName],
       );
       const wrapped = this.resolvers.maybeApplySemanticNullRuntimeCheck(
         graphQLType.getFields()[fieldName],
