@@ -101,6 +101,14 @@ const satisfiesTsVersion = (range: string): boolean => {
     : compareVersions(current, parseVersion(range)) === 0;
 };
 
+/** Why a fixture's `tsVersion` gate excludes the current TypeScript, if it does. */
+const tsVersionSkipReason = (code: string): string | undefined => {
+  const gate = tsVersionGateOf(code);
+  return gate === undefined || satisfiesTsVersion(gate)
+    ? undefined
+    : `gated to TypeScript ${gate}, running ${tsVersion}`;
+};
+
 /**
  * Diagnostics print paths relative to the working directory. Upstream ran from its repo root with
  * fixtures in src/tests/; here they live in test/, so map the prefix back to keep the snapshots.
@@ -156,16 +164,10 @@ defineFixtureSuite({
   },
 });
 
-defineFixtureSuite({
-  name: "fixtures",
-  fixturesDir,
-  testFilePattern: /\.ts$/,
-  ignoreFilePattern: null,
-  transformer: (code, fileName) => {
-    const tsVersionGate = tsVersionGateOf(code);
-    if (tsVersionGate !== undefined && !satisfiesTsVersion(tsVersionGate)) {
-      return false;
-    }
+/** Upstream's schema fixture transformer: SDL and generated TypeScript, or the error report. */
+const schemaFixtureTransformer =
+  (dir: string) =>
+  (code: string, fileName: string): TransformerResult => {
     const config = {
       nullableByDefault: true,
       schemaHeader: null,
@@ -180,7 +182,7 @@ defineFixtureSuite({
         options: {},
         raw: { grats: config },
         errors: [],
-        fileNames: [join(fixturesDir, fileName), typesFile],
+        fileNames: [join(dir, fileName), typesFile],
       });
       if (parsedOptionsResult.kind === "ERROR") {
         return err(
@@ -208,7 +210,7 @@ defineFixtureSuite({
     // Run codegen here to make sure it doesn't throw.
     const executableSchema = applyTypeScriptHeader(
       parsedOptions.raw.grats,
-      codegen(schema, resolvers, parsedOptions.raw.grats, join(fixturesDir, fileName)),
+      codegen(schema, resolvers, parsedOptions.raw.grats, join(dir, fileName)),
     );
 
     const docSansDirectives = {
@@ -227,7 +229,15 @@ defineFixtureSuite({
     markdown.addHeader(3, "TypeScript");
     markdown.addCodeBlock(executableSchema, "ts");
     return ok(markdown);
-  },
+  };
+
+defineFixtureSuite({
+  name: "fixtures",
+  fixturesDir,
+  testFilePattern: /\.ts$/,
+  ignoreFilePattern: null,
+  skipReason: tsVersionSkipReason,
+  transformer: schemaFixtureTransformer(fixturesDir),
 });
 
 defineFixtureSuite({

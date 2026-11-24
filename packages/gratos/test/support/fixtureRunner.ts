@@ -11,8 +11,7 @@ import { Markdown } from "./Markdown.ts";
 
 export type TransformerResult =
   | { readonly kind: "OK"; readonly value: Markdown }
-  | { readonly kind: "ERROR"; readonly err: Markdown | string }
-  | false;
+  | { readonly kind: "ERROR"; readonly err: Markdown | string };
 
 export type Transformer = (
   code: string,
@@ -25,6 +24,11 @@ export interface FixtureSuite {
   readonly testFilePattern: RegExp;
   readonly ignoreFilePattern: RegExp | null;
   readonly transformer: Transformer;
+  /**
+   * Why a fixture does not run on the current TypeScript (for example a `tsVersion` gate), or
+   * `undefined` to run it. A skipped fixture is reported as skipped, never as a pass.
+   */
+  readonly skipReason?: (code: string, fileName: string) => string | undefined;
 }
 
 const UPDATE = process.env["GRATOS_UPDATE_FIXTURES"] === "1";
@@ -65,14 +69,16 @@ export const defineFixtureSuite = (suite: FixtureSuite): void => {
     });
 
     for (const fixture of fixtures) {
+      const fixturePath = join(suite.fixturesDir, fixture);
+      const skipReason = suite.skipReason?.(readFileSync(fixturePath, "utf8"), fixture);
+      if (skipReason !== undefined) {
+        it.skip(`${fixture} (${skipReason})`, () => {});
+        continue;
+      }
       it(fixture, async () => {
-        const fixturePath = join(suite.fixturesDir, fixture);
         const expectedPath = `${fixturePath}.expected.md`;
         const code = readFileSync(fixturePath, "utf8");
         const result = await runTransformer(suite.transformer, code, fixture);
-        if (result === false) {
-          return; // skipped by the transformer (for example a tsVersion gate)
-        }
 
         const output = new Markdown();
         output.addHeader(1, fixture);
