@@ -1,0 +1,59 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "globalDependencies": [
+    "tsconfig.base.json",
+    "vitest.shared.ts",
+    "oxlint.config.ts",
+    ".oxfmtrc.json",
+    ".node-version"
+  ],
+  "tasks": {
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "codegen": {
+      "dependsOn": ["^transit"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
+      "outputs": ["src/generated/schema.ts", "src/generated/schema.graphql"]
+    },
+    "codegen:check": {
+      "dependsOn": ["^transit"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"]
+    },
+    "typecheck": {
+      "dependsOn": ["^transit"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"]
+    },
+    "test": {
+      "dependsOn": ["^transit"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tsconfig.base.json",
+        "$TURBO_ROOT$/vitest.shared.ts"
+      ]
+    },
+    "//#fmt:check": {
+      "inputs": ["$TURBO_DEFAULT$"]
+    },
+    "//#lint": {
+      "inputs": ["$TURBO_DEFAULT$"]
+    },
+    "check": {
+      "dependsOn": [
+        "//#fmt:check",
+        "//#lint",
+        "//#typecheck:root",
+        "typecheck",
+        "test",
+        "codegen:check"
+      ]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "//#typecheck:root": {
+      "inputs": ["$TURBO_DEFAULT$"]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@dblechoc/gratos",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "codegen": "node -e \"console.log('codegen: nothing to generate yet (M2)')\"",
+    "codegen:check": "node -e \"console.log('codegen:check: nothing to check yet (M2)')\""
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

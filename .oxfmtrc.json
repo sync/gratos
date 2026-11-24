@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "skills-lock.json",
+    ".agents/**",
+    ".claude/**",
+    "docs/plan.html",
+    "**/src/generated/**",
+    "packages/gratos/llm-docs/**",
+    "packages/gratos/src/upstream/**",
+    "packages/gratos/test/fixtures/**",
+    "packages/gratos/test/integrationFixtures/**"
+  ]
+}
