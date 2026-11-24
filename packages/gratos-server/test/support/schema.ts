@@ -9,7 +9,7 @@ import type {
 } from "graphql";
 
 export type Resolvers = Readonly<
-  Record<string, Readonly<Record<string, GraphQLFieldResolver<unknown, unknown>>>>
+  Record<string, Readonly<Record<string, GraphQLFieldResolver<never, unknown>>>>
 >;
 export type Extensions = Readonly<
   Record<string, Readonly<Record<string, GraphQLFieldExtensions<unknown, unknown>>>>
