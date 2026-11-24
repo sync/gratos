@@ -54,6 +54,9 @@ const memoryFileSystem = (
     exists: (path) => Effect.succeed(contents.has(path)),
     // Strings are stored as UTF-8.
     readFile: (path) => {
+      if (denied.unreadable?.includes(path) === true) {
+        return Effect.fail(systemError("PermissionDenied", "readFile", path));
+      }
       const content = contents.get(path);
       if (content === undefined) {
         return Effect.fail(systemError("NotFound", "readFile", path));
@@ -62,6 +65,7 @@ const memoryFileSystem = (
         typeof content === "string" ? new TextEncoder().encode(content) : content,
       );
     },
+    // Decodes as Effect's FileSystem does (TextDecoder), dropping a leading UTF-8 byte order mark.
     readFileString: (path) => {
       if (denied.unreadable?.includes(path) === true) {
         return Effect.fail(systemError("PermissionDenied", "readFileString", path));
@@ -288,6 +292,38 @@ describe("check", () => {
   });
 });
 
+describe("an output file with a UTF-8 byte order mark", () => {
+  // The committed SDL, prefixed with a byte order mark: decoded as text, it equals the SDL.
+  const sdlWithBom = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(committedSdl)]);
+
+  it.effect("is out of date for check(), which writes nothing", () => {
+    const fs = memoryFileSystem({
+      [smokeTsconfig]: smokeConfig,
+      [sdlPath]: sdlWithBom,
+      [tsPath]: committedTs,
+    });
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(Effect.scoped(check(smokeTsconfig)));
+      assert.instanceOf(error, StaleFilesError);
+      expect(error.files).toEqual(["schema.graphql"]);
+      expect(fs.writes).toEqual([]);
+    }).pipe(Effect.provide(fs.layer));
+  });
+
+  it.effect("is rewritten without it by generate()", () => {
+    const fs = memoryFileSystem({
+      [smokeTsconfig]: smokeConfig,
+      [sdlPath]: sdlWithBom,
+      [tsPath]: committedTs,
+    });
+    return Effect.gen(function* () {
+      yield* Effect.scoped(generate(smokeTsconfig));
+      expect(fs.writes).toEqual([sdlPath]);
+      expect(fs.contents.get(sdlPath)).toBe(committedSdl);
+    }).pipe(Effect.provide(fs.layer));
+  });
+});
+
 describe("output files that cannot be read or written", () => {
   it.effect("check() reports an unreadable file as an OutputError, not as stale", () => {
     const fs = memoryFileSystem(
@@ -299,7 +335,7 @@ describe("output files that cannot be read or written", () => {
       assert.instanceOf(error, OutputError);
       expect(error.path).toBe(sdlPath);
       expect(error.message).toBe(
-        `Gratos: Could not read \`${sdlPath}\`: ${systemError("PermissionDenied", "readFileString", sdlPath).message}`,
+        `Gratos: Could not read \`${sdlPath}\`: ${systemError("PermissionDenied", "readFile", sdlPath).message}`,
       );
     }).pipe(Effect.provide(fs.layer));
   });

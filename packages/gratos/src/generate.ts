@@ -64,7 +64,7 @@ export interface GeneratedFile {
   /** Path relative to the tsconfig's directory, as messages print it. */
   readonly name: string;
   readonly content: string;
-  /** Whether the file on disk already had exactly this content. */
+  /** Whether the file on disk already had exactly this content, byte for byte (UTF-8). */
   readonly upToDate: boolean;
 }
 
@@ -190,15 +190,26 @@ const outputError =
     new OutputError({ path, message: `Gratos: Could not ${verb} \`${path}\`: ${error.message}` });
 
 /**
- * A generated file's current content, or None when it does not exist yet. Any other failure
- * (such as permission denied) is an OutputError: it does not mean the file is out of date.
+ * A generated file's current bytes, or None when it does not exist yet. Any other failure (such
+ * as permission denied) is an OutputError: it does not mean the file is out of date.
+ *
+ * Bytes, not text: decoding would drop a leading byte order mark, so a file with one would pass
+ * as up to date although its bytes differ from what Gratos writes.
  */
 const readOutput = (fs: FileSystem.FileSystem, path: string) =>
-  fs.readFileString(path).pipe(
+  fs.readFile(path).pipe(
     Effect.map(Option.some),
     Effect.catchReason("PlatformError", "NotFound", () => Effect.succeedNone),
     Effect.mapError(outputError("read", path)),
   );
+
+const utf8 = new TextEncoder();
+
+/** Whether `bytes` are exactly `content` as Gratos writes it (UTF-8, no byte order mark). */
+const hasContent = (bytes: Uint8Array, content: string): boolean => {
+  const expected = utf8.encode(content);
+  return bytes.length === expected.length && bytes.every((byte, i) => byte === expected[i]);
+};
 
 /** Builds every output for `tsconfig` and compares each with the file on disk. */
 const build = Effect.fnUntraced(function* (tsconfig: string) {
@@ -226,7 +237,7 @@ const build = Effect.fnUntraced(function* (tsconfig: string) {
     files.push({
       ...output,
       name: relative(dirname(configPath), output.path),
-      upToDate: Option.isSome(existing) && existing.value === output.content,
+      upToDate: Option.isSome(existing) && hasContent(existing.value, output.content),
     });
   }
   const [sdl, tsSchema] = files;
