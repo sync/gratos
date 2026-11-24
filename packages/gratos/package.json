@@ -14,6 +14,11 @@
     "codegen:check": "node -e \"console.log('codegen:check: nothing to check yet (M2)')\"",
     "vendor:verify": "node scripts/verify-vendor.ts"
   },
+  "dependencies": {
+    "commander": "14.0.1",
+    "graphql": "16.11.0",
+    "typescript-baseline": "npm:typescript@5.9.2"
+  },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
@@ -22,10 +27,5 @@
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"
-  },
-  "dependencies": {
-    "graphql": "16.11.0",
-    "semver": "7.7.2",
-    "typescript-baseline": "npm:typescript@5.9.2"
   }
 }

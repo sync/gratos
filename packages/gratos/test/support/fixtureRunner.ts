@@ -2,8 +2,8 @@
 //
 // Each fixture becomes one test. The produced Markdown must equal the committed
 // `<fixture>.expected.md`. Set GRATOS_UPDATE_FIXTURES=1 to rewrite the expected files instead.
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { extname, join, relative } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -30,10 +30,9 @@ export interface FixtureSuite {
 const UPDATE = process.env["GRATOS_UPDATE_FIXTURES"] === "1";
 
 const readdirRecursive = (dir: string): Array<string> =>
-  fs
-    .readdirSync(dir, { recursive: true, withFileTypes: true })
+  readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => !entry.isDirectory())
-    .map((entry) => path.relative(dir, path.join(entry.parentPath, entry.name)))
+    .map((entry) => relative(dir, join(entry.parentPath, entry.name)))
     .toSorted();
 
 const runTransformer = async (
@@ -67,9 +66,9 @@ export const defineFixtureSuite = (suite: FixtureSuite): void => {
 
     for (const fixture of fixtures) {
       it(fixture, async () => {
-        const fixturePath = path.join(suite.fixturesDir, fixture);
+        const fixturePath = join(suite.fixturesDir, fixture);
         const expectedPath = `${fixturePath}.expected.md`;
-        const code = fs.readFileSync(fixturePath, "utf8");
+        const code = readFileSync(fixturePath, "utf8");
         const result = await runTransformer(suite.transformer, code, fixture);
         if (result === false) {
           return; // skipped by the transformer (for example a tsVersion gate)
@@ -78,20 +77,20 @@ export const defineFixtureSuite = (suite: FixtureSuite): void => {
         const output = new Markdown();
         output.addHeader(1, fixture);
         output.addHeader(2, "Input");
-        output.addCodeBlock(code, path.extname(fixture).slice(1), fixture);
+        output.addCodeBlock(code, extname(fixture).slice(1), fixture);
         output.addHeader(2, "Output");
         const actual = result.kind === "OK" ? result.value : result.err;
-        if (actual instanceof Markdown) {
-          output.addMarkdown(actual);
-        } else {
+        if (typeof actual === "string") {
           output.addCodeBlock(actual, "");
+        } else {
+          output.addMarkdown(actual);
         }
         const text = output.toString();
 
         if (UPDATE) {
-          fs.writeFileSync(expectedPath, text, "utf8");
+          writeFileSync(expectedPath, text, "utf8");
         } else {
-          const expected = fs.existsSync(expectedPath) ? fs.readFileSync(expectedPath, "utf8") : "";
+          const expected = existsSync(expectedPath) ? readFileSync(expectedPath, "utf8") : "";
           expect(text).toBe(expected);
         }
 

@@ -7,7 +7,7 @@
  * unauthenticated API rate limit.
  */
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import { Schema } from "effect";
@@ -91,7 +91,54 @@ const fetchUpstreamTree = async (): Promise<(typeof TreeResponse.Type)["tree"]> 
   return body.tree;
 };
 
+/**
+ * Intentional, reviewed changes to vendored files. Each entry pins the file's expected git blob
+ * SHA (or records its removal) with the reason; anything else that differs from upstream fails.
+ * Record a new set of changes with: `node scripts/verify-vendor.ts --record "<reason>"`.
+ */
+const ledgerPath = join(packageRoot, "vendor-changes.json");
+const LedgerEntry = Schema.Union([
+  Schema.Struct({ sha: Schema.String, reason: Schema.String }),
+  Schema.Struct({ removed: Schema.Literal(true), reason: Schema.String }),
+]);
+const Ledger = Schema.Struct({
+  upstream: Schema.String,
+  changes: Schema.Record(Schema.String, LedgerEntry),
+});
+type Ledger = typeof Ledger.Type;
+const decodeLedger = Schema.decodeUnknownSync(Ledger);
+const UPSTREAM_REF = `${UPSTREAM_REPO}@${UPSTREAM_COMMIT}`;
+
+const readLedger = (): Ledger =>
+  existsSync(ledgerPath)
+    ? decodeLedger(JSON.parse(readFileSync(ledgerPath, "utf8")))
+    : { upstream: UPSTREAM_REF, changes: {} };
+
+type LocalState =
+  | { readonly kind: "missing" }
+  | { readonly kind: "symlink" }
+  | { readonly kind: "file"; readonly sha: string };
+const localStateOf = (local: string): LocalState => {
+  const absolute = join(packageRoot, local);
+  // Upstream has no symlinks in the vendored set, so a symlink is always a change.
+  // Checking with lstat keeps readFileSync from hashing a link target instead.
+  if (isSymlink(absolute)) {
+    return { kind: "symlink" };
+  }
+  if (!existsSync(absolute)) {
+    return { kind: "missing" };
+  }
+  return { kind: "file", sha: gitBlobSha(readFileSync(absolute)) };
+};
+
 const main = async (): Promise<number> => {
+  const recordIndex = process.argv.indexOf("--record");
+  const recordReason = recordIndex === -1 ? undefined : process.argv[recordIndex + 1];
+  if (recordIndex !== -1 && (recordReason === undefined || recordReason.trim() === "")) {
+    process.stderr.write('usage: verify-vendor.ts [--record "<reason>"]\n');
+    return 2;
+  }
+
   const tree = await fetchUpstreamTree();
   const expected = new Map<string, string>();
   for (const entry of tree) {
@@ -104,21 +151,44 @@ const main = async (): Promise<number> => {
     }
   }
 
+  const ledger = readLedger();
+  const changes = { ...ledger.changes };
   const problems: Array<string> = [];
-  for (const [local, sha] of expected) {
-    const absolute = join(packageRoot, local);
-    if (!existsSync(absolute) && !isSymlink(absolute)) {
-      problems.push(`missing: ${local}`);
+  for (const [local, upstreamSha] of expected) {
+    const state = localStateOf(local);
+    const recorded = changes[local];
+    if (state.kind === "file" && state.sha === upstreamSha) {
+      if (recorded !== undefined) {
+        problems.push(`stale ledger entry: ${local} is identical to upstream again`);
+      }
       continue;
     }
-    // Upstream has no symlinks in the vendored set, so a symlink is always a change.
-    // Checking with lstat keeps readFileSync from hashing a link target instead.
-    if (isSymlink(absolute)) {
+    if (state.kind === "symlink") {
       problems.push(`changed: ${local} (now a symlink)`);
       continue;
     }
-    if (gitBlobSha(readFileSync(absolute)) !== sha) {
-      problems.push(`changed: ${local}`);
+    const matchesLedger =
+      recorded !== undefined &&
+      (state.kind === "missing"
+        ? "removed" in recorded
+        : "sha" in recorded && recorded.sha === state.sha);
+    if (matchesLedger) {
+      continue;
+    }
+    if (recordReason !== undefined) {
+      changes[local] =
+        state.kind === "missing"
+          ? { removed: true, reason: recordReason }
+          : { sha: state.sha, reason: recordReason };
+      continue;
+    }
+    problems.push(
+      `${state.kind === "missing" ? "missing" : "changed"}: ${local}${recorded === undefined ? "" : " (differs from vendor-changes.json)"}`,
+    );
+  }
+  for (const local of Object.keys(changes)) {
+    if (!expected.has(local)) {
+      problems.push(`stale ledger entry: ${local} is not a vendored upstream file`);
     }
   }
 
@@ -129,7 +199,7 @@ const main = async (): Promise<number> => {
   const present = vendoredRoots.flatMap((root) => {
     const absolute = join(packageRoot, root);
     if (!existsSync(absolute)) {
-      return []; // its files are already reported as missing
+      return [];
     }
     return lstatSync(absolute).isDirectory() ? listEntries(absolute) : [absolute];
   });
@@ -140,15 +210,23 @@ const main = async (): Promise<number> => {
     }
   }
 
+  if (recordReason !== undefined) {
+    const sorted = Object.fromEntries(
+      Object.entries(changes).toSorted(([a], [b]) => a.localeCompare(b)),
+    );
+    writeFileSync(
+      ledgerPath,
+      `${JSON.stringify({ upstream: UPSTREAM_REF, changes: sorted }, null, 2)}\n`,
+    );
+  }
   if (problems.length > 0) {
     process.stderr.write(`${problems.join("\n")}\n`);
-    process.stderr.write(
-      `verify-vendor: ${problems.length} problem(s) against ${UPSTREAM_REPO}@${UPSTREAM_COMMIT}\n`,
-    );
+    process.stderr.write(`verify-vendor: ${problems.length} problem(s) against ${UPSTREAM_REF}\n`);
     return 1;
   }
+  const changed = Object.keys(changes).length;
   process.stdout.write(
-    `verify-vendor: all ${expected.size} vendored files are byte-identical to ${UPSTREAM_REPO}@${UPSTREAM_COMMIT}\n`,
+    `verify-vendor: ${expected.size - changed} vendored files are byte-identical to ${UPSTREAM_REF}; ${changed} differ exactly as recorded in vendor-changes.json\n`,
   );
   return 0;
 };

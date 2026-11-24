@@ -1,8 +1,18 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // This package compiles the vendored Grats engine (src/upstream), which upstream wrote
+    // for strictNullChecks + strictPropertyInitialization only. Making it pass the repo's
+    // extra flags would need real edits to vendored code, so this package keeps upstream's
+    // strictness. The other packages stay fully strict.
+    "strict": false,
+    "strictNullChecks": true,
+    "strictPropertyInitialization": true,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false
+  },
   "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "*.ts"],
   "exclude": [
-    "src/upstream/**",
     "llm-docs/**",
     "test/fixtures/**",
     "test/integrationFixtures/**",
