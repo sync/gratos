@@ -32,3 +32,9 @@ export const effectOnSubscription = (): string =>
 
 export const bareEffectType = (): string =>
   'Expected `Effect.Effect`, not a bare `Effect`. Gratos only recognizes the qualified name, so `Effect<A>` imported from `effect` is not unwrapped. Import the module with `import { Effect } from "effect"` and write `Effect.Effect<A>`.';
+
+export const effectWithResolverMap = (): string =>
+  "Expected no `Effect.Effect` field when `EXPERIMENTAL__emitResolverMap` is enabled. The resolver map has no generated `resolve` or `gratos` extensions for the Gratos Effect layer to run the Effect with. Turn off `EXPERIMENTAL__emitResolverMap`, or return the value or a `Promise` of it.";
+
+export const streamWithResolverMap = (): string =>
+  "Expected no `Stream.Stream` subscription when `EXPERIMENTAL__emitResolverMap` is enabled. The resolver map has no `subscribe` for the Gratos Effect layer to turn the Stream into an AsyncIterable. Turn off `EXPERIMENTAL__emitResolverMap`, or return an `AsyncIterable`.";

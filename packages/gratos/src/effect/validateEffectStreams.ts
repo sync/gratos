@@ -32,7 +32,7 @@ import {
 } from "./errors.ts";
 
 /** The first list in a type marked as a `Stream.Stream`, outermost first. */
-const effectStreamIn = (type: TypeNode): TypeNode | null => {
+export const effectStreamIn = (type: TypeNode): TypeNode | null => {
   switch (type.kind) {
     case Kind.NON_NULL_TYPE:
       return effectStreamIn(type.type);
