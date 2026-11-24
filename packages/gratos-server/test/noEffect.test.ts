@@ -30,8 +30,8 @@ describe("@dblechoc/gratos-server core", () => {
     const urls = Array.isArray(parsed) ? parsed.map(String) : [];
     // The recording works: the entry, graphql and graphql-jit were resolved.
     expect(urls.some((url) => url.endsWith("/gratos-server/src/index.ts"))).toBe(true);
-    expect(urls.some((url) => url.includes("/graphql@17.1.0/"))).toBe(true);
-    expect(urls.some((url) => url.includes("/graphql-jit@0.10.1"))).toBe(true);
+    expect(urls.some((url) => url.includes("/node_modules/graphql/"))).toBe(true);
+    expect(urls.some((url) => url.includes("/node_modules/graphql-jit/"))).toBe(true);
     expect(urls.filter((url) => /\/effect@|\/node_modules\/effect\/|^effect$/.test(url))).toEqual(
       [],
     );
