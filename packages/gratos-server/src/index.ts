@@ -5,7 +5,10 @@ export { mutationOf, signalOf, startOf } from "./core/requestState.ts";
 export { gqlError, httpStatusOf } from "./core/errors.ts";
 export { APPLICATION_JSON, GRAPHQL_RESPONSE_JSON } from "./core/http.ts";
 export type {
+  BaseServerOptions,
+  ContextFactory,
   ContextInput,
+  ContextServerOptions,
   DrainOptions,
   ExecuteInput,
   Executor,
@@ -16,6 +19,7 @@ export type {
   Logger,
   MutationState,
   NextExecutor,
+  NoContextServerOptions,
   Params,
   Phase,
   PhaseName,

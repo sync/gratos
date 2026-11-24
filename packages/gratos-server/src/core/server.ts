@@ -36,6 +36,8 @@ import type { MediaType } from "./http.ts";
 import { registerMutation, registerRequest } from "./requestState.ts";
 import type { MutationTracker } from "./requestState.ts";
 import type {
+  BaseServerOptions,
+  ContextFactory,
   ContextInput,
   DrainOptions,
   ExecuteInput,
@@ -135,16 +137,30 @@ interface Answer {
 
 const answer = (response: Response): Answer => ({ _tag: "answer", response });
 
-export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Server => {
+/** The context of a server without a context factory. */
+const noContext = (): undefined => undefined;
+
+/**
+ * Creates a server. Without a context factory the context is `undefined`; the types require one
+ * when `Ctx` excludes `undefined` (see `ServerOptions`).
+ */
+export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Server =>
+  options.context === undefined
+    ? serve<undefined>(options, noContext, options.plugins ?? [])
+    : serve<Ctx>(options, options.context, options.plugins ?? []);
+
+const serve = <Ctx>(
+  options: BaseServerOptions,
+  contextFactory: ContextFactory<Ctx>,
+  plugins: ReadonlyArray<Plugin<Ctx>>,
+): Server => {
   let schema = options.schema;
   assertValidSchema(schema);
   let generation = 0;
   const cache = new DocumentCache(options.documentCacheSize ?? DEFAULT_DOCUMENT_CACHE_SIZE);
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
   const logger: Logger = options.logger ?? console;
-  const plugins = options.plugins ?? [];
   const hideSuggestions = plugins.some((plugin) => plugin.hideSuggestions === true);
-  const contextFactory = options.context;
 
   // Hook lists are built once: a hook that no plugin defines costs nothing per request.
   const onServer = hooksOf(plugins, "onServer");
@@ -338,12 +354,8 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
     input: ContextInput,
   ): Promise<Answer | { readonly _tag: "context"; readonly ctx: Ctx }> => {
     try {
-      const ctx =
-        contextFactory === undefined
-          ? // Without a factory the context is `undefined`, which is what `Ctx` defaults to.
-            // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-            (undefined as Ctx)
-          : await settle(contextFactory(run.request, input));
+      const produced = contextFactory(run.request, input);
+      const ctx = isPromiseLike(produced) ? await produced : produced;
       run.ctx = ctx;
       for (const hook of onContext) {
         await settle(hook(ctx, run.request, input.operation));

@@ -175,11 +175,12 @@ export interface Logger {
   readonly error: (message: string, details?: unknown) => void;
 }
 
-export interface ServerOptions<Ctx> {
+/** Builds the per-request context, after the operation is resolved. */
+export type ContextFactory<Ctx> = (request: Request, input: ContextInput) => PromiseOrValue<Ctx>;
+
+/** The options every server takes, with or without a context factory. */
+export interface BaseServerOptions {
   readonly schema: GraphQLSchema;
-  /** Builds the per-request context, after the operation is resolved. Defaults to `undefined`. */
-  readonly context?: (request: Request, input: ContextInput) => PromiseOrValue<Ctx>;
-  readonly plugins?: ReadonlyArray<Plugin<Ctx>>;
   readonly rootValue?: unknown;
   /** Size of the validated-document LRU. Default 1000. */
   readonly documentCacheSize?: number;
@@ -187,6 +188,27 @@ export interface ServerOptions<Ctx> {
   readonly maxTokens?: number;
   readonly logger?: Logger;
 }
+
+/** A server with a context factory: every hook sees the context it builds. */
+export interface ContextServerOptions<Ctx> extends BaseServerOptions {
+  readonly context: ContextFactory<Ctx>;
+  readonly plugins?: ReadonlyArray<Plugin<Ctx>>;
+}
+
+/** A server without a context factory: the context is `undefined`. */
+export interface NoContextServerOptions extends BaseServerOptions {
+  readonly context?: undefined;
+  readonly plugins?: ReadonlyArray<Plugin<undefined>>;
+}
+
+/**
+ * The options of `createServer<Ctx>`. The context factory is required when `Ctx` excludes
+ * `undefined` (so no plugin is handed an `undefined` it does not expect), optional otherwise; the
+ * default server (`Ctx = undefined`) needs none.
+ */
+export type ServerOptions<Ctx> = undefined extends Ctx
+  ? ContextServerOptions<Ctx> | NoContextServerOptions
+  : ContextServerOptions<Ctx>;
 
 export interface DrainOptions {
   /**
