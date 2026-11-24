@@ -22,8 +22,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/codegen/schemaCodegen.ts": {
-      "sha": "3e379a7c0ebe901ca132d9d6ecfdcc78ec6315cf",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "sha": "8d3bb2353c2509fc32820deb60ef08af3f90530c",
+      "reason": "M1b mechanical (see the other entries) + M1b graphql 17.1: argument defaults are read from arg.default (graphql 17 leaves the deprecated defaultValue unset for SDL-built schemas) via coerceInputLiteral, so generated defaultValue output is unchanged"
     },
     "src/upstream/codegen/TSAstBuilder.ts": {
       "sha": "52da8b98de3b63d0cbef20ca0245e4409256cff0",
@@ -200,6 +200,30 @@
     "src/upstream/validations/validateTypenames.ts": {
       "sha": "2f603544ba258ce0e0578fe99468837f0368fa60",
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "test/fixtures/arguments/PositionalArgDeprecatedWithDefault.ts.expected.md": {
+      "sha": "d6f432f4fc13f59e68484841f08a3279166c3b3c",
+      "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
+    },
+    "test/fixtures/custom_scalars/SpecifiedByMissingUrlinvalid.invalid.ts.expected.md": {
+      "sha": "80eafb7621af231f833ededba494d13a1b6142f1",
+      "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
+    },
+    "test/fixtures/default_values/DefaultArgumentObjectLiteral.ts.expected.md": {
+      "sha": "1ca1d03a2228fc1b6c4262bb2a985510bce62236",
+      "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
+    },
+    "test/fixtures/directives/directiveArgFieldInvalid.invalid.ts.expected.md": {
+      "sha": "be425b57edd8f1b160401688e7c06c3e6a723b89",
+      "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
+    },
+    "test/fixtures/directives/directiveArgInvalidOneOf.invalid.ts.expected.md": {
+      "sha": "b08c030b81ed95339255fbc26dd6d5279dc94a0c",
+      "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
+    },
+    "test/fixtures/enums/NonNullEnumDefaultInInputObject.ts.expected.md": {
+      "sha": "05de79b489266c5b73c0c9a60ab5abba19f5e1ff",
+      "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
     }
   }
 }

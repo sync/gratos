@@ -27,7 +27,7 @@ export function myQueryField(): string {
 ### Error Report
 
 ```text
-GraphQL request:1:23 - error: OneOf Input Object "MyInput" must specify exactly one key.
+GraphQL request:1:23 - error: Within OneOf Input Object type "MyInput", exactly one field must be specified, and the value for that field must be non-null.
 
 1 @customDirective(foo: {a: "a", b: "b"})
                         ~~~~~~~~~~~~~~~~

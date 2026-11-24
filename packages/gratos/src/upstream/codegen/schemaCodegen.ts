@@ -25,6 +25,7 @@ import {
   isScalarType,
   isUnionType,
   valueFromASTUntyped,
+  coerceInputLiteral,
 } from "graphql";
 import * as ts from "typescript-baseline";
 import { extend, nullThrows } from "../utils/helpers.ts";
@@ -698,10 +699,10 @@ class Codegen {
       this.deprecated(arg),
       F.createPropertyAssignment("type", this.typeReference(arg.type)),
       // TODO: arg.defaultValue seems to be missing for complex objects
-      arg.defaultValue !== undefined
+      defaultValueOf(arg) !== undefined
         ? F.createPropertyAssignment(
             "defaultValue",
-            this.defaultValue(arg.defaultValue),
+            this.defaultValue(defaultValueOf(arg)),
           )
         : null,
       this.extensions(arg.astNode?.directives),
@@ -978,4 +979,17 @@ class Codegen {
 
     return this.ts.print();
   }
+}
+
+// graphql 17 keeps a default read from SDL as `arg.default.literal`; the deprecated
+// `arg.defaultValue` (what graphql 16 set) is undefined. Recover the runtime value so the
+// generated `defaultValue:` stays the same as before.
+function defaultValueOf(arg: GraphQLArgument): unknown {
+  if (arg.default === undefined) {
+    return arg.defaultValue;
+  }
+  if (arg.default.literal !== undefined) {
+    return coerceInputLiteral(arg.default.literal, arg.type);
+  }
+  return arg.default.value;
 }
