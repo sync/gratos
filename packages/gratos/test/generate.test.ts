@@ -252,6 +252,18 @@ describe("generate", () => {
       },
     ],
     [
+      "a relative symlink reached through a symlinked directory",
+      "./link/enums.ts",
+      (dir: string) => {
+        // link/enums.ts -> ../../real/schéma.ts climbs from nested/real/, where the link really
+        // is, to real/schéma.ts; read from link/ instead, it would point outside the project.
+        mkdirSync(join(dir, "real"));
+        mkdirSync(join(dir, "nested", "real"), { recursive: true });
+        symlinkSync(join(dir, "nested", "real"), join(dir, "link"));
+        symlinkSync(`../../real/${schemaName}`, join(dir, "nested", "real", "enums.ts"));
+      },
+    ],
+    [
       "a hard link",
       "./enums.ts",
       (dir: string) => {

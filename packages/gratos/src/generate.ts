@@ -224,7 +224,13 @@ const destinationOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, pa
     if (Option.isNone(link)) {
       break;
     }
-    target = resolve(dirname(target), link.value);
+    // Relative to the link's physical directory: `..` in the target climbs from where the link
+    // really is, not from the symlinked directory it was reached through.
+    const parent = yield* Effect.option(fs.realPath(dirname(target)));
+    target = resolve(
+      Option.getOrElse(parent, () => dirname(target)),
+      link.value,
+    );
   }
   const rest: Array<string> = [];
   let current = target;
