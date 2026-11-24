@@ -1,5 +1,6 @@
 // @dblechoc/gratos-server: the GraphQL server core and its plugins (docs/plan.html M4a). The core
-// never imports `effect`; the Effect layer is the separate `@dblechoc/gratos-server/effect` entry.
+// never imports `effect`; the Effect layer is planned as a separate `@dblechoc/gratos-server/effect`
+// entry (M5), which package.json does not export yet.
 export { CLIENT_CLOSED_REQUEST, createServer } from "./core/server.ts";
 export { mutationOf, signalOf, startOf } from "./core/requestState.ts";
 export { gqlError, httpStatusOf } from "./core/errors.ts";
