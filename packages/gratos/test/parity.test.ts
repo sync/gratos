@@ -15,11 +15,12 @@ import { join, relative } from "node:path";
 
 import { Predicate, Schema } from "effect";
 import { buildASTSchema, findBreakingChanges, findDangerousChanges, parse, print } from "graphql";
-import type { DocumentNode } from "graphql";
+import { codegen as oracleCodegen } from "grats-upstream/dist/src/codegen/schemaCodegen.js";
 import { buildSchemaAndDocResult as oracleBuildSchemaAndDocResult } from "grats-upstream/dist/src/lib.js";
 import { validateGratsOptions as oracleValidateGratsOptions } from "grats-upstream/dist/src/gratsConfig.js";
 import { describe, expect, it } from "vitest";
 
+import { codegen } from "../src/upstream/codegen/schemaCodegen.ts";
 import { validateGratsOptions } from "../src/upstream/gratsConfig.ts";
 import { buildSchemaAndDocResult } from "../src/upstream/lib.ts";
 
@@ -29,14 +30,14 @@ const oracleRequire = createRequire(import.meta.resolve("grats-upstream/package.
 const oracleGraphql: unknown = oracleRequire("graphql");
 
 const OracleGraphql = Schema.Struct({ print: Schema.Any, version: Schema.String });
-const oracle = Schema.decodeUnknownSync(OracleGraphql)(oracleGraphql);
+const oracleGraphqlModule = Schema.decodeUnknownSync(OracleGraphql)(oracleGraphql);
 type Print = (doc: unknown) => string;
 const isPrint = (value: unknown): value is Print => Predicate.isFunction(value);
 const printWithOracleGraphql = (doc: unknown): string => {
-  if (!isPrint(oracle.print)) {
+  if (!isPrint(oracleGraphqlModule.print)) {
     throw new Error("oracle graphql has no print()");
   }
-  return oracle.print(doc);
+  return oracleGraphqlModule.print(doc);
 };
 
 const FixtureHeader = Schema.Struct({ tsVersion: Schema.optional(Schema.String) });
@@ -64,6 +65,10 @@ const fixtures = readdirSync(fixturesDir, { recursive: true, withFileTypes: true
   .map((entry) => relative(fixturesDir, join(entry.parentPath, entry.name)))
   .toSorted();
 
+/** Same gate as upstream's runner: fixtures with a `tsVersion` header only run on TS 5.0.2. */
+const isTsVersionGated = (fixture: string): boolean =>
+  headerOf(readFileSync(join(fixturesDir, fixture), "utf8")).tsVersion !== undefined;
+
 const optionsFor = (fileName: string, code: string) => ({
   options: {},
   raw: {
@@ -78,7 +83,8 @@ const optionsFor = (fileName: string, code: string) => ({
   fileNames: [join(fixturesDir, fileName), typesFile],
 });
 
-const oursSdl = (fileName: string, code: string): DocumentNode => {
+/** Our SDL document and generated schema.ts for a fixture. */
+const ours = (fileName: string, code: string) => {
   const options = validateGratsOptions(optionsFor(fileName, code));
   if (options.kind === "ERROR") {
     throw new Error("vendored engine rejected the config");
@@ -87,10 +93,15 @@ const oursSdl = (fileName: string, code: string): DocumentNode => {
   if (result.kind === "ERROR") {
     throw new Error("vendored engine reported diagnostics");
   }
-  return result.value.doc;
+  const { schema, doc, resolvers } = result.value;
+  return {
+    doc,
+    ts: codegen(schema, resolvers, options.value.raw.grats, join(fixturesDir, fileName)),
+  };
 };
 
-const oracleSdl = (fileName: string, code: string): string => {
+/** The oracle's SDL (printed by its graphql 16) and generated schema.ts for a fixture. */
+const oracle = (fileName: string, code: string) => {
   const options = oracleValidateGratsOptions(optionsFor(fileName, code));
   if (options.kind === "ERROR") {
     throw new Error("oracle rejected the config");
@@ -99,7 +110,11 @@ const oracleSdl = (fileName: string, code: string): string => {
   if (result.kind === "ERROR") {
     throw new Error("oracle reported diagnostics");
   }
-  return printWithOracleGraphql(result.value.doc);
+  const { schema, doc, resolvers } = result.value;
+  return {
+    sdl: printWithOracleGraphql(doc),
+    ts: oracleCodegen(schema, resolvers, options.value.raw.grats, join(fixturesDir, fileName)),
+  };
 };
 
 /** Snapshots recorded in vendor-changes.json, which lists every intentionally changed vendored file. */
@@ -112,8 +127,12 @@ const changedVendoredFiles = Object.keys(
 
 describe("parity with grats@0.0.36", () => {
   it("compares every eligible fixture", () => {
-    // 236 valid schema fixtures, plus 2 that only run on TS 5.0.2 (skipped, as upstream does).
-    expect(fixtures.length).toBe(238);
+    // 236 valid schema fixtures compared live; 2 only run on TS 5.0.2 and are skipped, as upstream does.
+    expect(fixtures.filter((fixture) => !isTsVersionGated(fixture))).toHaveLength(236);
+    expect(fixtures.filter(isTsVersionGated)).toEqual([
+      "descriptions/DescriptionWithGitHubHandle.ts",
+      "user_error/TypeErrorWithTypeCheckingEnabled.ts",
+    ]);
   });
 
   it("keeps upstream's recorded query results and generated TypeScript", () => {
@@ -137,19 +156,21 @@ describe("parity with grats@0.0.36", () => {
   });
 
   it("runs the oracle on graphql 16", () => {
-    expect(oracle.version.startsWith("16.")).toBe(true);
+    expect(oracleGraphqlModule.version.startsWith("16.")).toBe(true);
   });
 
   for (const fixture of fixtures) {
     const code = readFileSync(join(fixturesDir, fixture), "utf8");
-    // Same gate as upstream's runner: these fixtures only run on TS 5.0.2.
-    const skip = headerOf(code).tsVersion !== undefined;
-    it.skipIf(skip)(fixture, () => {
-      const ours = oursSdl(fixture, code);
-      const theirs = parse(oracleSdl(fixture, code));
-      expect(print(ours)).toBe(print(theirs));
+    it.skipIf(isTsVersionGated(fixture))(fixture, () => {
+      const mine = ours(fixture, code);
+      const reference = oracle(fixture, code);
+      // Generated schema.ts: same TypeScript 5.9.2 printer on both sides, so byte for byte.
+      expect(mine.ts).toBe(reference.ts);
 
-      const oursSchema = buildASTSchema(ours, { assumeValidSDL: true });
+      const theirs = parse(reference.sdl);
+      expect(print(mine.doc)).toBe(print(theirs));
+
+      const oursSchema = buildASTSchema(mine.doc, { assumeValidSDL: true });
       const theirsSchema = buildASTSchema(theirs, { assumeValidSDL: true });
       expect(findBreakingChanges(theirsSchema, oursSchema)).toEqual([]);
       expect(findDangerousChanges(theirsSchema, oursSchema)).toEqual([]);
