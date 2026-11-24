@@ -20,6 +20,11 @@ export const serverTiming = (): Plugin => {
       }
     },
     onResponse: (response, request) => {
+      // A network error (`Response.error()`, status 0) cannot be rebuilt: new Response() throws
+      // for status 0. It carries no headers anyway, so it is left as it is.
+      if (response.status === 0) {
+        return undefined;
+      }
       const entries = (phases.get(request) ?? []).map(
         ({ name, start, end }) => `${name};dur=${ms(end - start)}`,
       );

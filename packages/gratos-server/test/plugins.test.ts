@@ -329,6 +329,19 @@ describe("serverTiming()", () => {
     expect(signalOf(request)?.aborted).toBe(true);
   });
 
+  it("leaves a network-error Response (status 0) alone instead of failing", async () => {
+    const error = vi.fn();
+    const server = createServer({
+      schema: basicSchema(),
+      logger: { warn: () => {}, error },
+      plugins: [{ onRequest: () => Response.error() }, serverTiming()],
+    });
+    const response = await server.handle(post({ query: "{ count }" }));
+    expect(response.type).toBe("error");
+    expect(response.status).toBe(0);
+    expect(error).not.toHaveBeenCalled();
+  });
+
   it("a null body (405) stays null", async () => {
     const events: Array<string> = [];
     const server = createServer({
@@ -339,6 +352,7 @@ describe("serverTiming()", () => {
     expect(response.status).toBe(405);
     expect(response.body).toBeNull();
     expect(response.headers.get("allow")).toBe("POST");
+    expect(response.headers.get("server-timing")).toMatch(/^total;dur=[\d.]+$/);
     expect(events).toEqual(["ended: no body"]);
   });
 });
