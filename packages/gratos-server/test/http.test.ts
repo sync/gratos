@@ -89,6 +89,11 @@ describe("406: unsupported Accept", () => {
     ["application/json;q=0"],
     ["application/json; charset=utf-16"],
     ['application/graphql-response+json;charset="iso-8859-1", */*;charset=utf-16'],
+    // The charset is read wherever `q` sits.
+    ["application/graphql-response+json;q=1;charset=utf-16"],
+    ["application/json;q=0.5;charset=utf-16"],
+    // A range with a parameter the core never sends cannot accept its representations.
+    ['application/json;profile="special"'],
   ])("%s", async (accept) => {
     const sent = await send(server, post({ query: "{count}" }, { accept }));
     expect(sent.status).toBe(406);
@@ -111,6 +116,12 @@ describe("Accept negotiation", () => {
     ["application/graphql-response+json; charset=utf-16, application/json;q=0.5", JSON_],
     ["application/json;charset=utf-16, application/*;q=0.2", GRJ],
     ["application/json;charset=utf-8;q=0.4, application/json;q=0, */*;q=0.3", JSON_],
+    ["application/json;q=0.4;charset=utf-8, application/json;q=0, */*;q=0.3", JSON_],
+    // A range with a parameter the core never sends does not match, so its q=0 refuses nothing.
+    [
+      'application/graphql-response+json, application/graphql-response+json;profile="special";q=0',
+      GRJ,
+    ],
   ])("%s gives %s", async (accept, contentType) => {
     const sent = await send(server, post({ query: "{count}" }, { accept }));
     expect(sent.status).toBe(200);

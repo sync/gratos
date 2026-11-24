@@ -35,51 +35,52 @@ interface MediaRange {
   readonly range: string;
   /** The `charset` parameter, lowercased and unquoted, when the range names one. */
   readonly charset: string | undefined;
-  readonly hasParameters: boolean;
+  /** A parameter other than `charset` and `q`, which no representation of the core carries. */
+  readonly hasOtherParameters: boolean;
   readonly quality: number;
 }
 
 const parseRange = (part: string): MediaRange => {
   const [range = "", ...pieces] = part.split(";").map((piece) => piece.trim().toLowerCase());
   let charset: string | undefined;
-  let hasParameters = false;
+  let hasOtherParameters = false;
   let quality = 1;
+  // Every parameter is read, wherever `q` sits: clients write `charset` after `q` too.
   for (const piece of pieces) {
     const equals = piece.indexOf("=");
     const name = (equals === -1 ? piece : piece.slice(0, equals)).trim();
     const value = unquote(equals === -1 ? "" : piece.slice(equals + 1).trim());
-    if (name === "q") {
-      // `q` ends the media-range parameters; what follows are accept-extensions.
-      const parsed = Number(value);
-      quality = Number.isFinite(parsed) ? parsed : 0;
-      break;
-    }
     if (name === "") {
       continue;
     }
-    hasParameters = true;
-    if (name === "charset") {
+    if (name === "q") {
+      const parsed = Number(value);
+      quality = Number.isFinite(parsed) ? parsed : 0;
+    } else if (name === "charset") {
       charset = value;
+    } else {
+      hasOtherParameters = true;
     }
   }
-  return { range, charset, hasParameters, quality };
+  return { range, charset, hasOtherParameters, quality };
 };
 
 /**
  * 0 when the range does not match the type as the core sends it (`; charset=utf-8`), else its
- * specificity: the rank, doubled, plus one when the range has parameters (RFC 9110 §12.5.1: a
- * more specific range takes precedence). Only `charset` is compared: the core's representations
- * carry no other parameter, and GraphQL over HTTP defines none.
+ * specificity: the rank, doubled, plus one when the range names the charset (RFC 9110 §12.5.1: a
+ * more specific range takes precedence). A range with a charset other than utf-8, or with any
+ * other parameter (the core's representations carry none), does not match, so it can neither
+ * accept nor, with q=0, refuse what the core sends.
  */
 const specificity = (
-  { range, charset, hasParameters }: MediaRange,
+  { range, charset, hasOtherParameters }: MediaRange,
   mediaType: MediaType,
 ): number => {
   const rank = rangeRank(range, mediaType);
-  if (rank === 0 || (charset !== undefined && !UTF8.test(charset))) {
+  if (rank === 0 || hasOtherParameters || (charset !== undefined && !UTF8.test(charset))) {
     return 0;
   }
-  return rank * 2 + (hasParameters ? 1 : 0);
+  return rank * 2 + (charset === undefined ? 0 : 1);
 };
 
 /**
