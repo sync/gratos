@@ -442,6 +442,11 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
       return context.response;
     }
     const { ctx } = context;
+    // A drain that started during the context phase refuses the mutation before any onExecute
+    // hook can refuse it for another reason (the gate checks again right before dispatch).
+    if (run.mutation !== undefined && draining) {
+      return respond(run, errorResult([serverDraining()]));
+    }
 
     // execute
     const args: ExecutionArgs = {

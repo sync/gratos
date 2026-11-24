@@ -9,6 +9,7 @@ import {
   CLIENT_CLOSED_REQUEST,
   createServer,
   mutationOf,
+  readOnly,
   signalOf,
   startOf,
 } from "../src/index.ts";
@@ -459,6 +460,24 @@ describe("control.drain", () => {
       expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
       expect(executor).not.toHaveBeenCalled();
       expect(events).toEqual([]);
+      expect(await mutationOf(request)?.started).toBe(false);
+    });
+
+    it("a drain during the context factory wins over an onExecute refusal (503, not 403)", async () => {
+      const context = gate();
+      const server = createServer({
+        schema: basicSchema(),
+        context: () => context.promise.then(() => ({})),
+        plugins: [readOnly()],
+      });
+      const request = post({ query: "mutation { bump }" });
+      const pending = send(server, request);
+      await flush();
+      await server.control.drain();
+      context.resolve();
+      const sent = await pending;
+      expect(sent.status).toBe(503);
+      expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
       expect(await mutationOf(request)?.started).toBe(false);
     });
 
