@@ -335,6 +335,23 @@ describe("getParsedCommandLineOfConfigFile", () => {
     );
   });
 
+  it("reports a tsconfig syntax error at its place instead of throwing", () => {
+    const text =
+      '{\n  "grats": { "reportTypeScriptTypeErrors": true },\n  "compilerOptions" { "strict": true }\n}\n';
+    const directory = project({ "tsconfig.json": text, "a.ts": "export const a = 1;\n" });
+    const parsed = getParsedCommandLineOfConfigFile(join(directory, "tsconfig.json"));
+    expect(parsed.errors.map((error) => error.code)).toEqual([1005]);
+    expect(parsed.errors[0]?.start).toBe(text.indexOf('{ "strict"'));
+    expect(format(parsed.errors, directory)).toBe(
+      "tsconfig.json:3:21 - error TS1005: ':' expected.\n\n" +
+        '3   "compilerOptions" { "strict": true }\n' +
+        `${" ".repeat(22)}~\n`,
+    );
+    // The partial `grats` key of a config with syntax errors is not read.
+    expect(parsed.raw).toBeUndefined();
+    expect(parsed.program.session.blankThirdParty).toBe(true);
+  });
+
   it("reads a tsconfig that starts with a byte order mark", () => {
     const directory = project({
       "tsconfig.json": `\uFEFF${JSON.stringify({ grats: { tsSchema: "./schema.ts" } })}`,

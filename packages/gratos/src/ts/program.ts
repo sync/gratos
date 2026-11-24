@@ -511,18 +511,27 @@ export const findConfigFile = (
 };
 
 /**
- * The root tsconfig's JSON, read with comments and trailing commas allowed. Only this file is
- * read: its top-level `grats` key is the Grats config, with no `extends` merging (TypeScript 5's
- * `raw` behaved the same way).
+ * The root tsconfig's JSON, read with comments and trailing commas allowed, or `undefined` when
+ * it is not valid JSON with comments. Only this file is read: its top-level `grats` key is the
+ * Grats config, with no `extends` merging (TypeScript 5's `raw` behaved the same way).
  */
-export const readRawConfig = (configFile: string): unknown => {
+const parseRawConfig = (configFile: string): { readonly raw: unknown } | undefined => {
   const errors: Array<ParseError> = [];
   const text = decodeText(readFileSync(configFile));
   const raw: unknown = parseJsonc(text, errors, { allowTrailingComma: true });
-  if (errors.length > 0) {
-    throw new Error(`Gratos: could not parse ${configFile} as JSON with comments`);
+  return errors.length > 0 ? undefined : { raw };
+};
+
+const unparsableConfig = (configFile: string): Error =>
+  new Error(`Gratos: could not parse ${configFile} as JSON with comments`);
+
+/** The root tsconfig's JSON, as parseRawConfig reads it; throws when it is not valid. */
+export const readRawConfig = (configFile: string): unknown => {
+  const parsed = parseRawConfig(configFile);
+  if (parsed === undefined) {
+    throw unparsableConfig(configFile);
   }
-  return raw;
+  return parsed.raw;
 };
 
 const reportsTypeScriptErrors = (raw: unknown): boolean => {
@@ -553,10 +562,17 @@ export const getParsedCommandLineOfConfigFile = (
   _host?: unknown,
 ): ParsedCommandLine => {
   const configPath = resolve(configFile);
-  const raw = readRawConfig(configPath);
+  // A tsconfig with syntax errors is left to TypeScript, which reports them with their place as
+  // config diagnostics. Its partial `grats` key is never read.
+  const rawConfig = parseRawConfig(configPath);
+  const raw = rawConfig?.raw;
   const blankThirdParty = !reportsTypeScriptErrors(raw);
   const session = restartDefaultSession(blankThirdParty);
   const program = makeProgram(session, openProject(session, configPath));
+  const errors = program.getConfigFileParsingDiagnostics();
+  if (rawConfig === undefined && errors.length === 0) {
+    throw unparsableConfig(configPath);
+  }
   const options = {
     ...Object.fromEntries(Object.entries(program.project.compilerOptions)),
     configFilePath: configPath,
@@ -572,7 +588,7 @@ export const getParsedCommandLineOfConfigFile = (
   return {
     options,
     fileNames: [...fileNames],
-    errors: program.getConfigFileParsingDiagnostics(),
+    errors,
     raw,
     program,
   };
