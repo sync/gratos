@@ -1,0 +1,13 @@
+This package vendors Grats (https://github.com/captbaritone/grats), MIT License,
+Copyright (c) 2024 Jordan Eldredge. See LICENSE.
+
+Vendored from tag v0.0.36, commit 5ab66166446b4f80263cda1a13de7d3a69a1c2f8:
+  upstream src/ (without src/tests/)      -> src/upstream/
+  upstream src/tests/fixtures/            -> test/fixtures/
+  upstream src/tests/integrationFixtures/ -> test/integrationFixtures/
+  upstream src/tests/configParserFixtures/-> test/configParserFixtures/
+  upstream llm-docs/                      -> llm-docs/
+  upstream LICENSE                        -> LICENSE
+
+`pnpm --filter @dblechoc/gratos vendor:verify` proves these files are byte-identical
+to upstream. Later milestones change them only in separate, listed commits.

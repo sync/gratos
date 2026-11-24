@@ -10,6 +10,8 @@ reviews:
     - "!packages/gratos/src/upstream/**"
     - "!packages/gratos/test/fixtures/**"
     - "!packages/gratos/test/integrationFixtures/**"
+    - "!packages/gratos/test/configParserFixtures/**"
+    - "!packages/gratos/LICENSE"
     - "!.agents/**"
     - "!pnpm-lock.yaml"
     - "!docs/plan.html"

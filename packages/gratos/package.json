@@ -2,6 +2,7 @@
   "name": "@dblechoc/gratos",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -10,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "codegen": "node -e \"console.log('codegen: nothing to generate yet (M2)')\"",
-    "codegen:check": "node -e \"console.log('codegen:check: nothing to check yet (M2)')\""
+    "codegen:check": "node -e \"console.log('codegen:check: nothing to check yet (M2)')\"",
+    "vendor:verify": "node scripts/verify-vendor.ts"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
