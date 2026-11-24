@@ -2,9 +2,10 @@
 //
 // TypeScript 7 opens programs only from a tsconfig. Programs built from a tsconfig that
 // getParsedCommandLineOfConfigFile read open that real tsconfig, with fast loading unless the
-// Grats config asks for TypeScript errors. Any other program (the fixture harness, API users)
-// gets a virtual tsconfig with explicit `files` and the given compiler options, served by the
-// session's readFile callback, and loads every file in full.
+// Grats config asks for TypeScript errors; with other roots or options, a virtual tsconfig
+// extends it. Any other program (the fixture harness, API users) gets a virtual tsconfig with
+// explicit `files` and the given compiler options, served by the session's readFile callback,
+// and loads every file in full.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -209,8 +210,18 @@ export const getPreEmitDiagnostics = (
   ]);
 };
 
+/** A config read by getParsedCommandLineOfConfigFile, and the program last opened for it. */
+interface ParsedConfig {
+  readonly configPath: string;
+  readonly session: Session;
+  readonly fileNames: ReadonlyArray<string>;
+  /** The options as returned, to tell whether a caller changed them since. */
+  readonly optionsJson: string;
+  program: FacadeProgram;
+}
+
 /** Configs read by getParsedCommandLineOfConfigFile, keyed by the options object it returned. */
-const parsedConfigs = new WeakMap<CompilerOptions, { readonly program: FacadeProgram }>();
+const parsedConfigs = new WeakMap<CompilerOptions, ParsedConfig>();
 
 export const createCompilerHost = (
   options: CompilerOptions,
@@ -315,6 +326,57 @@ const toTsconfigOptions = (options: CompilerOptions): CompilerOptions =>
 
 let virtualConfigCount = 0;
 
+/** Opens a virtual tsconfig with these contents on `session`. */
+const openVirtualProgram = (session: Session, tsconfig: unknown): FacadeProgram => {
+  virtualConfigCount += 1;
+  const configPath = join(
+    process.cwd(),
+    `__gratos_virtual_${process.pid}_${virtualConfigCount}__.tsconfig.json`,
+  );
+  session.virtualFiles.set(configPath, JSON.stringify(tsconfig));
+  return makeProgram(session, openProject(session, configPath));
+};
+
+const sameFileNames = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean =>
+  a.length === b.length && a.every((fileName, i) => resolve(fileName) === resolve(b[i] ?? ""));
+
+/**
+ * The program for a config read by getParsedCommandLineOfConfigFile. Its own program is reused
+ * only while it is still the session's open project and the caller kept its roots and options.
+ * After another project was opened on the session, the config is reopened. With other roots or
+ * options, a virtual tsconfig extends it with exactly those roots and the changed options.
+ */
+const programForParsedConfig = (
+  parsed: ParsedConfig,
+  rootNames: ReadonlyArray<string>,
+  options: CompilerOptions,
+): FacadeProgram => {
+  const { session, configPath } = parsed;
+  const sameOptions = JSON.stringify(options) === parsed.optionsJson;
+  if (sameOptions && sameFileNames(rootNames, parsed.fileNames)) {
+    if (session.current?.project !== parsed.program.project) {
+      parsed.program = makeProgram(session, openProject(session, configPath));
+    }
+    return parsed.program;
+  }
+  const original: CompilerOptions = JSON.parse(parsed.optionsJson);
+  const changed = Object.fromEntries(
+    Object.keys({ ...original, ...options }).flatMap((key): Array<[string, unknown]> => {
+      if (JSON.stringify(options[key]) === JSON.stringify(original[key])) {
+        return [];
+      }
+      // A removed option is reset to its default with null, as in an extending tsconfig.
+      return [[key, options[key] ?? null]];
+    }),
+  );
+  return openVirtualProgram(session, {
+    extends: configPath,
+    compilerOptions: toTsconfigOptions(changed),
+    files: rootNames.map((fileName) => resolve(fileName)),
+    include: [],
+  });
+};
+
 /** TypeScript 5's createProgram(rootNames, options, host). */
 export const createProgram = (
   rootNames: ReadonlyArray<string>,
@@ -323,22 +385,12 @@ export const createProgram = (
 ): FacadeProgram => {
   const parsed = parsedConfigs.get(options);
   if (parsed !== undefined) {
-    return parsed.program;
+    return programForParsedConfig(parsed, rootNames, options);
   }
-  const session = defaultSession(false);
-  virtualConfigCount += 1;
-  const configPath = join(
-    process.cwd(),
-    `__gratos_virtual_${process.pid}_${virtualConfigCount}__.tsconfig.json`,
-  );
-  session.virtualFiles.set(
-    configPath,
-    JSON.stringify({
-      compilerOptions: toTsconfigOptions(options),
-      files: rootNames.map((fileName) => resolve(fileName)),
-    }),
-  );
-  return makeProgram(session, openProject(session, configPath));
+  return openVirtualProgram(defaultSession(false), {
+    compilerOptions: toTsconfigOptions(options),
+    files: rootNames.map((fileName) => resolve(fileName)),
+  });
 };
 
 /** The project of the most recent program on any session, for the printer. */
@@ -413,7 +465,7 @@ const reportsTypeScriptErrors = (raw: unknown): boolean => {
 /**
  * TypeScript 5's getParsedCommandLineOfConfigFile. It opens the project right away: TypeScript
  * 7 reports config errors only on a project. A later createProgram with the returned options
- * reuses that project.
+ * and file names reuses that project while it is open (see programForParsedConfig).
  */
 export const getParsedCommandLineOfConfigFile = (
   configFile: string,
@@ -428,7 +480,13 @@ export const getParsedCommandLineOfConfigFile = (
     ...Object.fromEntries(Object.entries(program.project.compilerOptions)),
     configFilePath: configPath,
   };
-  parsedConfigs.set(options, { program });
+  parsedConfigs.set(options, {
+    configPath,
+    session,
+    fileNames: program.project.rootFiles,
+    optionsJson: JSON.stringify(options),
+    program,
+  });
   return {
     options,
     fileNames: program.project.rootFiles,

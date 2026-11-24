@@ -9,7 +9,8 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { formatDiagnosticsWithColorAndContext } from "../src/ts/diagnostics.ts";
 import type { Diagnostic } from "../src/ts/diagnostics.ts";
-import { getParsedCommandLineOfConfigFile } from "../src/ts/program.ts";
+import { createProgram, getParsedCommandLineOfConfigFile } from "../src/ts/program.ts";
+import type { FacadeProgram } from "../src/ts/program.ts";
 import { closeDefaultSessions } from "../src/ts/session.ts";
 
 const directories: Array<string> = [];
@@ -35,6 +36,9 @@ afterAll(() => {
 const tsconfig = (compilerOptions: { readonly target?: string } = {}): string =>
   JSON.stringify({ compilerOptions: { strict: true, ...compilerOptions } }, null, 2);
 
+const sourceFileNames = (program: FacadeProgram): Array<string> =>
+  program.getSourceFiles().map((sourceFile) => sourceFile.fileName);
+
 const format = (diagnostics: ReadonlyArray<Diagnostic>, directory: string): string =>
   stripVTControlCharacters(
     formatDiagnosticsWithColorAndContext(diagnostics, {
@@ -43,6 +47,53 @@ const format = (diagnostics: ReadonlyArray<Diagnostic>, directory: string): stri
       getNewLine: () => "\n",
     }),
   );
+
+describe("createProgram with the options of a parsed config", () => {
+  it("reuses the parsed config's program for the same roots and options", () => {
+    const directory = project({ "tsconfig.json": tsconfig(), "a.ts": "export const a = 1;\n" });
+    const parsed = getParsedCommandLineOfConfigFile(join(directory, "tsconfig.json"));
+    expect(createProgram(parsed.fileNames, parsed.options)).toBe(parsed.program);
+  });
+
+  it("loads only the given roots when they are fewer than the config's", () => {
+    const directory = project({
+      "tsconfig.json": tsconfig(),
+      "a.ts": "export const f = (x) => x;\n",
+      "b.ts": "export const b = 2;\n",
+    });
+    const parsed = getParsedCommandLineOfConfigFile(join(directory, "tsconfig.json"));
+    expect(sourceFileNames(parsed.program)).toEqual([
+      join(directory, "a.ts"),
+      join(directory, "b.ts"),
+    ]);
+
+    const program = createProgram([join(directory, "a.ts")], parsed.options);
+    expect(sourceFileNames(program)).toEqual([join(directory, "a.ts")]);
+    // The config's options still apply: strict reports the implicit any.
+    expect(program.getSemanticDiagnostics().map((diagnostic) => diagnostic.code)).toEqual([7006]);
+  });
+
+  it("reopens the parsed config after another project was opened", () => {
+    const first = project({ "tsconfig.json": tsconfig(), "a.ts": "export const a = 1;\n" });
+    const second = project({ "tsconfig.json": tsconfig(), "b.ts": "export const b = 2;\n" });
+    const parsed = getParsedCommandLineOfConfigFile(join(first, "tsconfig.json"));
+    getParsedCommandLineOfConfigFile(join(second, "tsconfig.json"));
+
+    const program = createProgram(parsed.fileNames, parsed.options);
+    expect(sourceFileNames(program)).toEqual([join(first, "a.ts")]);
+    expect(program.getSemanticDiagnostics()).toEqual([]);
+  });
+
+  it("applies options the caller changed", () => {
+    const directory = project({
+      "tsconfig.json": tsconfig(),
+      "a.ts": "export const f = (x) => x;\n",
+    });
+    const parsed = getParsedCommandLineOfConfigFile(join(directory, "tsconfig.json"));
+    const program = createProgram(parsed.fileNames, { ...parsed.options, noImplicitAny: false });
+    expect(program.getSemanticDiagnostics()).toEqual([]);
+  });
+});
 
 describe("getParsedCommandLineOfConfigFile", () => {
   it("sees a source file edited since the config was last parsed", () => {
