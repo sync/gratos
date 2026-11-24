@@ -1,6 +1,6 @@
 // The TypeScript 7 facade's programs and config reading on real tsconfigs in temporary
 // directories: program reuse, edits between parses, config diagnostics and byte order marks.
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -165,6 +165,30 @@ describe("getParsedCommandLineOfConfigFile", () => {
     const deleted = getParsedCommandLineOfConfigFile(configPath);
     expect(deleted.fileNames).toEqual([join(directory, "b.ts")]);
     expect(sourceFileNames(deleted.program)).toEqual([join(directory, "b.ts")]);
+  });
+
+  it("loads a root file in full once its symlink points out of node_modules", () => {
+    // A root file keeps its own path in the program, so it was blanked under that path while
+    // the symlink pointed into node_modules.
+    const text = "export const shared = 2;\n";
+    const directory = project({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+      "src/main.ts": "export const m = 1;\n",
+      "node_modules/dep/shared.ts": "export const shared = 1;\n",
+      "packages/dep/shared.ts": text,
+    });
+    const configPath = join(directory, "tsconfig.json");
+    const link = join(directory, "src", "shared.ts");
+    symlinkSync(join(directory, "node_modules", "dep", "shared.ts"), link);
+    expect(sourceFileNames(getParsedCommandLineOfConfigFile(configPath).program)).toEqual([
+      join(directory, "src", "main.ts"),
+    ]);
+
+    unlinkSync(link);
+    symlinkSync(join(directory, "packages", "dep", "shared.ts"), link);
+    const program = getParsedCommandLineOfConfigFile(configPath).program;
+    expect(sourceFileNames(program)).toEqual([join(directory, "src", "main.ts"), link]);
+    expect(program.getSourceFile(link)?.text).toBe(text);
   });
 
   it("reports an invalid compiler option at its place in the tsconfig", () => {
