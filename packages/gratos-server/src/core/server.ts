@@ -399,6 +399,12 @@ const serve = <Ctx>(
       }
     } catch (error) {
       if (error instanceof GraphQLError) {
+        // Precedence for an operation that never started: drain (an unstarted mutation, inside
+        // `refuse`), then disconnect (a cancellation, like an ordinary failure below), then the
+        // refusal itself.
+        if (!drainRefuses(run) && run.controller.signal.aborted) {
+          return answer(new Response(null, { status: CLIENT_CLOSED_REQUEST }));
+        }
         return answer(refuse(run, error));
       }
       // Any other throw is a failure of the request, before anything started.

@@ -136,7 +136,9 @@ export interface Plugin<Ctx = unknown> {
    * Claims the operation by returning an executor, or returns nothing. Synchronous. Every
    * onExecute hook runs, in list order, before anything executes; the first executor returned is
    * called (see `Executor`). A thrown GraphQLError refuses the operation with that error (status
-   * from `gqlError`, else 400), whatever executors earlier hooks returned: no executor runs.
+   * from `gqlError`, else 400), whatever executors earlier hooks returned: no executor runs. Two
+   * outcomes take precedence over the refusal, in this order: a mutation is refused with 503
+   * SERVER_DRAINING once the drain has begun, and a request whose client has left gets 499.
    * Because a later hook may still refuse, a hook keeps work that should happen only for an
    * operation that runs inside the executor it returns.
    */

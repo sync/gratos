@@ -373,6 +373,62 @@ describe("a mutation that fails before dispatch after the client left", () => {
   });
 });
 
+describe("an onExecute refusal after the client left", () => {
+  it.each([
+    ["a query", "{ count }"],
+    ["a mutation", "mutation { bump }"],
+  ])("%s is a cancellation (499), like an ordinary onExecute failure", async (_name, query) => {
+    const context = gate();
+    const onResult = vi.fn();
+    const server = createServer({
+      schema: basicSchema(),
+      context: () => context.promise.then(() => ({})),
+      plugins: [
+        {
+          onExecute: () => {
+            throw gqlError("Not allowed", 403);
+          },
+          onResult,
+        },
+      ],
+    });
+    const client = new AbortController();
+    const request = post({ query }, { signal: client.signal });
+    const pending = server.handle(request);
+    await flush();
+    client.abort();
+    context.resolve();
+    const response = await pending;
+    expect(response.status).toBe(CLIENT_CLOSED_REQUEST);
+    expect(response.body).toBeNull();
+    expect(onResult).not.toHaveBeenCalled();
+    expect(await mutationOf(request)?.started).toBe(
+      query.startsWith("mutation") ? false : undefined,
+    );
+  });
+
+  it("a drain still wins for an unstarted mutation (drain > disconnect > refusal)", async () => {
+    const client = new AbortController();
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        {
+          onExecute: () => {
+            void server.control.drain();
+            client.abort();
+            throw gqlError("Not allowed", 403);
+          },
+        },
+      ],
+    });
+    const request = post({ query: "mutation { bump }" }, { signal: client.signal });
+    const sent = await send(server, request);
+    expect(sent.status).toBe(503);
+    expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
+    expect(await mutationOf(request)?.started).toBe(false);
+  });
+});
+
 describe("completion of a disconnected mutation", () => {
   it("settled and the drain wait until onResult has seen the result", async () => {
     const hold = gate();
