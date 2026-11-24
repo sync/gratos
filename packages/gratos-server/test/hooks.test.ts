@@ -42,6 +42,19 @@ describe("onServer", () => {
     expect(server.control.generation()).toBe(1);
   });
 
+  it("once an async startup is done, a request keeps the schema it pinned at handle() entry", async () => {
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [{ onServer: () => Promise.resolve() }],
+    });
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
+    // Started before replaceSchema: it finishes on generation 0.
+    const pending = gql(server, "{ count }");
+    server.control.replaceSchema(basicSchema({ Query: { count: () => 2 } }));
+    expect((await pending).body).toEqual({ data: { count: 1 } });
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 2 } });
+  });
+
   it("a synchronous throw fails createServer", () => {
     expect(() =>
       createServer({

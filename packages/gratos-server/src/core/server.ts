@@ -184,7 +184,9 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
   };
 
   // onServer hooks run in order. Synchronous ones run (and throw) inside createServer; once one
-  // returns a Promise, the rest run after it and requests wait for them.
+  // returns a Promise, the rest run after it and requests wait for them. `ready` is the startup
+  // barrier: it is cleared once startup succeeds, so later requests keep the schema they pinned at
+  // handle() entry. A failed startup keeps it, and every request gets a 500.
   let ready: Promise<void> | undefined;
   for (const [index, hook] of onServer.entries()) {
     const returned = hook({ schema, control });
@@ -195,6 +197,7 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
         for (const next of rest) {
           await settle(next({ schema, control }));
         }
+        ready = undefined;
       })();
       // A failed startup answers every request with a 500 (handle awaits `ready`).
       ready.catch((error: unknown) => {
@@ -520,6 +523,7 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
     let response: Response;
     try {
       if (ready !== undefined) {
+        // Arrived during startup: pin the schema startup leaves (onServer may replace it).
         await ready;
         run.schema = schema;
         run.generation = generation;
