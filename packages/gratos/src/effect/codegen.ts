@@ -7,6 +7,11 @@
 // - "effectSemanticNonNull": a semantically non-null field whose resolver returns `Effect.Effect`
 //   gets `extensions: { gratos: { semanticNonNull: true } }` instead of `assertNonNull`, which
 //   would only ever see the (never null) Effect object. The Effect layer checks the value.
+// - "effectResolvers": a field backed by a same-name `Effect.Effect` property or getter gets an
+//   explicit `resolve` (`return source.name;`) instead of graphql-js' default resolver. The
+//   Effect layer (docs/plan.html M5) wraps each field's resolve to run the Effect it returns and,
+//   with the `semanticNonNull` marker, check its success value; a field without a resolve would
+//   hand the unrun Effect to graphql-js.
 //
 // The markers merge into the one `extensions` object upstream emits for directives
 // (`{ grats: { directives } }`), so no field ever gets a second `extensions` property.
@@ -19,12 +24,17 @@ import type { ResolverDefinition } from "../upstream/metadata.ts";
 import { SEMANTIC_NON_NULL_DIRECTIVE } from "../upstream/publicDirectives.ts";
 import "./astExtensions.ts";
 
-export type CodegenDelta = "methodResolvers" | "jitMarker" | "effectSemanticNonNull";
+export type CodegenDelta =
+  | "methodResolvers"
+  | "jitMarker"
+  | "effectSemanticNonNull"
+  | "effectResolvers";
 
 export const ALL_CODEGEN_DELTAS: ReadonlySet<CodegenDelta> = new Set([
   "methodResolvers",
   "jitMarker",
   "effectSemanticNonNull",
+  "effectResolvers",
 ]);
 
 let enabledDeltas: ReadonlySet<CodegenDelta> = ALL_CODEGEN_DELTAS;
@@ -55,6 +65,13 @@ export const withUpstreamCodegen = <A>(f: () => A): A => withCodegenDeltas(new S
 
 /** Whether codegen must give a method field an explicit resolve (spec §8). */
 export const alwaysResolveMethods = (): boolean => isCodegenDeltaEnabled("methodResolvers");
+
+/**
+ * Whether codegen must give a field an explicit resolve although its resolver signature is
+ * graphql-js' default (a same-name property or getter): it returns `Effect.Effect`.
+ */
+export const alwaysResolveEffect = (field: GraphQLField<unknown, unknown> | undefined): boolean =>
+  isCodegenDeltaEnabled("effectResolvers") && field?.astNode?.returnsEffect === true;
 
 /**
  * Whether the field's semantic non-null check belongs to the Effect layer rather than to a

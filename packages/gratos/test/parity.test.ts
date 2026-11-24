@@ -6,9 +6,10 @@
 // findBreakingChanges / findDangerousChanges must also report nothing in either direction.
 //
 // The generated schema.ts is compared live too, byte for byte, with Gratos' codegen deltas
-// (src/effect/codegen.ts: explicit method resolvers, the jit and semanticNonNull markers) turned
-// off through the internal withUpstreamCodegen switch. Each delta is then attributed: turned on
-// alone, it changes exactly the fixtures it applies to, and nothing else.
+// (src/effect/codegen.ts: explicit method and Effect property resolvers, the jit and
+// semanticNonNull markers) turned off through the internal withUpstreamCodegen switch. Each delta
+// is then attributed: turned on alone, it changes exactly the fixtures it applies to, and
+// nothing else.
 //
 // Query results are compared with upstream's own recordings: the integration fixtures'
 // `.expected.md` snapshots. The check below proves from vendor-changes.json that none of them
@@ -182,14 +183,16 @@ const appliesTo: Record<CodegenDelta, (mine: ReturnType<typeof ours>) => boolean
         resolver.kind !== "property" &&
         (resolver.arguments ?? []).some((argument) => argument.kind === "information"),
     ),
-  // An Effect.Effect resolver: upstream fixtures have none.
+  // An Effect.Effect resolver or property: upstream fixtures have none.
   effectSemanticNonNull: () => false,
+  effectResolvers: () => false,
 };
 
 const DELTAS: ReadonlyArray<CodegenDelta> = [
   "methodResolvers",
   "jitMarker",
   "effectSemanticNonNull",
+  "effectResolvers",
 ];
 
 /** Per delta, the fixtures whose schema.ts it changes; filled by the per-fixture tests. */
@@ -197,6 +200,7 @@ const changedBy: Record<CodegenDelta | "any", Set<string>> = {
   methodResolvers: new Set(),
   jitMarker: new Set(),
   effectSemanticNonNull: new Set(),
+  effectResolvers: new Set(),
   any: new Set(),
 };
 
@@ -258,11 +262,13 @@ describe("parity with grats@0.0.36", () => {
       methodResolvers: changedBy.methodResolvers.size,
       jitMarker: changedBy.jitMarker.size,
       effectSemanticNonNull: changedBy.effectSemanticNonNull.size,
+      effectResolvers: changedBy.effectResolvers.size,
       any: changedBy.any.size,
     }).toEqual({
       methodResolvers: METHOD_RESOLVER_FIXTURES,
       jitMarker: JIT_MARKER_FIXTURES,
       effectSemanticNonNull: 0,
+      effectResolvers: 0,
       any: CHANGED_FIXTURES,
     });
   });
