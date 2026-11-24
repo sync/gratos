@@ -18,5 +18,6 @@ TypeScripts (TypeScript 7, then TypeScript 5.9.2 in the parity run), with the sa
   explicit `resolve` makes (a source may omit the method; test/optionalMethod.test.ts runs it).
 - `resolverMap/`: with `EXPERIMENTAL__emitResolverMap`, `Effect.Effect` fields (functions,
   methods, properties, getters) and `Stream.Stream` subscriptions are rejected: the resolver map
-  has no generated `resolve`, `subscribe` or `gratos` markers for the Effect layer. Fields without
-  Effect or Stream still compile.
+  has no generated `resolve`, `subscribe` or `gratos` markers for the Effect layer. So are
+  resolvers with a `GqlInfo` parameter, which need the `jit: false` marker. Other fields still
+  compile.

@@ -38,3 +38,6 @@ export const effectWithResolverMap = (): string =>
 
 export const streamWithResolverMap = (): string =>
   "Expected no `Stream.Stream` subscription when `EXPERIMENTAL__emitResolverMap` is enabled. The resolver map has no `subscribe` for the Gratos Effect layer to turn the Stream into an AsyncIterable. Turn off `EXPERIMENTAL__emitResolverMap`, or return an `AsyncIterable`.";
+
+export const infoWithResolverMap = (): string =>
+  "Expected no resolver with a `GqlInfo` parameter when `EXPERIMENTAL__emitResolverMap` is enabled. Such a field must carry the `gratos: { jit: false }` marker so the jit executor leaves it to graphql-js, and the resolver map has no `extensions` to carry it. Turn off `EXPERIMENTAL__emitResolverMap`, or read what the resolver needs from its arguments or context instead.";

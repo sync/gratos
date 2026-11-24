@@ -7,6 +7,10 @@
 // no extensions, and a subscription field is a plain resolver that returns the Stream, with no
 // `subscribe`. Rather than emit a map the Effect layer cannot run, the option rejects them.
 //
+// A resolver that takes a `GqlInfo` parameter is rejected too: it must carry the
+// `gratos: { jit: false }` marker (M4a's jit executor does not provide graphql-js' info), and the
+// resolver map has no extensions to put it in.
+//
 // Runs in the engine's pipeline just after validateEffectStreams, which has already rejected a
 // Stream anywhere but as a subscription's source.
 import { Kind } from "graphql";
@@ -15,11 +19,11 @@ import type { DocumentNode, FieldDefinitionNode, TypeNode } from "graphql";
 import type { DiagnosticWithLocation } from "#typescript";
 
 import type { GratsConfig } from "../upstream/gratsConfig.ts";
-import { gqlErr } from "../upstream/utils/DiagnosticError.ts";
+import { gqlErr, tsErr } from "../upstream/utils/DiagnosticError.ts";
 import type { DiagnosticsResult } from "../upstream/utils/DiagnosticError.ts";
 import { err, ok } from "../upstream/utils/Result.ts";
 import "./astExtensions.ts";
-import { effectWithResolverMap, streamWithResolverMap } from "./errors.ts";
+import { effectWithResolverMap, infoWithResolverMap, streamWithResolverMap } from "./errors.ts";
 import { effectStreamIn } from "./validateEffectStreams.ts";
 
 export const validateEffectResolverMap = (
@@ -32,8 +36,18 @@ export const validateEffectResolverMap = (
   const errors: Array<DiagnosticWithLocation> = [];
   // A field an interface adds to each implementation is the same node: report it once.
   const reported = new Set<TypeNode>();
+  const reportedInfo = new Set<unknown>();
   const check = (fields: ReadonlyArray<FieldDefinitionNode> | undefined) => {
     for (const field of fields ?? []) {
+      const resolver = field.resolver;
+      const info =
+        resolver === undefined || resolver.kind === "property"
+          ? undefined
+          : resolver.arguments?.find((argument) => argument.kind === "information");
+      if (info !== undefined && !reportedInfo.has(info.node)) {
+        reportedInfo.add(info.node);
+        errors.push(tsErr(info.node, infoWithResolverMap()));
+      }
       const stream = effectStreamIn(field.type);
       const node = field.returnsEffect === true ? field.type : stream;
       if (node === null || reported.has(node)) {
