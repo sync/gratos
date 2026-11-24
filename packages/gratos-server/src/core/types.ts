@@ -110,8 +110,12 @@ export interface Plugin<Ctx = unknown> {
     params: Params,
     request: Request,
   ) => PromiseOrValue<Params | undefined | void>;
-  /** A finished phase (parse and validate on a cache miss, jit when it compiles). Synchronous. */
-  readonly onPhase?: (phase: Phase, request: Request) => void;
+  /**
+   * A finished phase (parse and validate on a cache miss, jit when it compiles). Synchronous: it
+   * returns `undefined` (not `void`), so an async hook, whose rejection nobody would handle, does
+   * not typecheck.
+   */
+  readonly onPhase?: (phase: Phase, request: Request) => undefined;
   /** After the context factory, once the operation is known, before anything executes. */
   readonly onContext?: (
     ctx: Ctx,

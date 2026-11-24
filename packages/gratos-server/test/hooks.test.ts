@@ -169,7 +169,7 @@ describe("onPhase", () => {
     const phases: Array<Phase> = [];
     const server = createServer({
       schema: basicSchema(),
-      plugins: [{ onPhase: (phase) => phases.push(phase) }],
+      plugins: [{ onPhase: (phase) => void phases.push(phase) }],
     });
     await gql(server, "{ count }");
     expect(phases.map(({ name }) => name)).toEqual(["parse", "validate"]);
@@ -183,12 +183,20 @@ describe("onPhase", () => {
     const names: Array<string> = [];
     const server = createServer({
       schema: basicSchema(),
-      plugins: [{ onPhase: ({ name }) => names.push(name) }],
+      plugins: [{ onPhase: ({ name }) => void names.push(name) }],
     });
     await gql(server, "{ count");
     expect(names).toEqual(["parse"]);
     await gql(server, "{ nope }");
     expect(names).toEqual(["parse", "parse", "validate"]);
+  });
+
+  it("is synchronous: a Promise-returning hook does not typecheck", () => {
+    const plugin: Plugin = {
+      // @ts-expect-error onPhase is a hot-loop hook and must be synchronous.
+      onPhase: async () => {},
+    };
+    expect(plugin.onPhase).toBeDefined();
   });
 });
 
