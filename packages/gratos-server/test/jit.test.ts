@@ -329,14 +329,20 @@ describe("regression: a jit-warmed mutation, then a query from the same document
     await repeat(4, () => gql(server, document, { operationName: "M" }));
     expect(phases.compiled).toHaveLength(1);
     expect(calls["bump"]).toBe(4);
-    const queries = await repeat(4, () => gql(server, document, { operationName: "Q" }));
+    // The query warms up on its own count: its first two uses compile nothing (the mutation's
+    // uses do not count for it), and its third use gets its own compilation.
+    const query = () => gql(server, document, { operationName: "Q" });
+    const queries = await repeat(2, query);
+    expect(phases.compiled).toHaveLength(1);
+    queries.push(await query());
+    expect(phases.compiled).toHaveLength(2);
+    queries.push(await query());
+    expect(phases.compiled).toHaveLength(2);
     expect(queries.map(({ body }) => body)).toEqual(
       Array.from({ length: 4 }, () => ({ data: { count: 1 } })),
     );
     expect(calls["bump"]).toBe(4);
     expect(calls["count"]).toBe(4);
-    // The query got its own compilation on its own third use.
-    expect(phases.compiled).toHaveLength(2);
   });
 });
 
