@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gratos Build Plan</title>
+<style>
+:root{
+  --bg:#faf9f5; --panel:#ffffff; --ink:#1d1d1b; --muted:#6b6a63; --line:#d9d6cc;
+  --green:#2f7a4a; --green-bg:#e9f4ec; --red:#b4484c; --red-bg:#f8ebeb; --amber:#8a6212; --amber-bg:#fbf3e1;
+  --code-bg:#f3f1ea;
+  --mono: ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans: -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#151513; --panel:#1d1d1a; --ink:#ecebe4; --muted:#a3a197; --line:#3a3933;
+    --green:#7cc79a; --green-bg:#1d2e23; --red:#e3888b; --red-bg:#341f20; --amber:#e0b660; --amber-bg:#33291a;
+    --code-bg:#24241f;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#151513; --panel:#1d1d1a; --ink:#ecebe4; --muted:#a3a197; --line:#3a3933;
+  --green:#7cc79a; --green-bg:#1d2e23; --red:#e3888b; --red-bg:#341f20; --amber:#e0b660; --amber-bg:#33291a;
+  --code-bg:#24241f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 var(--sans)}
+main{max-width:1040px;margin:0 auto;padding:40px 16px 80px}
+h1{font:600 26px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;margin:0 0 6px}
+.sub{font:12px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:24px}
+h2{font:600 14px var(--mono);letter-spacing:.14em;text-transform:uppercase;border-bottom:1px solid var(--ink);padding-bottom:8px;margin:44px 0 16px}
+h3{font:600 13px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin:22px 0 8px}
+p{margin:0 0 12px}
+code{font:13px var(--mono);background:var(--code-bg);padding:1px 5px;border-radius:3px}
+pre{font:12.5px/1.55 var(--mono);background:var(--panel);border:1px solid var(--line);padding:14px 16px;overflow-x:auto;margin:0 0 14px}
+pre code{background:none;padding:0}
+.grid{display:grid;gap:14px}
+.g4{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);padding:14px 16px}
+.hatch{border-color:var(--green);background:repeating-linear-gradient(135deg,var(--green-bg) 0 6px,transparent 6px 12px),var(--panel)}
+.card .k{font:11px var(--mono);letter-spacing:.12em;color:var(--green);text-transform:uppercase}
+.card .t{font:600 13px var(--mono);letter-spacing:.08em;text-transform:uppercase;margin:2px 0 6px}
+.card p{margin:0;font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:14px;margin:0 0 14px;background:var(--panel)}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{font:600 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+td code{font-size:12.5px}
+.tw{overflow-x:auto}
+.pill{display:inline-block;font:11px var(--mono);letter-spacing:.06em;padding:1px 7px;border:1px solid;border-radius:10px;white-space:nowrap}
+.ok{color:var(--green);border-color:var(--green);background:var(--green-bg)}
+.dev{color:var(--amber);border-color:var(--amber);background:var(--amber-bg)}
+.risk{color:var(--red);border-color:var(--red);background:var(--red-bg)}
+.ms{border:1px solid var(--line);background:var(--panel);margin:0 0 14px}
+.ms summary{cursor:pointer;list-style:none;padding:12px 16px;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.ms summary::-webkit-details-marker{display:none}
+.ms summary .id{font:600 13px var(--mono);color:var(--green);min-width:34px}
+.ms summary .nm{font:600 13px var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.ms summary .br{font:12px var(--mono);color:var(--muted);margin-left:auto}
+.ms .body{padding:0 16px 14px;border-top:1px dashed var(--line)}
+.ms ul{margin:10px 0;padding-left:20px}
+.ms li{margin:3px 0}
+.ms p ul{margin:6px 0}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font:12px var(--mono);margin:10px 0 16px}
+.flow .n{border:1px solid var(--line);background:var(--panel);padding:8px 10px}
+.flow .n.h{border-color:var(--green);background:repeating-linear-gradient(135deg,var(--green-bg) 0 6px,transparent 6px 12px),var(--panel)}
+.flow .a{color:var(--muted)}
+.note a{color:inherit}
+.note{border-left:3px solid var(--amber);background:var(--amber-bg);padding:10px 14px;margin:0 0 14px;font-size:14px}
+ol.q li{margin:0 0 10px}
+.cap{font:12px var(--mono);color:var(--muted);border-top:1px solid var(--line);padding-top:8px;margin-top:-4px}
+</style>
+</head>
+<body>
+<main>
+
+<h1>Gratos: Effect-native Grats</h1>
+<div class="sub">Plan v11 · for council review · 2026-11-24 · Node 26 · TypeScript 7 · Turborepo · one PR per milestone</div>
+
+<p>We vendor the last TypeScript release of <strong>Grats</strong> into this repo, port it to the <strong>TypeScript 7</strong> compiler API, and teach it to read <code>Effect.Effect</code> and <code>Stream.Stream</code> return types. We then build a small GraphQL server core with plugins, and an Effect layer that runs every resolver in the request's fiber context. The three spec diagrams (<em>Grats: the schema comes from the code</em>, <em>An Effect-native GraphQL server</em>, <em>Plugins and resolvers</em>) are the source of truth. This page records how we will build them, where we depart from them, and how each milestone is proven.</p>
+
+<div class="note"><strong>For the council.</strong> Score the plan out of 10, where 9 means "approve, start M0". Every claim marked <em>verified</em> was run on Node 26.13 against the exact versions listed. Each <a href="#defaults">proposed default</a> takes effect unless the council overrules it, so the plan has no open blockers. Please challenge the milestone order, the mechanisms, and whether the acceptance criteria can be checked.</div>
+
+<h2>Decisions made</h2>
+<div class="grid g4">
+  <div class="card hatch"><div class="k">Runtime</div><div class="t">Node 26 everywhere</div><p>No Bun APIs. Effect platform-node provides FileSystem, Path and the HTTP server. Packages run from source through Node's type stripping; there is no build step.</p></div>
+  <div class="card hatch"><div class="k">TypeScript</div><div class="t">TS 7 everywhere</div><p>One TypeScript, 7.0.2. <code>tsc --noEmit</code> typechecks each package, and Grats uses its API (<code>typescript/unstable/sync</code> + <code>unstable/ast</code>). TS 5.9.2 survives only behind Grats' facade, as a fallback and a test oracle.</p></div>
+  <div class="card hatch"><div class="k">Scope</div><div class="t">All three specs, phased</div><p>The compiler, the server core with plugins, the Effect layer and an example app. The spec's "client compiler" box is <strong>out of scope</strong>.</p></div>
+  <div class="card hatch"><div class="k">Compiler</div><div class="t">Vendor v0.0.36, Effect shell</div><p>The extractor, transforms and codegen keep upstream's logic, so upstream's fixture suite stays the proof. The CLI, config, file IO, the compiler-process lifecycle and errors are Effect.</p></div>
+  <div class="card hatch"><div class="k">graphql-js</div><div class="t">17.1</div><p>Native <code>@defer</code>/<code>@stream</code>. graphql-jit 0.10.1 runs on 17.1 unpatched (<em>verified</em>).</p></div>
+  <div class="card hatch"><div class="k">Monorepo</div><div class="t">pnpm + Turborepo</div><p>The generated files are committed. A task graph with a local cache, restored in CI.</p></div>
+  <div class="card hatch"><div class="k">Agents</div><div class="t">One source for every agent</div><p>Skills live in <code>.agents/skills</code>, and <code>.claude/skills</code> holds symlinks to them. <code>AGENTS.md</code> holds the rules, and <code>CLAUDE.md</code> is just <code>@AGENTS.md</code>.</p></div>
+  <div class="card hatch"><div class="k">Delivery</div><div class="t">PR per milestone, full send</div><p>Each milestone follows the user's <code>full-send</code> skill: prove, run <code>sol-loop</code>, file a PR, babysit CodeRabbit and CI, and merge once the merge gate passes. When a change is uncertain, I stop and suggest a <code>council</code>.</p></div>
+</div>
+
+<h3>Facts that shaped the plan (all verified)</h3>
+<ul>
+  <li><strong>Upstream:</strong> <code>grats@0.0.37</code> (Oct 2026) already ships the Rust binary. <code>v0.0.36</code> (commit <code>5ab6616</code>, Apr 2026, MIT) is the last TypeScript engine: about 11.2k lines in 55 files, 455 fixture inputs and 29 integration fixtures. Its <code>typescript</code> is a regular dependency pinned to <code>5.9.2</code>.</li>
+  <li><strong>TypeScript 7 API.</strong> <code>typescript@7.0.2</code> runs the Go compiler (tsgo) as a child process. <code>typescript/unstable/sync</code> gives projects from a tsconfig, programs, diagnostics, a checker and <code>emitter.printNode</code>. <code>unstable/ast</code> gives node types, <code>is*</code> guards, a factory, a visitor, <code>getJSDocTags</code> and comment ranges. Spikes, with lib files loaded correctly: a project of 94 files opens in about 180 ms cold, including the process spawn. A class's <code>@gqlType</code> tag is read and its symbol resolved. <code>printNode</code> output on a schema.ts-shaped tree was byte-identical to TS 5.9.2's printer on a sample. <code>parent</code>, <code>getText</code>, <code>getStart</code>, <code>getLeadingCommentRanges</code> and <code>NodeHandle.resolve()</code> (identity-preserving) all work. The API's virtual-FS <code>readFile</code> callback can serve <code>export {};</code> for third-party code files, which is the spec's §5 trick.</li>
+  <li><strong>Where TS 7 differs from TS 5</strong> (inventoried against upstream's 804 <code>ts.</code> references):
+    <ul>
+      <li>factory signatures differ: 282 calls go through 49 factory functions, and some helpers are missing (<code>createTrue</code>, <code>createNull</code>, <code>createModifier</code> …);</li>
+      <li>JSDoc <code>comment</code> is always a NodeArray, never a string (11 sites in <code>Extractor.ts</code>);</li>
+      <li><code>getChildren</code>, <code>getNameOfDeclaration</code> and <code>formatDiagnosticsWithColorAndContext</code> are missing;</li>
+      <li>a few guards are renamed;</li>
+      <li>symbol declarations are <code>NodeHandle</code>s;</li>
+      <li>programs open only from a tsconfig;</li>
+      <li><code>parseConfigFile</code> drops the <code>grats</code> key;</li>
+      <li>the checker is called in only 3 places, and <code>getMergedSymbol</code> is the identity in TS 7.</li>
+    </ul>
+    M2 is scoped around this list.</li>
+  <li><strong>Effect 4.1.5</strong> has every API the spec uses: <code>runForkWith</code>, <code>Fiber.pollUnsafe/interruptUnsafe/addObserver</code>, Exit-as-Effect, <code>Cause.findError/hasInterruptsOnly/squash/pretty</code>, <code>Stream.toAsyncIterableWith</code>, <code>Effect.withFiber</code>, <code>Match.tagsExhaustive</code>, <code>effect/http</code> <code>HttpRouter</code>. Two corrections to the spec: a span cannot be renamed, and the only way to backdate one is the <code>Tracer.Tracer</code> service's own method, <code>Context.get(fiber.context, Tracer.Tracer).span({ name, parent: Option&lt;AnySpan&gt;, annotations, links, startTime, kind, root, sampled })</code>. There is no module-level <code>Tracer.span</code>. M5's tracing design follows from that.</li>
+  <li><strong>graphql 17.1</strong>: plain <code>execute()</code> <em>throws</em> on any schema that contains <code>@defer</code>/<code>@stream</code>. The incremental executors are <code>experimentalExecuteIncrementally</code> (pending/incremental/completed) and <code>legacyExecuteIncrementally</code> (the <code>deferSpec=20220824</code> shape). <code>abortSignal</code> and <code>hideSuggestions</code> are execution options. M4's design follows from this.</li>
+  <li><strong>Node 26</strong> strips types in workspace packages because it resolves realpaths through pnpm symlinks. <code>--preserve-symlinks</code> breaks that with <code>ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING</code>. TS 7 <code>tsc -b</code> with project references needs emit (TS6310), so we use per-package <code>tsc --noEmit</code>.</li>
+</ul>
+
+<h2>What we are building</h2>
+<div class="flow">
+  <span class="n">models/*.ts<br>tagged classes</span><span class="a">→</span>
+  <span class="n h">tsgo via TS 7 API<br>node_modules read as empty</span><span class="a">→</span>
+  <span class="n h">extractor<br>unwraps Promise · Effect · Stream</span><span class="a">→</span>
+  <span class="n">transforms<br>+ validate</span><span class="a">→</span>
+  <span class="n h">codegen<br>SDL + schema.ts, one resolver per method</span>
+</div>
+<div class="flow">
+  <span class="n">Client</span><span class="a">→</span>
+  <span class="n h">effectRoute<br>HttpRouter · toWeb · keeps the fiber context</span><span class="a">→</span>
+  <span class="n">core: read → doc cache → context → <b>execute</b> → encode</span><span class="a">→</span>
+  <span class="n h">effectSchema wrapper<br>Exit now · fork in request fiber · Stream→AsyncIterable</span><span class="a">→</span>
+  <span class="n h">resolver<br>Effect&lt;A, E, R&gt; via ctx.guard</span>
+</div>
+<p class="cap">Green hatch marks the new or changed parts, as in the spec. Each request produces one trace. Typed failures are mapped with <code>Match</code>, and defects are masked. When a client leaves, its fibers are interrupted and nothing is reported, except mutations, which always finish.</p>
+
+<h3>Where we depart from the spec</h3>
+<div class="tw"><table>
+<tr><th>Spec says</th><th>We do</th><th>Why</th></tr>
+<tr><td>"Pinned TypeScript 5.9" inside Grats</td><td>TypeScript 7.0.2 everywhere. All TS access goes through one adapter folder, <code>packages/grats/src/ts/</code></td><td>One compiler for the repo. Models are parsed by the same TS that typechecks them</td></tr>
+<tr><td>Custom compiler host (<code>createCompilerHost</code>)</td><td>The TS 7 API's virtual-FS <code>readFile</code> callback</td><td>The same trick through the API TS 7 provides</td></tr>
+<tr><td><code>parseArgs</code>, <code>Bun.file</code>, <code>Bun.write</code></td><td><code>effect/cli</code>, plus <code>FileSystem</code> / <code>Path</code> from <code>@effect/platform-node</code></td><td>The Node runtime. File IO becomes testable with a fake FileSystem layer</td></tr>
+<tr><td>"small server that we wrote for Bun"</td><td>A Web-standard <code>handle(Request): Promise&lt;Response&gt;</code> core, served by <code>effect/http</code> <code>HttpRouter</code> on <code>NodeHttpServer</code></td><td>Node 26 has global <code>Request</code>/<code>Response</code>, so the core needs neither a runtime nor Effect</td></tr>
+<tr><td><code>HttpRouter.add("POST", "/graphql", …)</code> with a <code>(request: Request) =&gt; Effect&lt;Response&gt;</code> route</td><td><code>HttpRouter.add("*", "/graphql", effectRoute(server))</code>, with a <code>(req: HttpServerRequest) =&gt; Effect&lt;HttpServerResponse&gt;</code> handler that converts through <code>HttpServerRequest.toWeb</code> and <code>HttpServerResponse.fromWeb</code></td><td>This is the handler type in Effect 4.1.5. Registering only <code>POST</code> would make the router return 404 for a GET before the core could send its documented 405</td></tr>
+<tr><td><code>effect()</code> reads the operation type in <code>onExecute</code></td><td>The core resolves the operation before the context phase and passes it to <code>onContext(ctx, req, op)</code>. <code>effect()</code> reads it there</td><td>Under the spec's own rule, the first plugin that returns an executor wins and later plugins never run. With <code>effect()</code> listed after <code>jit()</code>, mutations would lose their protection from interruption</td></tr>
+<tr><td>"hot reload" (<code>bun --hot</code>), a rebuild of about 1.2 s in process</td><td><code>node --watch-path</code> restarts the process and regenerates on boot. Target: <strong>≤ 2 s from save to first good response</strong></td><td>Node has no hot module reload. A restart always runs the new code and cannot leak ESM modules. Spiked: one save, one restart</td></tr>
+<tr><td>Session-read span inside the request trace (Fig. 2)</td><td>The <code>runInRequest</code> span is a child of the HTTP span, alongside <code>graphql &lt;op&gt;</code>, not a child of it</td><td>The context factory runs before the operation span can be created (the operation is not known yet). The spec asks only that it "joins the request's trace"</td></tr>
+<tr><td>Guard "sets a 60 s limit"</td><td>The 60 s limit applies to queries. Mutations have no interrupting timeout, and subscriptions bound only their setup</td><td>Interrupting a mutation would leave a half-finished write, which the spec forbids. A limit on a whole stream would end every subscription after 60 s</td></tr>
+<tr><td><code>guardStream({ stream: Stream.unwrap(Effect.gen(…)) })</code></td><td><code>guardStream({ stream: Effect.gen(…) })</code>; the guard unwraps it</td><td>Only an unwrapped setup effect can be timed out without also ending an idle subscription</td></tr>
+<tr><td>"@defer or @stream in the document" (any operation)</td><td><code>@defer</code>/<code>@stream</code> are rejected on mutations</td><td>Deferred mutation work would outlive the shutdown drain or could be skipped by <code>return()</code>. The spec does not need incremental mutations</td></tr>
+<tr><td>Client left → <code>request.signal</code></td><td>A core-owned per-request <code>AbortController</code>, linked to the incoming signal (route-fiber interrupt) and aborted on response-body cancel</td><td>Once the Response is returned, the route fiber is done. Streamed bodies need the second trigger</td></tr>
+<tr><td><code>bun run codegen</code></td><td><code>pnpm codegen</code> → <code>node packages/grats/src/cli.ts</code></td><td>Type stripping runs the CLI straight from its path</td></tr>
+</table></div>
+
+<h2>Repository layout</h2>
+<pre><code>gratos/
+├─ package.json            # private root; engines.node &gt;=26; packageManager pnpm@12.23.0; scripts call turbo, except lint/fmt:check (direct)
+├─ pnpm-workspace.yaml     # packages + catalog (every shared version pinned once) + build-approval decisions
+├─ turbo.json              # task graph (below)
+├─ .node-version           # 26.13.0
+├─ tsconfig.base.json      # TS 7: strict, erasableSyntaxOnly, verbatimModuleSyntax, allowImportingTsExtensions,
+│                          #       rewriteRelativeImportExtensions, module/moduleResolution nodenext, noEmit
+├─ oxlint.config.ts        # extends @cloudflare/oxlint-config; scoped overrides for src/upstream
+├─ .oxfmtrc.json           # ignores src/generated/**, llm-docs/**, fixtures, src/upstream/** (until reformatted on purpose)
+├─ .coderabbit.yaml        # path filters (generated, fixtures, llm-docs, .agents, lockfile, docs/plan.html), no draft review
+├─ AGENTS.md               # canonical agent rules
+├─ CLAUDE.md               # a single line: @AGENTS.md
+├─ .agents/skills/         # grats · effect-ts · turborepo (skills-lock.json)
+├─ .claude/skills/*        # symlinks -&gt; ../../.agents/skills/*
+├─ bench/baseline.json     # committed perf baseline + runner class
+├─ packages/
+│  ├─ grats/               # @gratos/grats: vendored compiler (MIT; NOTICE pins upstream 5ab6616); no "bin" field
+│  │  ├─ src/ts/           # the ONLY importer of typescript/unstable/*
+│  │  ├─ src/upstream/     # extractor, transforms, codegen, validations
+│  │  ├─ src/effect/       # wrapper detection, input-position errors
+│  │  ├─ src/generate.ts   # generate(tsconfig): Effect&lt;GenerateResult, GratsError, FileSystem | Scope&gt;
+│  │  ├─ src/cli.ts        # grats · grats --check
+│  │  ├─ src/dev.ts        # dev boot step (lazy entry: @gratos/grats/dev)
+│  │  ├─ llm-docs/         # vendored upstream docs + an Effect chapter
+│  │  └─ test/             # ported TestRunner → vitest; fixtures; parity harness (devDep grats-upstream)
+│  └─ server/              # @gratos/server: core with NO effect dependency
+│     ├─ src/core/         # phases, plugin lists, encoders (JSON · SSE · multipart), document LRU
+│     ├─ src/plugins/      # apq · jit · incremental · maskErrors · reportErrors · serverTiming · maxDepth · readOnly
+│     └─ src/effect/       # separate entry @gratos/server/effect (effect is an optional peer)
+│        ├─ schema.ts      # effectSchema(schema, { failure }): wrap · wrapSubscribe · run · fromCause
+│        ├─ plugin.ts      # effect(): onParams · onPhase · onContext · onResult · onResponse
+│        ├─ route.ts       # effectRoute(server), runInRequest()
+│        └─ guard.ts       # makeGuard(): ctx.guard / ctx.guardStream
+└─ examples/orders/        # Order · User · Query · Mutation · Subscription; src/generated/ committed
+</code></pre>
+<p><strong>Grats docs for agents:</strong> the installed grats skill points at <code>node_modules/grats/llm-docs/…</code>. AGENTS.md maps that path to <code>packages/grats/llm-docs/</code>. We do not add a root <code>grats</code> alias: it would put the compiler into turbo's global hash, and its <code>bin</code> would collide with the parity oracle's (<em>verified</em>).</p>
+
+<h3>Task graph (turbo.json)</h3>
+<pre><code>{
+  "$schema": "https://turborepo.com/schema.json",
+  "globalDependencies": ["tsconfig.base.json", "vitest.shared.ts", "oxlint.config.ts", ".oxfmtrc.json", ".node-version"],
+  "tasks": {
+    "transit":        { "dependsOn": ["^transit"] },
+    "codegen":        { "dependsOn": ["^transit"], "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
+                        "outputs": ["src/generated/schema.ts", "src/generated/schema.graphql"] },
+    "codegen:check":  { "dependsOn": ["^transit"], "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"] },
+    "typecheck":      { "dependsOn": ["^transit"], "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"] },
+    "test":           { "dependsOn": ["^transit"], "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json", "$TURBO_ROOT$/vitest.shared.ts"] },
+    "//#fmt:check":   { "inputs": ["$TURBO_DEFAULT$"] },
+    "//#lint":        { "inputs": ["$TURBO_DEFAULT$"] },
+    "check":          { "dependsOn": ["//#fmt:check", "//#lint", "typecheck", "test", "codegen:check"] },
+    "dev":            { "cache": false, "persistent": true }
+  }
+}</code></pre>
+<ul>
+  <li><strong>Generated files are committed</strong> (<code>src/generated/*</code>), as the grats skill and the spec ask. <code>codegen:check</code> runs <code>grats --check</code>: it writes nothing and exits 1 if the committed files are stale. <code>check</code> never runs <code>codegen</code>, so there is no write/check race. <code>pnpm codegen</code> is a developer task.</li>
+  <li><code>transit</code> has no script. It exists so that a change in <code>@gratos/grats</code> or <code>@gratos/server</code> source invalidates dependents' <code>codegen:check</code>, <code>typecheck</code> and <code>test</code> hashes. <code>$TURBO_DEFAULT$</code> keeps <code>vitest.config.ts</code> and tsconfig files in the hash.</li>
+  <li><strong>The root scripts never recurse.</strong> The root <code>package.json</code> scripts are <code>"lint": "oxlint ."</code>, <code>"fmt:check": "oxfmt --check ."</code>, <code>"check": "turbo run check"</code> and <code>"codegen": "turbo run codegen"</code>. The <code>//#lint</code> and <code>//#fmt:check</code> root tasks run those direct commands. A root script that called <code>turbo run lint</code> would recurse: turbo reports <code>recursive_turbo_invocations</code> (<em>verified</em>). Root files that packages consume (<code>tsconfig.base.json</code>, <code>vitest.shared.ts</code>) are listed as <code>$TURBO_ROOT$/…</code> inputs on the package tasks. A package's default inputs stop at its own folder, so without these a root edit would leave package hashes unchanged (<em>verified</em>). <code>globalDependencies</code> also covers them, as a second layer.</li>
+  <li>There is no <code>build</code> task and no project references. Each package's <code>typecheck</code> is <code>tsc --noEmit</code> (TS 7), and cross-package types resolve through <code>exports</code> that point at <code>.ts</code> files (<em>verified</em>). Keys are checked against the docs bundled with turbo 2.11.13.</li>
+</ul>
+
+<h2>Toolchain</h2>
+<div class="tw"><table>
+<tr><th>Concern</th><th>Choice</th><th>Version (verified 2026-11-24)</th></tr>
+<tr><td>Runtime</td><td>Node, with <code>.node-version</code> and <code>engines</code></td><td>26.13.0</td></tr>
+<tr><td>Package manager</td><td>pnpm workspaces + catalog. Node 26 has no corepack: locally <code>npm i -g pnpm@12.23.0</code>; in CI <code>pnpm/action-setup</code> reads <code>packageManager</code></td><td>12.23.0</td></tr>
+<tr><td>Monorepo tasks</td><td>Turborepo. Local cache, plus <code>actions/cache</code> of <code>.turbo</code> in CI (full <code>check</code>, no <code>--affected</code>). No remote cache</td><td>2.11.13</td></tr>
+<tr><td>TypeScript</td><td><code>typescript</code>, pinned exactly (the API is under <code>unstable/</code>): <code>tsc --noEmit</code> and <code>typescript/unstable/{sync,ast}</code></td><td>7.0.2</td></tr>
+<tr><td>Format</td><td>oxfmt</td><td>0.80.0</td></tr>
+<tr><td>Lint</td><td>oxlint + <code>@cloudflare/oxlint-config</code> + <code>tsrs</code> (type-aware, pinned exactly). Every linted <code>.ts</code> (tests, scripts, configs) belongs to a tsconfig. <code>tsc</code> is the authority when tsrs (which targets TS 7.1-beta) disagrees</td><td>oxlint 1.95.0 · config 0.2.0 · tsrs 7.1.0-beta.tsrs5</td></tr>
+<tr><td>Node types</td><td><code>@types/node</code></td><td>26.6.6</td></tr>
+<tr><td>Effect</td><td><code>effect</code> (also a root devDependency, per the effect-ts skill), <code>@effect/platform-node</code>, <code>@effect/vitest</code>, <code>@effect/opentelemetry</code> (tests and example)</td><td>4.1.5</td></tr>
+<tr><td>Tests</td><td>vitest + <code>vite</code> (a required peer) + <code>it.effect</code>. Each package declares its own test dependencies</td><td>vitest 5.1.1 · vite 8.3.8</td></tr>
+<tr><td>tsconfig reading</td><td><code>jsonc-parser</code> (for the <code>grats</code> key, which TS 7's <code>parseConfigFile</code> drops)</td><td>3.x (pinned in M2)</td></tr>
+<tr><td>GraphQL</td><td><code>graphql</code>, <code>graphql-jit</code></td><td>17.1.0 · 0.10.1</td></tr>
+<tr><td>Parity oracle (test-only)</td><td><code>"grats-upstream": "npm:grats@0.0.36"</code>, a devDependency of <code>packages/grats</code> only. It brings its own <code>typescript@5.9.2</code> and <code>graphql@16</code>. Scripts never call a <code>grats</code> bin</td><td>0.0.36</td></tr>
+</table></div>
+
+<h2>Agent setup</h2>
+<ul>
+  <li><strong>Skills</strong> (installed and reviewed; recorded in <code>skills-lock.json</code>): <code>grats</code> (captbaritone/grats@45b0805), <code>effect-ts</code> (Effect-TS/skills@155c50c), <code>turborepo</code> (vercel/turborepo@51d6ddf). The canonical copies are in <code>.agents/skills/</code>, and <code>.claude/skills/*</code> are symlinks to them. <code>npx skills experimental_install</code> restores them.</li>
+  <li><strong>AGENTS.md</strong> is the only source of agent rules. <code>CLAUDE.md</code> contains just <code>@AGENTS.md</code>. AGENTS.md contains:
+    <ul>
+      <li>the effect-ts block: read <code>node_modules/effect/AGENTS.md</code> first</li>
+      <li>read <code>node_modules/turbo/docs</code> before changing turbo config</li>
+      <li>the grats docs path mapping</li>
+      <li>never edit <code>src/generated/*</code>; run <code>pnpm codegen</code> and commit</li>
+      <li>all TS API access goes through <code>packages/grats/src/ts</code></li>
+      <li>never use <code>--preserve-symlinks</code>, injected dependencies or <code>pnpm deploy</code> (they break type stripping)</li>
+      <li>the delivery workflow below</li>
+    </ul>
+  </li>
+</ul>
+
+<h2>Delivery workflow (the <code>full-send</code> skill)</h2>
+<div class="flow">
+  <span class="n">branch off main</span><span class="a">→</span>
+  <span class="n">implement + prove<br>turbo run check + milestone proof</span><span class="a">→</span>
+  <span class="n h">sol-loop</span><span class="a">→</span>
+  <span class="n h">file-pr</span><span class="a">→</span>
+  <span class="n h">babysit-pr<br>CodeRabbit + CI</span><span class="a">→</span>
+  <span class="n h">merge gate passes → <b>merge</b> → next milestone from updated main</span>
+</div>
+<ul>
+  <li>Each milestone is one PR against <code>main</code>. It contains the acceptance checklist and the proof: command output, benchmark numbers and parity diff counts.</li>
+  <li><strong>CodeRabbit is "clean" when all of these hold:</strong>
+    <ul>
+      <li>(a) its check for the current head SHA has completed;</li>
+      <li>(b) no <code>coderabbitai[bot]</code> review thread is unresolved (GraphQL <code>reviewThreads.isResolved</code>);</li>
+      <li>(c) every nitpick, outside-diff and additional comment in the review body has a reply, either fixed or declined with a reason;</li>
+      <li>(d) the check run named <code>ci</code> has concluded <code>success</code> on the head SHA, and every other required check is green;</li>
+      <li>(e) the branch is up to date and mergeable.</li>
+    </ul>
+    There are at most 5 fix rounds. A finding I declined that is raised again gets one more reply and then counts as answered. If findings are still open after 5 rounds, I stop, leave the PR unmerged, and ask you.</li>
+  <li><strong>When CodeRabbit does not respond:</strong> if no review arrives 15 minutes after a push, I comment <code>@coderabbitai review</code> once. If there is still none after 30 minutes, or it reports being rate-limited, paused or skipped, I stop and report.</li>
+  <li><strong>Merge (full send).</strong> The gate is evaluated against one recorded PR head SHA. The proof, a successful <code>ci</code> and a completed CodeRabbit review must all be for that SHA. The merge call pins it: <code>gh pr merge --squash --match-head-commit &lt;sha&gt;</code>, which is the REST <code>sha</code> parameter. If the head has moved, the merge is refused, and the gate is re-evaluated on the new head. When the merge gate passes, I squash-merge the PR (the repository allows all three methods and has no history to copy, so the method is fixed here). The gate requires: proof covers every change in the diff; the check run named <code>ci</code> has concluded <code>success</code> on the PR's head SHA, and every other required check is green; CodeRabbit is clean as defined above; no human review requests changes, and no human review thread is unresolved (including on <code>COMMENTED</code> reviews); the branch is up to date and mergeable. Milestone proof that CI does not run, such as clean-clone <code>FULL TURBO</code>, <code>verify-vendor</code>, cold-build and RSS numbers, or the ≤ 2 s restart, is re-run on the final head SHA whenever a babysit fix touched relevant code. I never use <code>--admin</code> or any other bypass of branch protection. The final report gives the PR link, the merge commit, the proof and every decision made. Before the next milestone branches from the updated <code>main</code>, I confirm that <code>ci</code> on the merge commit is green. A red <code>main</code> stops the chain, and I ask you. There are no stacked PRs.</li>
+  <li><strong>When unsure, suggest a council.</strong> If a milestone hits a change I can't prove or am not confident in, I stop before merging and ask you through the question tool, recommending a <code>council</code> review. Examples: a departure from the spec that this plan doesn't list, a design choice the plan leaves open, a failed acceptance criterion, or the M2 escape hatch. A council then reviews that change under the same ≥ 9/10 rule.</li>
+  <li><strong>Asking</strong> follows full-send's rules. Questions go through the question tool with the PR link and a recommended option. Data deletion, production changes or changes outside the repo always ask first.</li>
+</ul>
+
+<h2>Milestones</h2>
+
+<details class="ms" open><summary><span class="id">M0</span><span class="nm">Project setup</span><span class="br">PR 1 · chore/setup</span></summary><div class="body">
+<ul>
+  <li>The pnpm workspace and catalog, with build-approval decisions (for example, deny <code>@cloudflare/oxlint-config</code>'s <code>prepare</code>). Also <code>.node-version</code>, <code>engines</code> and <code>packageManager</code>.</li>
+  <li><code>turbo.json</code> as above. Root scripts call <code>turbo run …</code>, except <code>lint</code> and <code>fmt:check</code>, which call oxlint and oxfmt directly. Each package has <code>typecheck</code>, <code>test</code>, <code>codegen</code> and <code>codegen:check</code> scripts, which are stubs for now.</li>
+  <li><code>tsconfig.base.json</code> plus per-package tsconfigs that cover <code>src</code>, <code>test</code>, <code>scripts</code> and config files.</li>
+  <li>The oxfmt and oxlint configs, <code>.coderabbit.yaml</code>, <code>AGENTS.md</code>, and <code>CLAUDE.md</code> containing <code>@AGENTS.md</code>.</li>
+  <li>Commit <code>.agents/skills</code>, the <code>.claude/skills</code> symlinks, <code>skills-lock.json</code> and <code>docs/plan.html</code>.</li>
+  <li>Empty <code>@gratos/grats</code>, <code>@gratos/server</code> and <code>examples/orders</code> packages, each with one <code>it.effect</code> smoke test.</li>
+  <li>GitHub Actions on Node 26:
+    <ul>
+      <li><code>actions/checkout</code> with default depth;</li>
+      <li><code>pnpm/action-setup</code>;</li>
+      <li>an <code>actions/cache</code> of <code>.turbo</code>, keyed on the SHA, with restore keys for the branch and then <code>main</code>. Before saving, <code>find .turbo/cache -mtime +7 -delete</code> prunes artifacts inside the saved entry, which would otherwise carry everything ever restored. A turbo cache hit does not update a file's mtime, so artifacts still in use are rebuilt once a week, which is accepted. GitHub's own 7-day last-access eviction and repository size limit handle whole entries;</li>
+      <li>on PRs and on <code>main</code>, the full <code>turbo run check</code>. The <code>.turbo</code> cache restored from <code>main</code> keeps it cheap. We don't use <code>--affected</code>, because it scheduled nothing for root-only changes (<em>verified</em>);</li>
+      <li>one aggregate check, <code>ci</code>.</li>
+      <li><strong>Branch protection.</strong> <code>main</code> is unprotected today (<code>gh api …/branches/main/protection</code> returns 404, and there are no rulesets), so "required checks" would pass vacuously. Protecting it is a change outside the repo, so before merging PR 1 I ask you to protect <code>main</code>, with <code>ci</code> as a required status check and "require branches to be up to date" (strict). M0 then verifies that GitHub enforces it at merge time: a PR whose base has moved is reported as not mergeable until it is updated. Until that is done, the gate still checks <code>ci</code> by name, as gate item (d) says.</li>
+    </ul>
+  </li>
+</ul>
+<div class="done"><span class="pill ok">Done when</span>
+  <ul>
+    <li>a clean clone on Node 26 passes <code>npm i -g pnpm@12.23.0 &amp;&amp; pnpm i --frozen-lockfile &amp;&amp; pnpm check</code>, locally and in CI;</li>
+    <li>a second <code>pnpm check</code> is fully cached (<code>FULL TURBO</code>);</li>
+    <li>a change only to <code>tsconfig.base.json</code> re-runs every package's typecheck;</li>
+    <li><code>main</code> protection (<code>ci</code> required, strict) is confirmed through <code>gh api …/branches/main/protection</code>, or the user declined, and either outcome is recorded in the PR;</li>
+    <li><code>.claude/skills/*</code> resolve to <code>.agents/skills/*</code>;</li>
+    <li>the PR passes the merge gate and is merged by full send.</li>
+  </ul>
+</div>
+</div></details>
+
+<details class="ms"><summary><span class="id">M1a</span><span class="nm">Vendor Grats v0.0.36 byte-identical</span><span class="br">PR 2 · feat/vendor-grats</span></summary><div class="body">
+<ul>
+  <li>Import <code>src/</code> (without tests), <code>llm-docs/</code>, <code>LICENSE</code> and the fixture files at <code>5ab6616</code>, plus a NOTICE. Nothing else changes.</li>
+  <li>The path filters in <code>.coderabbit.yaml</code>, oxfmt and oxlint skip vendored paths, and the package tsconfig excludes them until M1b, so typecheck stays green. <code>test/fixtures/**</code> and <code>test/integrationFixtures/**</code> stay excluded permanently: they deliberately contain invalid code, enums and parameter properties, which vitest still transforms at test time. Reviewers see the NOTICE and a script, <code>scripts/verify-vendor.ts</code>, that hashes every vendored file against the upstream tarball.</li>
+</ul>
+<p><span class="pill ok">Done when</span> <code>verify-vendor</code> reports every file identical to upstream <code>5ab6616</code>, CI is green, and the PR passes the merge gate and is merged by full send.</p>
+</div></details>
+
+<details class="ms"><summary><span class="id">M1b</span><span class="nm">Green baseline on graphql 17.1</span><span class="br">PR 3 · feat/grats-baseline</span></summary><div class="body">
+<ul>
+  <li>Port <code>TestRunner</code>/<code>Markdown</code> to vitest. All 455 fixture inputs, 29 integration fixtures and 6 config-parser fixtures run. Snapshot sections: 211 Error Report, 236 SDL, 236 TypeScript and 29 Query Result.</li>
+  <li><strong>Baseline:</strong> the engine runs unchanged on a temporary <code>"typescript-baseline": "npm:typescript@5.9.2"</code> (matching upstream exactly) and graphql 16. Every fixture must pass unchanged. <code>typecheck</code> keeps using the root TS 7 <code>tsc</code>, called by explicit path.</li>
+  <li>Move to graphql 17.1, then list every snapshot diff with its cause, such as a printer change or an error-message change.</li>
+  <li><strong>Mechanical edits</strong> (one commit): 13 parameter properties in 9 constructors become plain fields; imports gain <code>.ts</code> specifiers; type-only imports and exports become <code>import type</code>/<code>export type</code> (for example upstream imports <code>DocumentNode</code> as a value, which breaks both <code>verbatimModuleSyntax</code> and plain Node); <code>typescript</code> imports become <code>typescript-baseline</code> (TS 7's <code>"."</code> export holds only the version); and the <code>semver</code> check on graphql's version is dropped, because graphql is pinned. The spec allows no semver dependency.</li>
+  <li><strong>graphql 17 source edits</strong> (a separate commit), each listed.</li>
+  <li><strong>Cuts</strong> (a separate commit), since none of this code can be ported to TS 7: the TS language-service plugin, <code>CodeActions</code>, <code>fixFixable</code>, <code>Locate</code>, <code>--watch</code>, <code>--fix</code> and <code>locate</code>. The fixture sections those features own are removed and listed by name: 31 "Applied Fixes"/"Code Action" and 22 <code>// Locate:</code>.</li>
+  <li>The parity harness runs <code>grats-upstream</code> and the vendored engine on every fixture and diffs both the SDL and <code>schema.ts</code>.</li>
+</ul>
+<p><span class="pill ok">Done when</span> the remaining fixture suite is green on graphql 17.1, the parity bar (a) below holds against the oracle, and every justified diff and removed section is listed in the PR.</p>
+</div></details>
+
+<details class="ms"><summary><span class="id">M2</span><span class="nm">Port the engine to TypeScript 7</span><span class="br">PR 4 · feat/grats-ts7</span></summary><div class="body">
+<ul>
+  <li><strong><code>src/ts/</code> is a TS5-shaped facade</strong> with two implementations. The <strong>TS 7 port is the only one the CLI and dev step ever load</strong>. The TS 5.9.2 pass-through is a devDependency used only by the parity harness, so the same engine is diffed on both TypeScripts. Upstream modules change their import line, plus a listed set of call sites that are routed through facade helpers working on both TypeScripts: <code>tag.comment</code> reads, <code>symbol.declarations</code>, <code>node.getChildren</code> and so on. That way parity bar (b) runs the same code on both. The TS 7 implementation:
+    <ul>
+      <li>owns the API process as an Effect resource (<code>acquireRelease</code>: <code>new API(...)</code> / <code>api.close()</code>);</li>
+      <li>provides TS5 factory signatures, with the missing helpers built from existing nodes;</li>
+      <li>flattens JSDoc <code>comment</code> NodeArrays to strings;</li>
+      <li>replaces <code>getChildren</code> by rewriting <code>comments.ts</code> on the scanner;</li>
+      <li>adds <code>getNameOfDeclaration</code> and the renamed guards;</li>
+      <li>resolves <code>NodeHandle</code>s;</li>
+      <li>makes <code>getMergedSymbol</code> the identity;</li>
+      <li>ports <code>formatDiagnosticsWithColorAndContext</code> byte for byte, because 211 snapshots depend on it;</li>
+      <li>adds <code>printList</code> on top of <code>emitter.printNode</code>, which wraps printer panics as a typed defect;</li>
+      <li>adds a minimal <code>createSourceFile</code> (a line map only), which <code>DiagnosticError</code> and <code>TSAstBuilder</code> need. It is not exported by <code>unstable/ast</code>;</li>
+      <li>imports the factory from <code>typescript/unstable/ast/factory</code>, and always passes arrays (never <code>undefined</code>) for <code>typeArguments</code>, because TS 7's <code>createCallExpression</code> throws otherwise (<em>verified</em>).</li>
+    </ul>
+  </li>
+  <li><strong>Config:</strong> <code>parseConfigFile</code> drops unknown keys, so <code>generate()</code> reads the root tsconfig through <code>FileSystem</code>, parses it with <code>jsonc-parser</code> (comments and trailing commas), and takes the top-level <code>grats</code> key from the root file only, with no <code>extends</code> merging, as TS 5's <code>raw</code> did. It decodes that with <code>Schema</code>, and takes <code>fileNames</code>/<code>options</code> from the API.</li>
+  <li><strong>Fixture harness:</strong> each fixture gets a virtual tsconfig with explicit <code>compilerOptions</code> (2.3 ms per fixture, measured). Supported options on TS 7: <code>target ≥ ES2015</code>, with the pair <code>module: "nodenext"</code> + <code>moduleResolution: "nodenext"</code> or <code>module: "preserve"</code> + <code>moduleResolution: "bundler"</code> (there is no <code>module: "bundler"</code>), and <code>strict</code> as each fixture sets it. TS 7 rejects <code>target: ES5</code> and <code>moduleResolution: node10</code>. Fixtures that depend on those, on TS 5's <code>{}</code> defaults, on <code>tsVersion</code> gates, or on the TS1005 message get one variant per TS version, and every such difference is listed in the PR.</li>
+  <li><strong>CLI during M2:</strong> upstream's <code>cli.ts</code>, minus the cut features, is kept and runs on the facade until M3 replaces it with the Effect CLI. Its <code>commander</code> import becomes <code>node:util</code> <code>parseArgs</code>, so no new dependency is added. <code>readPackageVersion()</code> checks <code>"@gratos/grats"</code>. The <code>libraryImport</code> option (see M3) lands in M2, so the smoke schema imports <code>@gratos/grats</code>, and the generated schema is <em>typechecked</em> with <code>tsc --noEmit</code>. Node strips the type-only <code>GqlScalar</code> import, so running the schema alone can't verify its specifier. A committed smoke fixture, <code>packages/grats/test/smoke/</code> (two models, one Query field, one Promise, one custom <code>@gqlScalar</code>, so the generated <code>GqlScalar</code> import is exercised), gives M2 its generate-and-import test before the example app exists.</li>
+  <li><strong>Fast loading</strong> (spec §5), through the API's <code>fs.readFile</code> callback:
+    <ul>
+      <li>it blanks to <code>export {};</code> only files that match <code>/\.(d\.)?[cm]?[tj]sx?$/</code> and whose realpath is under <code>node_modules</code>;</li>
+      <li>it never blanks <code>package.json</code>;</li>
+      <li>it finds lib files by the resolved bundled lib directory, not by a substring;</li>
+      <li>it serves workspace packages, including <code>@gratos/grats</code>'s <code>Types.ts</code> built-in scalars, in full.</li>
+    </ul>
+    Source files are filtered by <code>getSourceFileNames()</code> and <code>getSourceFileMetadata()</code> before any AST is fetched. When <code>reportTypeScriptTypeErrors</code> is on, nothing is blanked and the full program is loaded, so its diagnostics are complete and never filtered. A tag inside a published package is invisible; this trade-off is documented.</li>
+</ul>
+<div class="done"><span class="pill ok">Done when</span>
+  <ul>
+    <li>the parity bar (b) below holds: the same suite is green on both facade implementations;</li>
+    <li>tests show that lib files load in full, <code>package.json</code> is never blanked, the built-in scalars resolve, and <code>printNode</code> works on a synthetic node;</li>
+    <li><code>typescript@5.9.2</code> appears only under <code>devDependencies</code>. A test asserts from the loaded modules that <code>node packages/grats/src/cli.ts</code> never loads <code>typescript-baseline</code>. The CLI, run under plain Node 26 with TS 7, generates the <code>test/smoke</code> schema with <code>importModuleSpecifierEnding: ".ts"</code>, and Node imports and executes it. Upstream integration fixtures that generate <code>.js</code> specifiers keep them and run under vitest, which resolves <code>.js</code> to <code>.ts</code>;</li>
+    <li>M2 adds the <code>bench</code> script and a <strong>synthetic 300-model fixture</strong>. Its models use Promise return types and import <code>effect</code>, <code>@effect/platform-node</code> and <code>graphql</code>, so the blanked third-party files really are exercised. On that fixture the cold build is ≤ 1.5 s, measured and in the PR. Above that, <a href="#defaults">default 3</a> applies.</li>
+  </ul>
+</div>
+</div></details>
+
+<details class="ms"><summary><span class="id">M3</span><span class="nm">Effect-aware compiler, Effect shell, CLI</span><span class="br">PR 5 · feat/grats-effect</span></summary><div class="body">
+<ul>
+  <li><strong>Wrapper detection</strong> (spec §4): <code>effectWrapper(name)</code> counts only the qualified <code>Effect.Effect</code> and <code>Stream.Stream</code>.
+    <ul>
+      <li><code>Effect&lt;A,E,R&gt;</code> becomes field type <code>A</code>, like <code>Promise&lt;A&gt;</code>.</li>
+      <li><code>Stream&lt;A,E,R&gt;</code> becomes an async iterable of <code>A</code>.</li>
+      <li>A user type named <code>Effect</code> stays a normal type.</li>
+      <li>A bare <code>Effect&lt;…&gt;</code> gets a hint toward <code>Effect.Effect</code>. The hint fires only when the identifier's alias resolves to an import from <code>effect</code> or <code>effect/*</code> (<em>verified</em>: this works with node_modules blanked).</li>
+      <li><strong>Hook point:</strong> detection runs in <code>Extractor.typeReference</code> <em>before</em> <code>expectNameIdentifier</code>, which today rejects any qualified name, and also in the input branch. <code>Stream</code> sets <code>listType.isAsyncIterable</code>.</li>
+      <li><strong>Rule: an Effect must be the resolver's outermost return wrapper.</strong> Rejected: <code>Effect.Effect&lt;Promise&lt;A&gt;&gt;</code>, <code>Promise&lt;Effect.Effect&lt;A&gt;&gt;</code>, <code>ReadonlyArray&lt;Effect.Effect&lt;A&gt;&gt;</code>, <code>Array&lt;Effect.Effect&lt;A&gt;&gt;</code> and <code>Effect.Effect&lt;A&gt;[]</code> (the runtime wrapper only handles an Effect returned directly; each spelling has a <code>.invalid</code> fixture), Effect around Stream, and Effect as a <code>@gqlContext</code> derived-context return type (generated code awaits those values).</li>
+      <li><strong>Documented limitation:</strong> <code>import { Effect as Fx }</code> with <code>Fx.Effect</code> is not detected.</li>
+      <li><code>subscriptionFieldNotAsyncIterable</code> now mentions <code>Stream.Stream</code>.</li>
+      <li><strong>A Stream outside a subscription is rejected.</strong> Upstream's <code>validateAsyncIterable</code> only checks <code>Subscription</code>, and it allows <code>AsyncIterable</code> as a list on other types. <code>Effect.isEffect(stream)</code> is false, so a Stream on a query would compile to <code>[T]</code> and fail at runtime (<em>verified</em>). So <code>Stream.Stream</code> also sets <code>listType.isEffectStream</code>, and a new validation rejects it on any type other than <code>Subscription</code>. Plain <code>AsyncIterable</code> behaves as upstream.</li>
+    </ul>
+  </li>
+  <li><strong>Validations:</strong> <code>Effect</code>/<code>Stream</code> as an argument or input field is an error ("not a valid input type"). <code>Stream</code> is valid only on <code>@gqlSubscriptionField</code>, which reuses <code>validateAsyncIterable</code>.</li>
+  <li><strong>One resolver per method field</strong> (spec §8): <code>isDefaultResolverSignature</code> returns false for methods, so codegen always emits an explicit <code>resolve</code>. Arguments go through upstream's existing <code>resolverParam</code> mapping, so positional arguments such as the spec's <code>orders(userId, ctx, first)</code> work. graphql-jit does not call function-valued properties (<em>verified</em>).</li>
+  <li><strong>Effect shell:</strong>
+    <ul>
+      <li><code>generate(tsconfig)</code> returns <code>Effect&lt;{ sdl, ts, diagnostics }, GratsError, FileSystem | Scope&gt;</code>.</li>
+      <li>The config is decoded with <code>Schema</code> (the reader is from M2).</li>
+      <li>Errors are <code>Data.TaggedError</code>: <code>ConfigError</code>, <code>DiagnosticsError</code>, <code>StaleFilesError</code>.</li>
+      <li>Files are written only when their content differs.</li>
+    </ul>
+  </li>
+  <li><strong>Semantic non-null for Effect fields:</strong> upstream's generated <code>assertNonNull</code> awaits the resolver's return value and checks it. For an Effect-backed field that value is the Effect object, which is never null, so a null <em>success</em> value would slip through as <code>data.field: null</code> with no error (<em>verified</em>). For <em>Effect</em>-returning <code>resolve</code> methods only, codegen does not emit <code>assertNonNull</code>. It emits <code>extensions: { gratos: { semanticNonNull: true } }</code> instead, and M5's wrapper checks the unwrapped value. <strong>Subscriptions keep upstream's placement:</strong> <code>assertNonNull</code> stays on the subscription field's identity <code>resolve(payload)</code>, which receives each unwrapped Stream item. A check inside the source stream would end the whole subscription on the first null (<em>verified</em>). The M3 fixture is a codegen snapshot showing three things: no <code>assertNonNull</code> around an Effect <code>resolve</code>; the marker is present; and a Promise field and a Stream subscription in the same fixture still get <code>assertNonNull</code>. The runtime behaviour is tested in M5.</li>
+  <li><strong>jit marker:</strong> a field whose resolver takes a <code>GqlInfo</code> parameter gets <code>gratos: { jit: false }</code> in its <code>extensions</code> in the generated <code>schema.ts</code>, for M4a's <code>jit()</code>. All <code>gratos</code> markers (<code>jit</code>, <code>semanticNonNull</code>) merge into the single <code>extensions</code> object that upstream already emits for directives (<code>{ grats: { directives } }</code>, schemaCodegen.ts:578-615). Upstream returns <code>null</code> when a field has no directives, so the merge creates the object when only <code>gratos</code> markers exist. No field ever gets a duplicate <code>extensions</code> property. There are fixtures for a field with markers plus a user directive, and for a field with markers alone.</li>
+  <li><strong>Library import specifier</strong> (implemented in M2, documented here): upstream hard-codes <code>"grats"</code> in generated code (<code>import type { GqlScalar } from "grats"</code>, emitted at <code>codegen/schemaCodegen.ts:102</code>), in the extractor (<code>LIBRARY_IMPORT_NAME</code>), and in error messages (<code>Errors.ts:280</code> and <code>:284</code> use the constant; <code>:561</code> is a literal). All of them are changed to take the configured name. It becomes a config option, <code>libraryImport</code>, defaulting to <code>"@gratos/grats"</code>. Upstream fixtures run with <code>"grats"</code>, so their snapshots don't change.</li>
+  <li><strong>CLI</strong> (<code>effect/cli</code>): <code>grats</code> writes both files. <code>grats --check</code> writes nothing and exits 1 with <code>Grats: `schema.graphql` is out of date. Run `grats`.</code></li>
+  <li>The <code>bench</code> script from M2 records files loaded, cold build ms and peak RSS on the synthetic fixture, compared against <code>bench/baseline.json</code>. Peak RSS is sampled over the whole process tree (Node plus <code>tsgo</code>), because the Go child is not counted in Node's <code>maxRSS</code>. M7 re-measures on <code>examples/orders</code>.</li>
+</ul>
+<div class="done"><span class="pill ok">Done when</span>
+  <ul>
+    <li>new fixtures cover <code>Effect</code>, <code>Stream</code>, a user-named <code>Effect</code> type, a bare <code>Effect</code> and input-position errors, plus <code>.invalid</code> fixtures for <code>Stream.Stream</code> on <code>@gqlQueryField</code> and on <code>@gqlField</code>;</li>
+    <li>the upstream fixtures are still green, except snapshot changes caused by §8 (explicit method resolvers), the jit marker and the reworded <code>subscriptionFieldNotAsyncIterable</code> diagnostic, each listed with its cause;</li>
+    <li>on the synthetic fixture, these spec targets are measured. A miss is reported, with the number, in the PR and in the final report. It does not block the merge gate, but a miss of more than 20% triggers a suggested council before merging: ≤ 530 files are loaded with third-party files read as empty, the cold build is ≤ 0.9 s, and peak RSS (process tree) is ≤ 380 MB, measured locally, with the CI bound at +20% because shared runners are noisy.</li>
+  </ul>
+</div>
+</div></details>
+
+<details class="ms"><summary><span class="id">M4a</span><span class="nm">Server core, contract, JSON path, core plugins</span><span class="br">PR 6 · feat/server-core</span></summary><div class="body">
+<ul>
+  <li><code>createServer({ schema, context, plugins })</code> returns <code>{ handle(Request): Promise&lt;Response&gt; }</code>. The core has five phases: read, doc cache, context, execute and encode. A test asserts that the core never imports <code>effect</code>.</li>
+  <li><strong>Contract types</strong> (the spec names these but never defines them):
+    <ul>
+      <li><code>Params = { query?, operationName?, variables?, extensions? }</code></li>
+      <li><code>onExecute({ operation, document, operationName }, args)</code>, where <code>operation: OperationDefinitionNode</code> is resolved by the core after the doc cache and before context. The spec's <code>readOnly</code> sample (<code>onExecute({ operation })</code> … <code>operation.operation</code>) works as written. <code>onContext(ctx, req, operation)</code> gets the same node.</li>
+      <li><code>args: ExecutionArgs</code></li>
+      <li><code>Executor = () =&gt; PromiseOrValue&lt;ExecutionResult | IncrementalResults | AsyncGenerator&lt;ExecutionResult&gt;&gt;</code></li>
+      <li><code>onResult(payload, ctx)</code> receives an initial result, a subsequent incremental payload, or a subscription event</li>
+      <li>synchronous-only (hot loop): <code>onResult</code>, <code>onPhase</code> and <code>onExecute</code>; every other hook may return a Promise</li>
+      <li><code>onResponse</code> runs exactly once, on the <code>Response</code> <em>before</em> it goes to the transport, including streamed responses, whose headers it can still change. It is not a "stream finished" hook. The end of a stream is observed by <code>onResult</code> payloads and by the body's completion or cancellation. A plugin that replaces the Response must keep <code>res.body</code>, either reusing it or wrapping it in a pass-through stream. It must never drop it, because body wrappers (<code>effect()</code>'s span end) depend on it. A test asserts that <code>serverTiming</code> followed by <code>effect()</code> still ends the span.</li>
+      <li>a throw in <code>onParams</code> becomes a 400 GraphQL error response. <code>onParams</code> runs <em>before</em> the "no query" check, so APQ hash-only requests reach <code>apq()</code></li>
+    </ul>
+  </li>
+  <li><strong>Hook lists</strong> are built once at startup, so a hook that no plugin defines costs nothing. <code>onExecute</code> runs in list order until one returns an executor. Documented ordering: <code>apq()</code> first; read-only plugins return nothing.</li>
+  <li><strong>Document cache:</strong> an LRU (default 1000) keyed by <code>(schema generation, query text)</code>. It stores the parsed, validated document. Inside each entry, plugin state such as the jit use count and the compiled executor is keyed by the <em>selected operation name</em>, so one document holding a mutation and a query never shares a compilation. A request pins the schema generation it started with until it ends. Invalid documents are not cached, and <code>parse</code> runs with <code>maxTokens</code>. <code>onPhase</code> fires for parse and validate on a cache miss, and for jit whenever a compilation actually happens. That includes the third request for a document that is already cached. <code>control.replaceSchema()</code> bumps the generation.</li>
+  <li><strong>HTTP matrix</strong> (GraphQL-over-HTTP):
+    <ul>
+      <li>POST only. GET and HEAD return 405 with <code>Allow: POST</code> and a null body.</li>
+      <li>Non-JSON or no <code>query</code>: 400. Unsupported content type: 415. Unsupported Accept: 406.</li>
+      <li><code>application/graphql-response+json</code> is the default. Parse, validation and variable errors give 400. Any non-null data gives 200.</li>
+      <li><code>application/json</code> gives 200 for any well-formed request.</li>
+      <li><code>gqlError(msg, status)</code> puts the status in <code>extensions.http.status</code>. It changes the HTTP status only when <code>data</code> is null.</li>
+    </ul>
+  </li>
+  <li><strong>Plugins:</strong>
+    <ul>
+      <li><code>apq()</code>: Apollo <code>persistedQuery {version, sha256Hash}</code>, <code>PERSISTED_QUERY_NOT_FOUND</code> and a hash-mismatch error. It stores only after validation passes.</li>
+      <li><code>jit({ after: 3 })</code>. It declines (returns no executor for) any operation whose variable types contain a <code>@oneOf</code> input, directly or nested. The walk keeps a visited set, so recursive input types terminate. The reason: graphql-jit 0.10.1 accepts empty, null-valued and multi-field oneOf inputs that graphql-js rejects (<em>verified</em>). Those operations always go to graphql-js.
+        <ul>
+          <li><strong>Abort-signal safety:</strong> graphql-jit's <code>info</code> has no <code>getAbortSignal()</code>, so a resolver that calls it works on graphql-js and throws once jit takes over (<em>verified</em>).</li>
+          <li>Grats codegen (M3) marks every field whose resolver declares a <code>GqlInfo</code> parameter with <code>extensions: { gratos: { jit: false } }</code>. A resolver without <code>info</code> cannot call <code>getAbortSignal()</code>, and neither the Effect wrapper nor default resolvers call it.</li>
+          <li><code>jit()</code> declines any operation whose selection, including the fragments it reaches, touches a field marked <code>jit: false</code>. Hand-written schemas can use the option <code>jit({ isSafe: (field) =&gt; boolean })</code>.</li>
+        </ul>
+      </li>
+      <li><code>reportErrors(log)</code></li>
+      <li><code>maskErrors()</code>, which also turns on <code>hideSuggestions</code></li>
+      <li>the spec's examples, <code>serverTiming()</code>, <code>maxDepth()</code> and <code>readOnly()</code>, as tested references</li>
+    </ul>
+  </li>
+  <li><strong>The core owns the abort signal.</strong> Each request gets a core <code>AbortController</code>. It is linked to the incoming <code>Request.signal</code>, and it is also aborted by the encoder when the response body is cancelled. The linked signal is passed as <code>abortSignal</code> to query and subscription execution, never to mutations. Hooks read it through a core export, <code>signalOf(req)</code>, backed by a WeakMap keyed by the uncloned <code>Request</code>. <code>req.signal</code> is the incoming one and is read-only. After the route returns its Response, <code>NodeHttpServer</code> never interrupts the route fiber. A mid-stream disconnect is visible only as a body cancel, which aborts the core's signal (<em>verified</em>).</li>
+  <li><strong>Mutation drain:</strong> the core tracks the promise of every in-flight <em>mutation operation</em>: the whole execution, including the gaps between serial fields. <code>control.drain({ warnAfterMs })</code> stops accepting new mutations and waits for <em>all</em> tracked mutations to settle, with no deadline. <code>warnAfterMs</code> only reports: it logs the operations that are still running. A deadline that released services mid-mutation would leave a write half-applied (<em>verified</em>). A process that must stop sooner is killed from outside, and that is outside this plan.</li>
+  <li><strong>No late start:</strong> the core checks its signal just before starting execution. If the client left during the context phase, the operation is not started. A mutation therefore runs either fully or not at all, and its span (created or late) ends with <code>cancel</code> because nothing ran.</li>
+  <li>The default executor is <code>execute</code>. graphql 17 then <em>throws</em> <code>AbortedGraphQLExecutionError</code> rather than returning a result (<em>verified</em>). The core catches it, skips <code>reportErrors</code>, and still runs the terminal path: <code>onResponse</code>, with a 499-style empty response that the disconnected client never reads. So cleanup hooks always run.</li>
+</ul>
+<div class="done"><span class="pill ok">Done when</span>
+  <ul>
+    <li>there is a test for each hook and for each row of the HTTP matrix. The method and content-type rows also run through <code>NodeHttpServer</code> in M5;</li>
+    <li>executor-order tests pass: apq passes through, jit wins on the third use, and default wins otherwise;</li>
+    <li>a cache hit fires no parse or validate phase; the third use fires the jit phase; <code>replaceSchema</code> starts a new generation while in-flight requests finish on the old one;</li>
+    <li>regression test: warm a mutation with jit, then run a query from the same document, and no mutation resolver runs;</li>
+    <li>regression test: a query whose resolver calls <code>info.getAbortSignal()</code>, warmed past the threshold, still runs on graphql-js, and its abort cleanup runs. This holds for a direct field and for a field reached through <code>... on Interface</code> or a union: the walk checks the field on every possible concrete type;</li>
+    <li>regression test: warm an operation with a <code>@oneOf</code> variable past the jit threshold, then send empty, null-valued and multi-field inputs. Each gets a validation error and the resolver is called zero times;</li>
+    <li>jit and default return deep-equal results on a shared suite of successes and resolver errors. Comparisons are deep, because the two order keys differently. Variable-coercion errors are compared only by count and path, because their messages differ (<em>verified</em>).</li>
+  </ul>
+</div>
+</div></details>
+
+<details class="ms"><summary><span class="id">M4b</span><span class="nm">Incremental delivery and subscriptions</span><span class="br">PR 7 · feat/server-streaming</span></summary><div class="body">
+<ul>
+  <li><strong><code>incremental()</code></strong> adds <code>GraphQLDeferDirective</code> and <code>GraphQLStreamDirective</code> to the schema at startup through <code>onServer</code> and <code>replaceSchema</code>; Grats never emits them.
+    <ul>
+      <li>When the schema has these directives, the default executor becomes <code>legacyExecuteIncrementally</code>. Plain <code>execute()</code> throws on such a schema (<em>verified</em>).</li>
+      <li>The wire format is <code>multipart/mixed; boundary="-"; deferSpec=20220824</code>, the format Apollo Client reads.</li>
+      <li><strong>No <code>@defer</code>/<code>@stream</code> on mutations.</strong> <code>incremental()</code> adds a validation rule that rejects them on mutation operations, with a 400 and a clear message. graphql 17.1 would accept them, return the initial result while deferred mutation work is still pending, and let <code>return()</code> skip that work (<em>verified</em>). That would let a write outlive the shutdown drain or be dropped. The spec never needs incremental mutations, so rejecting them is the smallest safe choice.</li>
+      <li><code>incremental()</code> returns an executor only when the <em>selected operation</em> and the fragments it can reach use <code>@defer</code>/<code>@stream</code>, never because of something elsewhere in the document. It never claims a subscription. jit silently inlines <code>@defer</code>, so <code>incremental()</code> must come before <code>jit()</code>.</li>
+      <li><strong>Subscriptions always dispatch through graphql-js <code>subscribe()</code></strong>, whatever other operations the document holds. <code>jit()</code> declines subscriptions: graphql-jit 0.10.1 passes wrong arguments to subscription source resolvers. <code>changed(id: "o-1")</code> receives <code>{}</code>, and <code>changed(id: $order)</code> receives <code>{ order }</code> (<em>verified</em>). A <code>legacyExecuteIncrementally</code> call on a subscription returns a one-shot <code>{ data: { event: null } }</code> (<em>verified</em>).</li>
+    </ul>
+  </li>
+  <li><strong>Subscriptions</strong> run through graphql-js <code>subscribe()</code> only. They are encoded as GraphQL-over-SSE "distinct connections" (<code>event: next</code>, then <code>event: complete</code>). When the client disconnects, the body stream's <code>cancel()</code> calls <code>iterator.return()</code>.</li>
+  <li><strong>Errors in streamed payloads:</strong> <code>maskErrors</code> and <code>reportErrors</code> cover <code>initialResult.errors</code>, <code>incremental[].errors</code> (the legacy format of <a href="#defaults">default 8</a>) and every subscription event. When a source fails, both subscription executors reject <code>next()</code>, and the payload hooks never see it (<em>verified</em>). So the encoder catches a rejected pull, turns it into a GraphQL error payload, passes that through the same <code>onResult</code> masking and reporting, sends it as a final <code>event: next</code>, then sends <code>complete</code>.</li>
+  <li><strong>Disconnect order:</strong> the core's request signal is aborted first, so cooperative sources stop (for example one waiting on <code>info.getAbortSignal()</code>). Only then is <code>return()</code> awaited. A <code>return()</code> alone can hang on a pending pull (<em>verified</em>). When <code>signal.aborted</code> is true, a rejected pull is graphql's <code>AbortError</code> <code>DOMException</code> or the <code>cancelled()</code> sentinel. The encoder then skips <code>onResult</code> and <code>reportErrors</code>, and enqueues no final event.</li>
+</ul>
+<div class="done"><span class="pill ok">Done when</span>
+  <ul>
+    <li>with <code>incremental()</code> installed, a plain query through the default executor returns data;</li>
+    <li>a <code>@defer</code> and a <code>@stream</code> response match recorded multipart snapshots;</li>
+    <li>a deferred resolver error is masked;</li>
+    <li>an abort during an in-flight query is caught (<code>AbortedGraphQLExecutionError</code>), is not reported, and still runs <code>onResponse</code>;</li>
+    <li>a client that disconnects mid-stream triggers the source generator's <code>finally</code>, including an idle source that has nothing to yield;</li>
+    <li>with no HTTP server involved, cancelling the body of a standalone <code>handle(Request)</code> response aborts the core signal while a subscription source is waiting on <code>info.getAbortSignal()</code>, and the source's cleanup runs;</li>
+    <li>over real HTTP, a source that throws mid-subscription (both a <code>GraphQLError</code> and a plain <code>Error</code>) produces one error event and then <code>complete</code>. The plain <code>Error</code> is masked, and <code>reportErrors</code> sees both;</li>
+    <li>an SSE subscription delivers N events and then completes;</li>
+    <li>regression test: a mutation with a nested <code>@defer</code>, and one with a nested <code>@stream</code>, each reached directly and through two levels of named fragments (the rule walks <code>getRecursivelyReferencedFragments(op)</code>), gets a 400 validation error under <code>Accept: application/graphql-response+json</code>, and no resolver runs;</li>
+    <li>regression test: a document holding a deferred query and a subscription, with the subscription selected, streams events and is not answered once;</li>
+    <li>regression test: after repeated requests, past the jit threshold, the source resolver of <code>changed(id: "o-1")</code> and of <code>changed(id: $order)</code> receives <code>{ id }</code>.</li>
+  </ul>
+</div>
+</div></details>
+
+<details class="ms"><summary><span class="id">M5</span><span class="nm">Effect layer</span><span class="br">PR 8 · feat/server-effect</span></summary><div class="body">
+<ul>
+  <li><strong>Wrapper.</strong> <code>effectSchema(schema, { failure })</code> wraps every <code>resolve</code>/<code>subscribe</code> once, at startup. It takes the cheapest path for each return value:
+    <ul>
+      <li>a plain value is returned after one <code>Effect.isEffect</code> check;</li>
+      <li>an <code>Exit</code> is answered immediately, with no fiber;</li>
+      <li>an <code>Effect</code> is forked with <code>runForkWith(scope.context)</code>; if <code>pollUnsafe</code> already has a result, it is returned with no Promise.</li>
+    </ul>
+    For an Effect field whose extensions say <code>semanticNonNull</code>, a null success value becomes a field error, exactly as Grats' <code>assertNonNull</code> would raise for a Promise field. Null Stream items are <em>not</em> checked in the wrapper. Grats' own <code>assertNonNull</code> on the subscription's per-event <code>resolve</code> handles them, so one bad item gives one event with an error and the subscription carries on. Async derived context makes Grats generate <code>async</code> adapters, so even a model annotated with a direct <code>Effect.Effect</code> or <code>Stream.Stream</code> can reach the wrapper inside a Promise. A thenable from <code>resolve</code> or <code>subscribe</code> therefore keeps its fast path, but its <em>fulfilled value</em> is classified the same way: an Effect is run, and a Stream becomes the single-iterator iterable. A resolver that returns a tagged-error instance as data counts as an Effect. That is documented and covered by a test.</li>
+  <li><strong>Errors.</strong> <code>fromCause</code> handles each cause in one of three ways:
+    <ul>
+      <li>a typed failure (<code>Cause.findError</code>) goes to the app's <code>Match.tagsExhaustive</code> mapper;</li>
+      <li>an interrupt-only cause carrying the <code>ClientAbort</code> annotation becomes the <code>cancelled()</code> sentinel, which <code>reportErrors</code> and the error counter ignore;</li>
+      <li>anything else becomes <code>ResolverDefect(Cause.squash)</code> with <code>stack = Cause.pretty</code>, which the mask hides.</li>
+    </ul>
+    A cause holding both a Fail and a Die maps the typed error <em>and</em> reports the defect.</li>
+  <li><strong>Subscriptions.</strong> <code>wrapSubscribe</code> applies <code>Stream.catchCause(c =&gt; Stream.die(fromCause(c)))</code> and then <code>Stream.toAsyncIterableWith(scope.context)</code>, so stream items take the same error paths as fields. It returns a request-local iterable whose <code>[Symbol.asyncIterator]()</code> always returns the <em>same</em> iterator. graphql-js takes one iterator for cleanup and another for pulling, and the raw iterable creates a fresh one each time, so <code>return()</code> would close the unused iterator and leave the live pull hanging (<em>verified</em>). <code>return()</code> on that single iterator closes the Stream's scope.</li>
+  <li><strong>Route.</strong> <code>effectRoute(server)</code> is the handler for <code>HttpRouter.add("*", "/graphql", …)</code>, so a GET reaches the core and gets its 405.
+    <ul>
+      <li>Inside the route Effect it yields <code>HttpServerRequest.toWeb(req, { signal })</code>, which is an <code>Effect&lt;Request, RequestError&gt;</code>, captures the fiber context with <code>Effect.withFiber</code>, then runs <code>Effect.promise((signal) =&gt; server.handle(request))</code> and <code>HttpServerResponse.fromWeb</code>.</li>
+      <li>The same <code>Request</code> object is the WeakMap key in every phase; the core never clones it.</li>
+      <li>The signal that <code>effectRoute</code> passes to <code>toWeb</code> comes from a route <code>AbortController</code>. The route aborts it from <code>Effect.promise</code>'s signal listener, which fires only on interrupt, never on normal completion. The core links its own controller to it (M4a), and body cancellation is handled there.</li>
+    </ul>
+  </li>
+  <li><strong>Fibers.</strong>
+    <ul>
+      <li>One abort listener per request, on <code>signalOf(req)</code>, calls <code>interruptUnsafe</code> with the <code>ClientAbort</code> annotation.</li>
+      <li>A fiber removes itself from <code>scope.fibers</code> when it completes (<code>addObserver</code>).</li>
+      <li>Mutation fibers are never interrupted on abort. On shutdown, the <code>effectRoute</code> layer's finalizer calls the core's <code>control.drain({ warnAfterMs })</code>, which waits until every tracked mutation has settled. That waits for the whole mutation operation, not just its current resolver fiber: a resolver-level <code>FiberSet</code> can drain between two serial fields (<em>verified</em>). <code>HttpRouter.add</code> only records handler requirements as phantom types, so the dependency is built explicitly. <code>effectRouteLayer(server)</code> wraps the route Layer and yields the app's service tags, or is <code>Layer.provide</code>d with them, so its drain finalizer runs before the services are released. <code>effectRoute(server)</code> is the handler, and <code>effectRouteLayer(server)</code> is the Layer. It is given the <em>same layer values</em> the app uses, so Effect's MemoMap shares one set of service instances, and the shutdown test uses the example app's real wiring (<em>verified</em>: with <code>Layer.provide</code>, the dependent drain finalizer runs before the service is released). <code>effectRouteLayer</code> is <code>Layer.provide</code>d with the same service layer values <em>and</em> the same tracer layer value as the app. So the tracer is also released only after the drain, and every mutation span ends normally, after its last resolver, before the tracer goes away (<em>verified</em>: teardown order drain → span end → tracer release → service release, each service built once).</li>
+      <li>The fork context excludes the request <code>Scope</code>. Resolvers that need one use <code>Effect.scoped</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Tracing.</strong> The <code>effect()</code> plugin works as follows:
+    <ul>
+      <li><code>effectRoute</code> records <code>t0</code> when the request enters the route, in a WeakMap keyed by the <code>Request</code>, which the core never clones. <code>effect()</code> reads <code>t0</code> from that WeakMap. When the core is served without <code>effectRoute</code>, <code>effect()</code> uses the core's own start time, <code>startOf(req)</code>, recorded at <code>handle()</code> entry before any <code>onRequest</code> plugin runs, in <code>performance.now()</code> ms. It is converted with the same per-request anchor as <code>onPhase</code>. A 2xx short circuit from an earlier plugin still gets a span with a start time and an <code>ok</code> status. A standalone request that reaches parse and validate has an operation span starting at or before its first phase span. The span ends when the body completes, meaning the last chunk was handed to the transport. That comes before Node's socket <code>finish</code> event. <code>onPhase</code> buffers phase timings.</li>
+      <li><code>onContext(ctx, req, op)</code> runs once the operation is known and before any resolver forks. It creates <code>graphql &lt;op&gt;</code> through <code>Context.get(scope.context, Tracer.Tracer).span({ name, parent: Option.some(httpSpan), annotations, links, startTime: t0, kind: "internal", root: false, sampled })</code>. All span times are nanoseconds from the Effect <code>Clock</code>, the same clock for the operation span and the phase spans. The core, which has no Effect dependency, reports <code>onPhase(name, startedAt)</code> in <code>performance.now()</code> milliseconds. <code>effect()</code> converts every <code>performance.now()</code> value (phase starts and ends, <code>startOf(req)</code>) against <strong>one per-request anchor</strong>: a <code>(clockNanos, perfMs)</code> pair captured once, when the operation span is created or at the early-exit span. The conversion is <code>nanos = clockNanos + (perfMs of x − perfMs) × 10⁶</code>. Separate reads of the Clock and of <code>performance.now()</code> drift slightly relative to each other, and a user-supplied Clock (a TestClock, or one based on Date) can have only millisecond resolution. Either way, reading the Clock separately in each hook could place a phase before its operation span (<em>verified</em>: 9 of 500 trials). Under <code>effectRoute</code>, <code>t0</code> is stored in the WeakMap as a <code>performance.now()</code> value and converted through the same anchor, so every span time comes from one conversion. The operation span is named <code>anonymous</code> when the operation has no name in the document. It also emits the buffered phase spans with explicit start and end times, sets <code>Tracer.ParentSpan</code> in <code>scope.context</code>, records the operation type, and marks mutations. From then on, <code>onPhase</code> emits each new phase (jit compiles <em>after</em> <code>onContext</code>) as a child span immediately, without buffering.</li>
+      <li>The context factory runs before <code>onContext</code>, so a <code>runInRequest</code> span (for example the session read) is a child of the HTTP span. That still meets the spec, which asks only that the session span "joins the request's trace".</li>
+      <li>On an early exit (a parse or validation error, an <code>onParams</code> throw, or an <code>onRequest</code> answer), no <code>onContext</code> ever runs. <code>onResponse</code> then creates a <code>graphql anonymous</code> span, backdated to <code>t0</code>, with the buffered phase spans, and hands it to the same finalizer. Its status is an error only when the response status is 400 or above, so an <code>onRequest</code> plugin that serves a deliberate 2xx response ends <code>ok</code>.</li>
+      <li>Only the Effect path adds <code>withSpan("resolve Type.field")</code>.</li>
+      <li><code>onResult</code> counts errors, including stream items.</li>
+      <li><strong>Ending the span.</strong> The operation span is ended by <strong>one idempotent finalizer</strong> per request. Its trigger is the response <em>body</em>, observed through hooks the spec already has. <code>effect()</code>'s <code>onResponse</code> returns a new <code>Response</code> with the same status and headers, whose body is a pass-through <code>ReadableStream</code> wrapping the original. The spec's <code>serverTiming</code> example replaces the Response the same way.
+        <ul>
+          <li>The wrapper's <code>pull</code> sees <code>done</code> and ends the span with <code>complete</code>, or sees a read error and ends it with <code>error</code>.</li>
+          <li>Its <code>cancel(reason)</code> ends the span with <code>cancel</code> and forwards the cancel to the original body. <code>pull</code> checks the same <code>ended</code> flag before touching the controller, because a pending <code>read()</code> resolves <code>done</code> after a cancel, and closing the cancelled controller would throw.</li>
+          <li>This works for a single JSON body and for SSE and multipart bodies alike, so the span ends after the last payload is written.</li>
+        </ul>
+        Backstop: <code>effectRoute</code> registers the same finalizer with the <strong>HTTP request's Scope</strong> (<code>Effect.addFinalizer</code>). That scope closes after the transport has finished with the response: after the body is written, after a discarded body such as a HEAD response (which is neither read nor cancelled, <em>verified</em>), after a transport failure, or after an interrupt. This was verified on Effect 4.1.5's <code>NodeHttpServer</code>: the route has a request <code>Scope</code>, which closed 8 ms after a streamed body's close, immediately after a HEAD response, and 4 ms after a client cancel. It does not use <code>Effect.ensuring</code> or an <code>onExit</code> on the route fiber, which ends at time-to-first-byte. The body wrapper gives the exact end time.
+        <ul>
+          <li><strong>Closed flag:</strong> the per-request finalizer state has a <code>closed</code> flag. The finalizer sets it, and ends any span that exists with <code>cancel</code>. For a <em>mutation</em> that the core reports as <em>started</em>, which keeps running after the client leaves, the end is deferred until the core's tracked mutation promise settles. The status is then ok or error, not cancel. The deferral depends only on that started signal, never on <code>onContext</code>'s mutation mark alone. If the core skips the mutation under the no-late-start check, it reports the request as not started, and the deferred end resolves at once with <code>cancel</code>. A span created <em>after</em> <code>closed</code> is set, in <code>onContext</code> or as the early-exit span in <code>onResponse</code>, is ended immediately with <code>cancel</code>. This covers a client that leaves while the context factory is still running: the scope closes before the span exists (<em>verified</em>, scope closed at 114 ms, span would be created at 415 ms).</li>
+          <li><strong>No body:</strong> if <code>res.body === null</code> in <code>onResponse</code> (for example the 499 abort response, or a 204), <code>effect()</code> ends the span there and returns the Response unchanged. A null body has nothing to wrap, and a 204 with a stream throws.</li>
+          <li>A second call does nothing.</li>
+        </ul>
+        Together these three triggers (body wrapper, null body, request scope with closed flag) guarantee an end under <code>effectRoute</code>. For a standalone <code>handle(Request)</code> with no scope, they guarantee an end provided the caller consumes or cancels the body. The core sends GET and HEAD 405s with a null body, so those go through the null-body path.</li>
+      <li><strong>Plugin rule</strong> (documented in M4a's contract): a plugin that replaces the Response in <code>onResponse</code> must reuse <code>res.body</code>, as <code>serverTiming</code> does, and must not discard it. With that rule, plugin order does not matter. Both <code>[serverTiming(), effect()]</code> and the spec's <code>[effect(), serverTiming()]</code> end the span correctly (<em>verified</em>).</li>
+    </ul>
+  </li>
+  <li><strong>Context and guard.</strong> <code>runInRequest(request, effect, services)</code> runs an Effect inside the context factory, and its span shares the request's trace. <code>makeGuard({ authorize, flags, timeout = 60 s, headers })</code> provides <code>ctx.guard</code> and <code>ctx.guardStream</code>.
+    <ul>
+      <li>A refusal returns <code>Effect.fail(refuse())</code>, where <code>refuse</code> builds the app's own error, such as <code>Forbidden</code> in the spec's union. That value is an Exit, so it costs no fiber and no span.</li>
+      <li>The timeout applies to <strong>queries only</strong>. A mutation gets no interrupting timeout. <code>guardStream</code> times out only the setup effect, never the stream itself.</li>
+      <li><strong>The timeout is a defect, not a typed failure.</strong> A timeout <em>dies</em> with the library's <code>GuardTimeout</code>, so resolver types stay <code>Effect&lt;A, AppError, R&gt;</code>. If it were a typed failure, the app's <code>Match.tagsExhaustive</code> would throw <code>absurd</code> on it (<em>verified</em>). <code>fromCause</code> checks the defects for <code>GuardTimeout</code> <em>before</em> the <code>ResolverDefect</code> fallback, and maps it to <code>gqlError("Request timeout", 504)</code>, which can be overridden with <code>effectSchema({ onTimeout })</code>.</li>
+      <li><strong>Telling mutations apart:</strong> <code>effect()</code>'s <code>onContext</code> writes an <code>OperationType</code> <code>Context.Reference</code> into <code>scope.context</code>, and <code>ctx.guard</code> reads it at run time. With no server, as in unit tests, it defaults to <code>"query"</code>, and a test can set it.</li>
+      <li><code>guardStream({ scopes, stream, setupTimeout })</code> accepts <code>stream: Effect&lt;Stream&lt;A, E, R&gt;, E2, R2&gt; | Stream&lt;A, E, R&gt;</code>. Given an Effect, it applies <code>setupTimeout</code> (default: the guard timeout) to that setup effect only, then calls <code>Stream.unwrap</code> itself. The stream's lifetime has no limit. Given a Stream, there is no setup to bound. <code>examples/orders</code> passes the <code>Effect.gen(…)</code> directly, instead of the spec's <code>Stream.unwrap(Effect.gen(…))</code>, because once the setup is wrapped in <code>Stream.unwrap</code>, a timeout on it would also end idle subscriptions.</li>
+    </ul>
+  </li>
+</ul>
+<div class="done"><span class="pill ok">Done when</span> the suite below runs once per executor (default, jit after warm-up, incremental) and passes:
+  <ul>
+    <li><strong>Semantic non-null:</strong> an Effect field marked <code>semanticNonNull</code> whose Effect succeeds with null yields a field error, not a silent null. A generated <code>strictSemanticNullability</code> subscription whose Stream yields <code>null</code> and then a valid value delivers two events and then <code>complete</code>: the first carries an error at the field path, and the second carries the valid value.</li>
+    <li><strong>Promise-wrapped:</strong> a generated query and a generated subscription that use async derived context, returning an Effect and a Stream, resolve correctly.</li>
+    <li><strong>Return paths:</strong> an Exit return creates no fiber (spy on <code>runForkWith</code>); a sync Effect returns a value, not a Promise; a guard refusal creates no fiber and no span.</li>
+    <li><strong>Error mapping:</strong> Fail, Die, Fail plus Die, and interrupt are each handled correctly; an unmapped tag fails <code>tagsExhaustive</code> (a <code>@ts-expect-error</code> test); a typed stream failure is mapped and a stream defect is masked.</li>
+    <li><strong>Aborts</strong> (at least one case over a real <code>NodeHttpServer</code> socket closed mid-SSE and mid-multipart, not only through body cancellation): a client that aborts is not reported; a mutation completes after an abort, including when jit runs it; a <code>@defer</code> client that disconnects after the first payload interrupts the deferred resolver.</li>
+    <li><strong>Idle subscription:</strong> a client that closes the socket on an Effect subscription with nothing to yield runs the source's <code>acquireRelease</code> finalizer.</li>
+    <li><strong>Fibers and shutdown:</strong> <code>scope.fibers</code> is empty after N subscription events; shutdown during a mutation with two serial async fields commits both fields before any service is released. Regression test, with the real example wiring: a mutation is held past <code>warnAfterMs</code> between two serial fields while shutdown starts. A warning is logged, both fields commit before any service is released, and the operation span ends exactly once after the last resolver, before the tracer layer is finalized.</li>
+    <li><strong>Timeouts:</strong> a slow mutation still commits; a subscription outlives the timeout.</li>
+    <li><strong>Tracing:</strong> an in-memory tracer shows one trace id per request (HTTP → operation → phases → resolvers → RPC). Phase spans start at or after the operation span. A cache hit has no parse or validate span. The session-read span shares the trace id. A validation error produces a <code>graphql anonymous</code> error span. No span is left open after an abort. For an SSE subscription with N events, and for a <code>@defer</code> response, the operation span ends at or after the last payload's write time, and it ends exactly once (finalizer call counter). A real HEAD request over <code>NodeHttpServer</code> ends the span exactly once. A client that disconnects during a slow <code>runInRequest</code> context factory, over a real <code>NodeHttpServer</code>, leaves no span open. A 499 from a standalone <code>handle(Request)</code> abort ends the span exactly once. A mutation whose client aborts <em>after its first resolver has started</em> ends its span after its last resolver span, exactly once, with status <code>ok</code>, or <code>error</code> if it failed, never <code>cancel</code>. A mutation whose client disconnects during a slow <code>runInRequest</code> context factory, over a real <code>NodeHttpServer</code>, never runs its resolver: the executor is called zero times, and its span ends with <code>cancel</code> exactly once. The third request for a document emits a <code>jit</code> child span.</li>
+    <li><strong>Guard:</strong> a slow query and a slow subscription setup each die with <code>GuardTimeout</code>, which is mapped to a 504 GraphQL error and never reaches the app's matcher. Resolvers typed <code>Effect&lt;A, AppError, R&gt;</code> compile.</li>
+  </ul>
+</div>
+</div></details>
+
+<details class="ms"><summary><span class="id">M6</span><span class="nm">Dev loop (live rebuild)</span><span class="br">PR 9 · feat/grats-dev</span></summary><div class="body">
+<ul>
+  <li><code>pnpm dev</code> runs <code>GRATS_DEV=1 node --watch-path=src/models --watch-path=src/services --watch-preserve-output src/server.ts</code>. The flag has to be explicit, because Node removes <code>--watch</code> and <code>--watch-path</code> from the child's <code>process.execArgv</code> (<em>verified</em>).</li>
+  <li><code>@gratos/grats/dev</code> is imported lazily, and only when <code>GRATS_DEV=1</code>. On boot it runs <code>generate()</code>, writes only the changed files into <code>src/generated/</code> (which is not watched), and then imports <code>schema.ts</code>.</li>
+  <li>When the models do not build, the server still starts and every request answers 500 with code <code>GRATS_ERROR</code> and the diagnostics. <code>--watch-path</code> watches folders, not the import graph, so the next good save still restarts it.</li>
+  <li>Each save resets the APQ and JIT caches, and open SSE subscriptions drop and reconnect.</li>
+</ul>
+<p>M6 adds a minimal runnable <code>examples/orders</code> (one model, the Node server, generated files committed), so these tests run before M7 fleshes it out.</p>
+<div class="done"><span class="pill ok">Done when</span> an integration test under <code>node --watch-path</code> does the following:
+  <ul>
+    <li>it edits a model and sees the new field after one restart;</li>
+    <li>it breaks the model and gets <code>GRATS_ERROR</code>, then fixes it and the server recovers;</li>
+    <li>save-to-first-good-response takes ≤ 2 s locally, with a CI bound at +50%;</li>
+    <li>a production start (no watch) never loads <code>typescript</code>, asserted by checking that it is absent from the loaded modules.</li>
+  </ul>
+</div>
+</div></details>
+
+<details class="ms"><summary><span class="id">M7</span><span class="nm">Example app, docs, end-to-end</span><span class="br">PR 10 · feat/example-orders</span></summary><div class="body">
+<ul>
+  <li><code>examples/orders</code> follows the spec's code:
+    <ul>
+      <li><code>Order</code> and <code>User</code>, plus <code>orders</code>, <code>cancelOrder</code> and <code>orderChanged</code></li>
+      <li>the <code>NotFound | Forbidden</code> error union</li>
+      <li><code>Api</code> and <code>Bus</code> services, and <code>FakeApi.layer</code></li>
+      <li>the "test a resolver with no server" tests</li>
+    </ul>
+  </li>
+  <li>The wiring from spec §8 runs on <code>NodeHttpServer</code>. End-to-end tests run a query, a mutation, an SSE subscription, <code>@defer</code> and <code>@stream</code> over real HTTP. The incremental flows use <strong>Apollo Client ≥ 4.1</strong> (the first release with <code>@stream</code> for <code>Defer20220824Handler</code>), pinned, as the named real client, with <code>Defer20220824Handler</code> set explicitly as its <code>incrementalHandler</code>. The <code>@stream</code> test uses <code>fetchPolicy: "no-cache"</code>, because with that handler Apollo's default merge truncates the streamed array to its first chunk (Apollo 4.1.0 changelog, #13078).</li>
+  <li>An Effect chapter in <code>llm-docs</code>, and a README with the spec's "rules for a new resolver".</li>
+</ul>
+<p><span class="pill ok">Done when</span> the end-to-end tests are green in CI, <code>codegen:check</code> passes, and the docs take a new resolver through the spec's five steps: write, generate, nothing, guard, test.</p>
+</div></details>
+
+<h2>How we prove it</h2>
+<div class="grid g2">
+  <div class="card"><div class="t">Parity bar</div><p><strong>(a) Vendored vs the oracle</strong> (<code>grats@0.0.36</code>, TS 5.9.2, graphql 16): the oracle's SDL is re-printed through graphql 17's <code>parse</code>/<code>print</code> and must match byte for byte; <code>findBreakingChanges</code> and <code>findDangerousChanges</code> must be empty; "Query Result" must be identical on all 29 integration fixtures.<br><strong>(b) TS 7 vs TS 5.9.2</strong> (same engine, both facades): zero diffs in SDL and Error Report sections. TypeScript-section diffs are allowed only for formatting, and each is listed.</p></div>
+  <div class="card"><div class="t">Behaviour</div><p>vitest with <code>@effect/vitest</code>. Resolvers are tested as plain Effects with fake layers, the server through <code>handle(Request)</code>, and end-to-end over real HTTP with Apollo Client.</p></div>
+  <div class="card"><div class="t">Tracing</div><p>An in-memory span exporter checks the span tree, the single trace id, the backdated phase timings, and that no span is left open.</p></div>
+  <div class="card"><div class="t">Performance</div><p><code>bench/baseline.json</code> records the runner class. Local targets are taken from the spec; CI bounds are +20% for builds and +50% for dev restarts.</p></div>
+</div>
+
+<h2>Risks</h2>
+<div class="tw"><table>
+<tr><th>Risk</th><th></th><th>Mitigation</th></tr>
+<tr><td>The TS 7 API lives under <code>unstable/</code> and can change in a minor release</td><td><span class="pill risk">high</span></td><td>Pin exactly, upgrade on purpose, and keep all access in <code>src/ts/</code>. The fixture suite on both facades catches drift. Escape hatch: <a href="#defaults">default 3</a></td></tr>
+<tr><td>The Go printer formats <code>schema.ts</code> differently from the 5.9 printer</td><td><span class="pill dev">medium</span></td><td>A sample already matched byte for byte. Parity bar (b) allows only listed formatting diffs</td></tr>
+<tr><td>The M2 port is larger than a rename</td><td><span class="pill dev">medium</span></td><td>The TS5-shaped facade isolates it. The inventory in the facts above is the M2 checklist, and checker latency is measured (200 unbatched calls take 5.7 ms)</td></tr>
+<tr><td><code>HttpServerRequest.toWeb</code> and <code>NodeHttpServer</code> internals are <code>@stability unstable</code></td><td><span class="pill dev">medium</span></td><td>Effect is pinned exactly at 4.1.5, and the route has its own end-to-end tests</td></tr>
+<tr><td><code>Stream.toAsyncIterableWith</code> forks two fibers per pull</td><td><span class="pill dev">low</span></td><td>Benchmark subscription throughput in M5. If needed, pull in chunks</td></tr>
+<tr><td><code>@effect/language-service</code> does not support the Go-native TS 7</td><td><span class="pill dev">low</span></td><td>It is optional. Record its status in M0</td></tr>
+<tr><td>Each dev restart rebuilds the program from scratch</td><td><span class="pill dev">low</span></td><td>tsgo plus empty third-party files. M6 sets the ≤ 2 s bound</td></tr>
+</table></div>
+
+<h2 id="defaults">Proposed defaults (applied unless the council overrules)</h2>
+<ol class="q">
+  <li><strong>Wrapper names:</strong> only the qualified <code>Effect.Effect</code>/<code>Stream.Stream</code> count, as Fig. 3 says. A bare <code>Effect&lt;…&gt;</code> gets a diagnostic that suggests the qualified form. The spec's bare samples are read as shorthand.</li>
+  <li><strong>Dev reload:</strong> <code>node --watch-path</code> restarts. Losing the APQ and JIT caches and open subscriptions on each save is accepted for development.</li>
+  <li><strong>TS 7 escape hatch:</strong> if M2 hits a missing API or a cold build above 1.5 s, M2 stops before merging, asks you, and suggests a council. Moving Grats back to 5.9.2 is your decision, and the facade makes it a one-line change. Nothing ships on 5.9.2 silently.</li>
+  <li><strong><code>ctx.guard</code> boundary:</strong> the library ships a generic <code>makeGuard</code>, and the app supplies the policy (scopes, flags, session headers).</li>
+  <li><strong>Packaging:</strong> private workspace packages under <code>@gratos/*</code>, not published.</li>
+  <li><strong>Turborepo cache:</strong> local, plus <code>actions/cache</code> in CI. No remote-cache token.</li>
+  <li><strong>Merging:</strong> each milestone is merged by full send once its merge gate passes, and the next milestone starts from the updated <code>main</code>. No stacked PRs. An uncertain change stops for a suggested council.</li>
+  <li><strong>Incremental wire format:</strong> <code>deferSpec=20220824</code> through <code>legacyExecuteIncrementally</code>, for client compatibility. The newer pending/completed format can be added later.</li>
+</ol>
+
+<h2 id="council-notes">Council implementation notes (non-blocking, recorded after approval)</h2>
+<p>All three council members approved plan v11 at 9/10. These are the non-blocking notes from the approving round. They are applied in the milestone named, checked by that milestone's proof and review, and change none of the approved mechanisms, scope or delivery process. If one of them turns out to change a mechanism, the full-send rule applies: stop and suggest a council.</p>
+<ol class="q">
+  <li><strong>M4a, one gate step:</strong> the drain-gate check, the no-late-start check and registration in the tracked set run in one synchronous step just before the executor call, so every mutation is either tracked or never started. Test: shutdown while a mutation is in a slow <code>runInRequest</code> context factory ends either with zero executor calls and a <code>cancel</code> span, or with both fields committed before any service is released.</li>
+  <li><strong>M4a, core export:</strong> <code>mutationOf(req): { started: Promise&lt;boolean&gt;, settled: Promise&lt;void&gt; } | undefined</code>, alongside <code>signalOf</code> and <code>startOf</code>. <code>started</code> resolves <code>false</code> on every path that never calls the executor. The started signal is published, and the completion promise registered, before the executor is called. The operation span is ended before that promise settles, so the drain waits for both.</li>
+  <li><strong>M4a, refusal while draining:</strong> a mutation refused during the drain gets a 503 with <code>extensions.code: "SERVER_DRAINING"</code>, with a test. <code>warnAfterMs</code> logs once when the threshold passes, then again every <code>warnAfterMs</code> while the drain is blocked.</li>
+  <li><strong>M5, teardown wording:</strong> the plan relies only on the drain and the mutation span end happening before the tracer and services are released. The release order between the tracer and the services depends on the <code>Layer.provide</code> order and is not relied on.</li>
+  <li><strong>M5, the shutdown test under <code>NodeHttpServer</code>:</strong> <code>HttpRouter.serve</code>'s graceful-shutdown wait runs before the drain finalizer. The regression test therefore aborts the client socket, or sets a short <code>gracefulShutdownTimeout</code> or <code>disablePreemptiveShutdown</code>, so that <code>drain</code> really runs while the mutation is held. The test's "a warning is logged" assertion catches a misconfiguration.</li>
+  <li><strong>M5, ordering inside the drain:</strong> the span-end continuation is registered when the mutation starts, or <code>drain()</code> yields a microtask after its tracked promises settle, so a direct <code>control.drain()</code> call in a unit test keeps "span end before drain done".</li>
+  <li><strong>Prose:</strong> the "9 of 500 trials" figure in the Clock note came from separate reads. A re-run gives 0 of 500 on the default hrtime Clock and 495 of 500 on an ms-quantized Clock without the anchor, and 0 of 500 with the anchor in both cases.</li>
+</ol>
+
+</main>
+</body>
+</html>

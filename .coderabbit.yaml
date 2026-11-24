@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  request_changes_workflow: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/src/generated/**"
+    - "!packages/grats/llm-docs/**"
+    - "!packages/grats/src/upstream/**"
+    - "!packages/grats/test/fixtures/**"
+    - "!packages/grats/test/integrationFixtures/**"
+    - "!.agents/**"
+    - "!pnpm-lock.yaml"
+    - "!docs/plan.html"

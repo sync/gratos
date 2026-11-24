@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "skills": {
+    "effect-ts": {
+      "source": "Effect-TS/skills",
+      "commit": "155c50c911f9c99c294ef8a4461981c5bbe6453e",
+      "sourceType": "github",
+      "skillPath": "skills/effect-ts/SKILL.md",
+      "computedHash": "0e5d926566561f7fe206f5f60c1c53e21d1519fd6de8408a7e3c9934d55ad04f"
+    },
+    "grats": {
+      "source": "captbaritone/grats",
+      "commit": "45b0805eec36f55803dabaa1b97d8b7774ff6336",
+      "sourceType": "github",
+      "skillPath": "skills/grats/SKILL.md",
+      "computedHash": "3532838f4dd0d60c9f794ac190213620bd30675aa5e9b727b4ee9f80691a0a9e"
+    },
+    "turborepo": {
+      "source": "vercel/turborepo",
+      "commit": "51d6ddfcbb35d7cc264ee9b6e0ef8f4f82fc23d1",
+      "sourceType": "github",
+      "skillPath": "skills/turborepo/SKILL.md",
+      "computedHash": "49bb6427015253ce5d93f15dfa6c9ade3f8528f0fbe54769b6da1e1458f058d4"
+    }
+  }
+}
