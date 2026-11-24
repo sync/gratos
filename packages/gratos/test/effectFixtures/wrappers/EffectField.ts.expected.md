@@ -66,7 +66,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 age: {
                     name: "age",
-                    type: GraphQLInt
+                    type: GraphQLInt,
+                    resolve(source) {
+                        return source.age;
+                    }
                 },
                 name: {
                     name: "name",

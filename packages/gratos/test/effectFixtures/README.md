@@ -13,4 +13,5 @@ TypeScripts (TypeScript 7, then TypeScript 5.9.2 in the parity run), with the sa
 - `streams/`: `Stream.Stream` outside `Subscription` is rejected, and so is `Effect.Effect` on a
   `Subscription` field (an Effect is not a subscription source); plain `AsyncIterable` is not.
 - `codegen/`: the `semanticNonNull` and `jit` markers in generated `schema.ts`, merged into one
-  `extensions` object with user directives.
+  `extensions` object with user directives, and the explicit `resolve` every Effect-backed
+  property or getter gets for the Effect layer to wrap.
