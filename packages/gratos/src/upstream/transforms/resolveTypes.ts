@@ -14,7 +14,7 @@ import {
 } from "graphql";
 import { loc } from "../GraphQLConstructor.ts";
 import { TypeContext } from "../TypeContext.ts";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { err, ok } from "../utils/Result.ts";
 import {
   type DiagnosticResult,

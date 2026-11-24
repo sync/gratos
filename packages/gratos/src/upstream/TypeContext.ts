@@ -5,7 +5,7 @@ import {
   type ObjectTypeDefinitionNode,
   type UnionTypeDefinitionNode,
 } from "graphql";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import {
   gqlErr,
   type DiagnosticResult,

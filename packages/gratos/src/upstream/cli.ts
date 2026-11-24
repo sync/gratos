@@ -6,7 +6,7 @@
 import * as E from "./Errors.ts";
 import { getParsedTsConfig } from "./index.ts";
 import { type SchemaAndDoc, buildSchemaAndDocResult } from "./lib.ts";
-import { Command } from "commander";
+import { parseArgs } from "node:util";
 import { writeFileSync, readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -15,7 +15,7 @@ import {
   printExecutableSchema,
   printEnumsModule,
 } from "./printSchema.ts";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import {
   locationlessErr,
   ReportableDiagnostics,
@@ -34,7 +34,7 @@ function readPackageVersion(): string {
   for (const relPath of ["../package.json", "../../package.json"]) {
     try {
       const pkg = JSON.parse(readFileSync(resolve(__dirname, relPath), "utf8"));
-      if (pkg.name === "grats") return pkg.version;
+      if (pkg.name === "@dblechoc/gratos") return pkg.version;
     } catch {
       // Ignore missing/unreadable package.json files
     }
@@ -45,26 +45,36 @@ function readPackageVersion(): string {
   return "unknown";
 }
 
-const program = new Command();
+const HELP = `Usage: gratos [options]
 
-program
-  .name("grats")
-  .description("Extract GraphQL schema from your TypeScript project")
-  .version(version)
-  .option(
-    "--tsconfig <TSCONFIG>",
-    "Path to tsconfig.json. Defaults to auto-detecting based on the current working directory",
-  )
-  .action(async ({ tsconfig }) => {
-    runBuild(tsconfig);
-  });
+Extract GraphQL schema from your TypeScript project
 
-program.parse();
+Options:
+  -V, --version          output the version number
+  --tsconfig <TSCONFIG>  Path to tsconfig.json. Defaults to auto-detecting based on the current working directory
+  -h, --help             display help for command
+`;
+
+const { values: args } = parseArgs({
+  options: {
+    tsconfig: { type: "string" },
+    version: { type: "boolean", short: "V" },
+    help: { type: "boolean", short: "h" },
+  },
+});
+
+if (args.help) {
+  process.stdout.write(HELP);
+} else if (args.version) {
+  process.stdout.write(`${version}\n`);
+} else {
+  runBuild(args.tsconfig);
+}
 
 /**
  * Run the compiler performing a single build.
  */
-function runBuild(tsconfig: string) {
+function runBuild(tsconfig: string | undefined) {
   const { config, configPath } = handleDiagnostics(getTsConfig(tsconfig));
   const schemaAndDoc = handleDiagnostics(buildSchemaAndDocResult(config));
   writeSchemaFilesAndReport(schemaAndDoc, config, configPath);

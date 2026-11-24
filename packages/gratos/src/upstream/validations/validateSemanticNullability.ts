@@ -1,4 +1,4 @@
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import {
   type ConstDirectiveNode,
   type GraphQLField,

@@ -4,27 +4,32 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "imports": {
+    "#typescript": "./src/ts/index.ts"
+  },
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.parity.config.ts",
     "codegen": "node -e \"console.log('codegen: nothing to generate yet (M2)')\"",
     "codegen:check": "node -e \"console.log('codegen:check: nothing to check yet (M2)')\"",
-    "vendor:verify": "node scripts/verify-vendor.ts"
+    "vendor:verify": "node scripts/verify-vendor.ts",
+    "bench": "node bench/run.ts"
   },
   "dependencies": {
-    "commander": "14.0.1",
+    "effect": "catalog:",
     "graphql": "catalog:",
-    "typescript-baseline": "npm:typescript@5.9.2"
+    "jsonc-parser": "catalog:",
+    "typescript": "catalog:"
   },
   "devDependencies": {
+    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
-    "effect": "catalog:",
     "grats-upstream": "npm:grats@0.0.36",
-    "typescript": "catalog:",
+    "typescript-baseline": "npm:typescript@5.9.2",
     "vite": "catalog:",
     "vitest": "catalog:"
   }

@@ -1,5 +1,6 @@
 import { type ConstDirectiveNode, type GraphQLField } from "graphql";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
+import { questionTokenOf } from "../../ts/compat.ts";
 import { SEMANTIC_NON_NULL_DIRECTIVE } from "../publicDirectives.ts";
 import {
   ASSERT_NON_NULL_HELPER,
@@ -298,7 +299,17 @@ export default class ResolverCodegen {
     if (!foundReturn) {
       throw new Error(`Expected method to have a return statement`);
     }
-    return { ...method, body: F.createBlock(newBodyStatements, true) };
+    return F.updateMethodDeclaration(
+      method,
+      method.modifiers,
+      method.asteriskToken,
+      method.name,
+      questionTokenOf(method),
+      method.typeParameters,
+      method.parameters,
+      method.type,
+      F.createBlock(newBodyStatements, true),
+    );
   }
 
   defaultResolverMethod(methodName: string): ts.MethodDeclaration {

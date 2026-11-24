@@ -26,6 +26,10 @@ All packages are `private: true` until publishing is decided.
 
 - Never edit generated files (`**/src/generated/*`). Run `pnpm codegen` and commit the result.
 - All TypeScript compiler API access goes through `packages/gratos/src/ts/`.
+- The engine imports TypeScript as `#typescript`: the TypeScript 7 facade in `src/ts/` at runtime,
+  TypeScript 5.9.2's declarations for typechecking (`paths` in `packages/gratos/tsconfig.json`).
+  The package's `test` script runs the fixture suite twice: on TypeScript 7, then on TypeScript 5.9.2
+  through `vitest.parity.config.ts` (parity bar (b)). Both must stay green with the same snapshots.
 - Never use `--preserve-symlinks`, injected dependencies or `pnpm deploy`: they break type stripping of workspace packages.
 - Only erasable TypeScript syntax (`erasableSyntaxOnly`): no enums, namespaces or parameter properties.
 - The installed grats skill refers to `node_modules/grats/llm-docs/…`. In this repo those docs are vendored at `packages/gratos/llm-docs/`.

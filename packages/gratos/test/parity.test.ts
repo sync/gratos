@@ -1,4 +1,4 @@
-// Parity bar (a) of docs/plan.html: the vendored engine (TS 5.9.2 baseline, graphql 17.1)
+// Parity bar (a) of docs/plan.html: the vendored engine (on the TypeScript 7 facade, graphql 17.1)
 // against the published oracle grats@0.0.36 (its own typescript 5.9.2 and graphql 16).
 //
 // For every valid schema fixture, the oracle's SDL is printed by its graphql 16, re-printed
@@ -69,13 +69,15 @@ const fixtures = readdirSync(fixturesDir, { recursive: true, withFileTypes: true
 const isTsVersionGated = (fixture: string): boolean =>
   headerOf(readFileSync(join(fixturesDir, fixture), "utf8")).tsVersion !== undefined;
 
-const optionsFor = (fileName: string, code: string) => ({
+/** The oracle predates Gratos' `libraryImport` option; ours names the library as upstream does. */
+const optionsFor = (fileName: string, code: string, extra: { libraryImport?: string } = {}) => ({
   options: {},
   raw: {
     grats: {
       nullableByDefault: true,
       schemaHeader: null,
       tsSchemaHeader: null,
+      ...extra,
       ...headerOf(code).overrides,
     },
   },
@@ -85,7 +87,7 @@ const optionsFor = (fileName: string, code: string) => ({
 
 /** Our SDL document and generated schema.ts for a fixture. */
 const ours = (fileName: string, code: string) => {
-  const options = validateGratsOptions(optionsFor(fileName, code));
+  const options = validateGratsOptions(optionsFor(fileName, code, { libraryImport: "grats" }));
   if (options.kind === "ERROR") {
     throw new Error("vendored engine rejected the config");
   }
@@ -175,7 +177,7 @@ describe("parity with grats@0.0.36", () => {
       const mine = ours(fixture, code);
       const reference = oracle(fixture, code);
       // The complete generated schema.ts (with tsSchemaHeader, or the resolver map when configured):
-      // same TypeScript 5.9.2 printer on both sides, so byte for byte.
+      // our TypeScript 7 printer against the oracle's TypeScript 5.9.2 printer, byte for byte.
       expect(mine.ts).toBe(reference.ts);
 
       const theirs = parse(reference.sdl);

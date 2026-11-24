@@ -12,7 +12,7 @@ import {
 } from "./utils/DiagnosticError.ts";
 import { concatResults, ResultPipe } from "./utils/Result.ts";
 import { ok, err } from "./utils/Result.ts";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { type ExtractionSnapshot } from "./Extractor.ts";
 import { TypeContext } from "./TypeContext.ts";
 import { validateSDL } from "graphql/validation/validate.js";
@@ -105,7 +105,10 @@ export function extractSchemaAndDoc(
       // Collect validation errors
       const validationResult = concatResults(
         validateMergedInterfaces(checker, snapshot.interfaceDeclarations),
-        validateDuplicateContextOrInfo(snapshot.nameDefinitions.values()),
+        validateDuplicateContextOrInfo(
+          snapshot.nameDefinitions.values(),
+          config.libraryImport,
+        ),
       );
 
       const docResult = new ResultPipe(validationResult)

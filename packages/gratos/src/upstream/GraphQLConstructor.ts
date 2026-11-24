@@ -34,7 +34,7 @@ import {
   type DirectiveDefinitionNode,
   type EnumValueNode,
 } from "graphql";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { uniqueId } from "./utils/helpers.ts";
 import { type DiagnosticResult, type TsLocatableNode } from "./utils/DiagnosticError.ts";
 import {

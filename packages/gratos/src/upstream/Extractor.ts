@@ -26,7 +26,8 @@ import {
   type DiagnosticResult,
 } from "./utils/DiagnosticError.ts";
 import { err, ok } from "./utils/Result.ts";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
+import { jsDocComment, jsDocCommentStart, questionTokenOf } from "../ts/compat.ts";
 import {
   type DeclarationDefinition,
   type NameDefinition,
@@ -46,7 +47,7 @@ import {
 import { Parser } from "graphql/language/parser.js";
 import { type ExportDefinition } from "./GraphQLAstExtensions.ts";
 
-export const LIBRARY_IMPORT_NAME = "grats";
+export const LIBRARY_IMPORT_NAME = "@dblechoc/gratos";
 export const LIBRARY_NAME = "Grats";
 
 export const TYPE_TAG = "gqlType";
@@ -159,7 +160,7 @@ type FieldTypeContext = {
  */
 export function extract(
   sourceFile: ts.SourceFile,
-  config?: { tsClientEnums?: string | null },
+  config?: { tsClientEnums?: string | null; libraryImport?: string },
 ): DiagnosticsResult<ExtractionSnapshot> {
   const extractor = new Extractor(config);
   return extractor.extract(sourceFile);
@@ -177,11 +178,13 @@ class Extractor {
 
   errors: ts.DiagnosticWithLocation[] = [];
   gql: GraphQLConstructor;
-  config?: { tsClientEnums?: string | null };
+  config?: { tsClientEnums?: string | null; libraryImport?: string };
+  libraryImport: string;
 
-  constructor(config?: { tsClientEnums?: string | null }) {
+  constructor(config?: { tsClientEnums?: string | null; libraryImport?: string }) {
     this.gql = new GraphQLConstructor();
     this.config = config;
+    this.libraryImport = config?.libraryImport ?? LIBRARY_IMPORT_NAME;
   }
 
   markUnresolvedType(node: ts.EntityName, name: NameNode) {
@@ -203,7 +206,7 @@ class Extractor {
   extract(sourceFile: ts.SourceFile): DiagnosticsResult<ExtractionSnapshot> {
     const seenCommentPositions: Set<number> = new Set();
     traverseJSDocTags(sourceFile, (node, tag) => {
-      seenCommentPositions.add(tag.parent.pos);
+      seenCommentPositions.add(jsDocCommentStart(tag.parent));
       switch (tag.tagName.text) {
         case DIRECTIVE_TAG:
           this.extractDirective(node, tag);
@@ -263,7 +266,7 @@ class Extractor {
         }
         case INFO_TAG: {
           if (!ts.isTypeAliasDeclaration(node)) {
-            this.report(tag, E.userDefinedInfoTag());
+            this.report(tag, E.userDefinedInfoTag(this.libraryImport));
           } else {
             const name = this.gql.name(tag, "INFO_DUMMY_NAME");
             this.recordTypeName(node, name, "INFO");
@@ -458,11 +461,12 @@ class Extractor {
 
     const args = this.extractDirectiveArgs(node);
 
-    if (tag.comment == null) {
+    const tagComment = jsDocComment(tag);
+    if (tagComment == null) {
       this.report(tag, E.directiveTagNoComment());
       return;
     }
-    const comment = this.extractDocblockTagComment(tag.comment);
+    const comment = this.extractDocblockTagComment(tagComment);
     if (comment == null) return;
 
     const tagData = this.parseGql<{
@@ -860,11 +864,11 @@ class Extractor {
       if (tag.tagName.text !== ANNOTATE_TAG) {
         continue;
       }
-      if (typeof tag.comment !== "string") {
+      if (typeof jsDocComment(tag) !== "string") {
         this.report(tag, "Expected docblock tag to have a value.");
         continue;
       }
-      const directiveText = `@${tag.comment}`;
+      const directiveText = `@${jsDocComment(tag)}`;
       const directive = this.parseGql(tag, directiveText, (parser) => {
         return parser.parseDirective(true);
       });
@@ -876,8 +880,8 @@ class Extractor {
     const tag = this.findTag(node, DEPRECATED_TAG);
     if (tag != null) {
       let reason: ConstArgumentNode | null = null;
-      if (tag.comment != null) {
-        const reasonComment = ts.getTextOfJSDocComment(tag.comment);
+      if (jsDocComment(tag) != null) {
+        const reasonComment = ts.getTextOfJSDocComment(jsDocComment(tag));
         if (reasonComment != null) {
           // FIXME: Use the _value_'s location not the tag's
           reason = this.gql.constArgument(
@@ -1226,7 +1230,7 @@ class Extractor {
     if (inner == null) return null;
 
     const type =
-      node.questionToken == null ? inner : this.gql.nullableType(inner);
+      questionTokenOf(node) == null ? inner : this.gql.nullableType(inner);
 
     const description = this.collectDescription(node);
 
@@ -1481,7 +1485,7 @@ class Extractor {
       return false;
     }
 
-    if (node.initializer.type.typeName.escapedText !== "const") {
+    if (node.initializer.type.typeName.text !== "const") {
       this.report(
         node.initializer.type.typeName,
         E.typeNameTypeNameNotConst(expectedName),
@@ -1873,8 +1877,9 @@ class Extractor {
     }
     let type = this.collectType(node.type, { kind: "INPUT" });
     if (type == null) return null;
+    const questionToken = questionTokenOf(node);
 
-    if (type.kind !== Kind.NON_NULL_TYPE && !node.questionToken) {
+    if (type.kind !== Kind.NON_NULL_TYPE && !questionToken) {
       // If a field is passed an argument value, and that argument is not defined in the request,
       // `graphql-js` will not define the argument property. Therefore we must ensure the argument
       // is not just nullable, but optional.
@@ -1893,7 +1898,7 @@ class Extractor {
       }
     }
 
-    if (node.questionToken && defaultValue == null) {
+    if (questionToken && defaultValue == null) {
       // Question mark means we can handle the argument being undefined in the
       // object literal, but if we are going to type the GraphQL arg as
       // optional, the code must also be able to handle an explicit null.
@@ -1904,7 +1909,7 @@ class Extractor {
       // TODO: This will catch { a?: string } but not { a?: string | undefined }.
       if (type.kind === Kind.NON_NULL_TYPE) {
         return this.report(
-          node.questionToken,
+          questionToken,
           E.nonNullTypeCannotBeOptional(),
           [],
         );
@@ -2127,8 +2132,8 @@ class Extractor {
       | ts.ParameterDeclaration,
     tag: ts.JSDocTag,
   ) {
-    if (tag.comment != null) {
-      const commentName = ts.getTextOfJSDocComment(tag.comment);
+    if (jsDocComment(tag) != null) {
+      const commentName = ts.getTextOfJSDocComment(jsDocComment(tag));
       if (commentName != null) {
         // FIXME: Use the _value_'s location not the tag's
         const locNode = tag;
@@ -2386,7 +2391,7 @@ class Extractor {
 
     const comment = docs
       .filter((doc) => doc.kind === ts.SyntaxKind.JSDoc)
-      .map((doc) => doc.comment)
+      .map((doc) => jsDocComment(doc))
       .join("");
 
     if (comment) {
@@ -2413,7 +2418,7 @@ class Extractor {
     // We already reported an error
     if (inner == null) return null;
     const type =
-      node.questionToken == null ? inner : this.gql.nullableType(inner);
+      questionTokenOf(node) == null ? inner : this.gql.nullableType(inner);
 
     const description = this.collectDescription(node);
 
@@ -2479,7 +2484,7 @@ class Extractor {
     } else if (node.kind === ts.SyntaxKind.BooleanKeyword) {
       return this.gql.nonNullType(node, this.gql.namedType(node, "Boolean"));
     } else if (node.kind === ts.SyntaxKind.NumberKeyword) {
-      return this.report(node, E.ambiguousNumberType());
+      return this.report(node, E.ambiguousNumberType(this.libraryImport));
     } else if (ts.isLiteralTypeNode(node)) {
       // Literal types are only valid in output positions. In input positions,
       // GraphQL cannot enforce that only this specific value is passed.
@@ -2494,7 +2499,7 @@ class Extractor {
       } else if (ts.isStringLiteral(node.literal)) {
         return this.gql.nonNullType(node, this.gql.namedType(node, "String"));
       } else if (ts.isNumericLiteral(node.literal)) {
-        return this.report(node, E.ambiguousNumberLiteralType());
+        return this.report(node, E.ambiguousNumberLiteralType(this.libraryImport));
       }
     } else if (ts.isTypeLiteralNode(node)) {
       return this.report(node, E.unsupportedTypeLiteral());
@@ -2592,7 +2597,7 @@ class Extractor {
 
   isNullish(node: ts.Node): boolean {
     if (ts.isIdentifier(node)) {
-      return node.escapedText === "undefined";
+      return node.text === "undefined";
     }
     if (ts.isLiteralTypeNode(node)) {
       return (
@@ -2617,7 +2622,7 @@ class Extractor {
   findTag(node: ts.Node, tagName: string): ts.JSDocTag | null {
     const tags = ts
       .getJSDocTags(node)
-      .filter((tag) => tag.tagName.escapedText === tagName);
+      .filter((tag) => tag.tagName.text === tagName);
 
     if (tags.length === 0) {
       return null;
@@ -2635,7 +2640,7 @@ class Extractor {
   hasTag(node: ts.Node, tagName: string): boolean {
     const tags = ts
       .getJSDocTags(node)
-      .filter((tag) => tag.tagName.escapedText === tagName);
+      .filter((tag) => tag.tagName.text === tagName);
 
     return tags.length > 0;
   }

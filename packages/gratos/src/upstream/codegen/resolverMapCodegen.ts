@@ -1,4 +1,4 @@
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { type GratsConfig } from "../gratsConfig.ts";
 import TSAstBuilder from "./TSAstBuilder.ts";
 import ResolverCodegen from "./resolverCodegen.ts";

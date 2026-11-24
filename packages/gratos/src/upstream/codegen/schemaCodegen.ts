@@ -27,7 +27,7 @@ import {
   valueFromASTUntyped,
   coerceInputLiteral,
 } from "graphql";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { extend, nullThrows } from "../utils/helpers.ts";
 import { type GratsConfig } from "../gratsConfig.ts";
 import { naturalCompare } from "../utils/naturalCompare.ts";
@@ -74,6 +74,7 @@ class Codegen {
   _typeDefinitions: Set<string> = new Set();
 
   public _schema: GraphQLSchema;
+  private _libraryImport: string;
   constructor(
     _schema: GraphQLSchema,
     _resolvers: Metadata,
@@ -81,6 +82,7 @@ class Codegen {
     destination: string,
   ) {
     this._schema = _schema;
+    this._libraryImport = config.libraryImport;
     this.ts = new TSAstBuilder(destination, config.importModuleSpecifierEnding);
     this.resolvers = new ResolverCodegen(this.ts, _resolvers);
   }
@@ -102,7 +104,7 @@ class Codegen {
       })
       .filter((type) => !BUILT_IN_SCALARS.has(type.name))
       .map((type) => {
-        this.ts.import("grats", [
+        this.ts.import(this._libraryImport, [
           { name: GQL_SCALAR_TYPE_NAME, isTypeOnly: true },
         ]);
         const exported = nullThrows(type.astNode?.exported);

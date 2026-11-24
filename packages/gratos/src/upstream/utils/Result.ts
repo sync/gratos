@@ -1,4 +1,4 @@
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { type DiagnosticsResult } from "./DiagnosticError.ts";
 
 export type Result<T, E> = Ok<T> | Err<E>;

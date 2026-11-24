@@ -1,4 +1,4 @@
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 
 // Recursively search for all JSDoc tags calling `cb` on each one with its
 // direct parent node.

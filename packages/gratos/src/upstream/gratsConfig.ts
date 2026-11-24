@@ -1,4 +1,4 @@
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { err, ok, type Result } from "./utils/Result.ts";
 import { invariant } from "./utils/helpers.ts";
 import { locationlessErr } from "./utils/DiagnosticError.ts";

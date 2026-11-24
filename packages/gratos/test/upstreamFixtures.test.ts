@@ -14,7 +14,13 @@ import {
   printSchema,
   specifiedScalarTypes,
 } from "graphql";
-import { createCompilerHost, version as tsVersion } from "typescript-baseline";
+import {
+  createCompilerHost,
+  ModuleKind,
+  ModuleResolutionKind,
+  ScriptTarget,
+  version as tsVersion,
+} from "#typescript";
 import { vi } from "vitest";
 
 import { codegen } from "../src/upstream/codegen/schemaCodegen.ts";
@@ -38,6 +44,24 @@ const typesFile = join(packageDir, "src", "upstream", "Types.ts");
 const fixturesDir = join(import.meta.dirname, "fixtures");
 const configFixturesDir = join(import.meta.dirname, "configParserFixtures");
 const integrationFixturesDir = join(import.meta.dirname, "integrationFixtures");
+/** Gratos's own schema fixtures (not vendored): TypeScript 7 port regressions and per-version variants. */
+const ts7FixturesDir = join(import.meta.dirname, "ts7Fixtures");
+
+/**
+ * The compiler options every fixture program gets, set explicitly instead of each TypeScript's
+ * `{}` defaults (TypeScript 5's ES5/CommonJS/node10/non-strict, which TypeScript 7 rejects or
+ * changes). They are the options both TypeScripts support (docs/plan.html M2): `preserve` +
+ * `bundler` keeps upstream's extensionless relative imports resolving.
+ */
+const FIXTURE_COMPILER_OPTIONS = {
+  target: ScriptTarget.ES2022,
+  module: ModuleKind.Preserve,
+  moduleResolution: ModuleResolutionKind.Bundler,
+  strict: true,
+};
+
+/** Upstream's snapshots name the library `grats`; Gratos defaults `libraryImport` to `@dblechoc/gratos`. */
+const UPSTREAM_LIBRARY_IMPORT = "grats";
 
 const ok = (value: Markdown): TransformerResult => ({ kind: "OK", value });
 const err = (error: Markdown | string): TransformerResult => ({ kind: "ERROR", err: error });
@@ -98,6 +122,26 @@ const satisfiesTsVersion = (range: string): boolean => {
     : compareVersions(current, parseVersion(range)) === 0;
 };
 
+/** Why a fixture's `tsVersion` gate excludes the current TypeScript, if it does. */
+const tsVersionSkipReason = (code: string): string | undefined => {
+  const gate = tsVersionGateOf(code);
+  return gate === undefined || satisfiesTsVersion(gate)
+    ? undefined
+    : `gated to TypeScript ${gate}, running ${tsVersion}`;
+};
+
+/**
+ * A `<name>.ts<major>.ts` fixture is a per-TypeScript-version variant of an upstream fixture: it
+ * runs only on that TypeScript major, with that version's snapshot.
+ */
+const VARIANT_PATTERN = /\.ts(\d+)\.ts$/;
+const variantSkipReason = (fileName: string): string | undefined => {
+  const major = VARIANT_PATTERN.exec(fileName)?.[1];
+  return major === undefined || major === tsVersion.split(".")[0]
+    ? undefined
+    : `TypeScript ${major} variant, running ${tsVersion}`;
+};
+
 /**
  * Diagnostics print paths relative to the working directory. Upstream ran from its repo root with
  * fixtures in src/tests/; here they live in test/, so map the prefix back to keep the snapshots.
@@ -153,30 +197,25 @@ defineFixtureSuite({
   },
 });
 
-defineFixtureSuite({
-  name: "fixtures",
-  fixturesDir,
-  testFilePattern: /\.ts$/,
-  ignoreFilePattern: null,
-  transformer: (code, fileName) => {
-    const tsVersionGate = tsVersionGateOf(code);
-    if (tsVersionGate !== undefined && !satisfiesTsVersion(tsVersionGate)) {
-      return false;
-    }
+/** Upstream's schema fixture transformer: SDL and generated TypeScript, or the error report. */
+const schemaFixtureTransformer =
+  (dir: string) =>
+  (code: string, fileName: string): TransformerResult => {
     const config = {
       nullableByDefault: true,
       schemaHeader: null,
       tsSchemaHeader: null,
+      libraryImport: UPSTREAM_LIBRARY_IMPORT,
       ...configOverridesOf(code),
     };
 
     let parsedOptions: ParsedCommandLineGrats;
     try {
       const parsedOptionsResult = validateGratsOptions({
-        options: {},
+        options: { ...FIXTURE_COMPILER_OPTIONS },
         raw: { grats: config },
         errors: [],
-        fileNames: [join(fixturesDir, fileName), typesFile],
+        fileNames: [join(dir, fileName), typesFile],
       });
       if (parsedOptionsResult.kind === "ERROR") {
         return err(
@@ -204,7 +243,7 @@ defineFixtureSuite({
     // Run codegen here to make sure it doesn't throw.
     const executableSchema = applyTypeScriptHeader(
       parsedOptions.raw.grats,
-      codegen(schema, resolvers, parsedOptions.raw.grats, join(fixturesDir, fileName)),
+      codegen(schema, resolvers, parsedOptions.raw.grats, join(dir, fileName)),
     );
 
     const docSansDirectives = {
@@ -223,7 +262,24 @@ defineFixtureSuite({
     markdown.addHeader(3, "TypeScript");
     markdown.addCodeBlock(executableSchema, "ts");
     return ok(markdown);
-  },
+  };
+
+defineFixtureSuite({
+  name: "fixtures",
+  fixturesDir,
+  testFilePattern: /\.ts$/,
+  ignoreFilePattern: null,
+  skipReason: tsVersionSkipReason,
+  transformer: schemaFixtureTransformer(fixturesDir),
+});
+
+defineFixtureSuite({
+  name: "ts7Fixtures",
+  fixturesDir: ts7FixturesDir,
+  testFilePattern: /\.ts$/,
+  ignoreFilePattern: /^README\.md$/,
+  skipReason: (code, fileName) => tsVersionSkipReason(code) ?? variantSkipReason(fileName),
+  transformer: schemaFixtureTransformer(ts7FixturesDir),
 });
 
 defineFixtureSuite({
@@ -235,13 +291,19 @@ defineFixtureSuite({
     const config = {
       nullableByDefault: true,
       importModuleSpecifierEnding: ".js",
+      libraryImport: UPSTREAM_LIBRARY_IMPORT,
       ...configOverridesOf(code),
     };
     const filePath = join(integrationFixturesDir, fileName);
     const schemaPath = join(dirname(filePath), "schema.ts");
 
     const parsedOptionsResult = validateGratsOptions({
-      options: { rootDir: packageDir, outDir: "dist", configFilePath: "tsconfig.json" },
+      options: {
+        ...FIXTURE_COMPILER_OPTIONS,
+        rootDir: packageDir,
+        outDir: "dist",
+        configFilePath: "tsconfig.json",
+      },
       raw: { grats: config },
       errors: [],
       fileNames: [filePath, typesFile],
@@ -314,9 +376,20 @@ const compareSchemas = (actual: GraphQLSchema, expected: GraphQLSchema): string 
     : `--- SDL schema\n${expectedSDL}\n--- codegen schema\n${actualSDL}`;
 };
 
+/**
+ * TypeScript's bundled lib files live in a different, platform-specific package per TypeScript
+ * (`@typescript/typescript-darwin-arm64` on TypeScript 7), so their paths are printed as
+ * `<typescript>/lib/…`. No upstream snapshot mentions a lib file.
+ */
+const toPortableLibPaths = (text: string): string =>
+  text.replaceAll(/\S*\/lib\/(lib\.[\w.]+\.d\.ts)/g, "<typescript>/lib/$1");
+
 function formatDiagnosticsWithContext(_code: string, diagnostics: ReportableDiagnostics): Markdown {
   const markdown = new Markdown();
   markdown.addHeader(3, "Error Report");
-  markdown.addCodeBlock(toUpstreamPaths(diagnostics.formatDiagnosticsWithContext()), "text");
+  markdown.addCodeBlock(
+    toPortableLibPaths(toUpstreamPaths(diagnostics.formatDiagnosticsWithContext())),
+    "text",
+  );
   return markdown;
 }
