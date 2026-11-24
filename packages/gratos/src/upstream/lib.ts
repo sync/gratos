@@ -105,7 +105,10 @@ export function extractSchemaAndDoc(
       // Collect validation errors
       const validationResult = concatResults(
         validateMergedInterfaces(checker, snapshot.interfaceDeclarations),
-        validateDuplicateContextOrInfo(snapshot.nameDefinitions.values()),
+        validateDuplicateContextOrInfo(
+          snapshot.nameDefinitions.values(),
+          config.libraryImport,
+        ),
       );
 
       const docResult = new ResultPipe(validationResult)

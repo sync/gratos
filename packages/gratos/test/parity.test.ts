@@ -69,13 +69,15 @@ const fixtures = readdirSync(fixturesDir, { recursive: true, withFileTypes: true
 const isTsVersionGated = (fixture: string): boolean =>
   headerOf(readFileSync(join(fixturesDir, fixture), "utf8")).tsVersion !== undefined;
 
-const optionsFor = (fileName: string, code: string) => ({
+/** The oracle predates Gratos' `libraryImport` option; ours names the library as upstream does. */
+const optionsFor = (fileName: string, code: string, extra: { libraryImport?: string } = {}) => ({
   options: {},
   raw: {
     grats: {
       nullableByDefault: true,
       schemaHeader: null,
       tsSchemaHeader: null,
+      ...extra,
       ...headerOf(code).overrides,
     },
   },
@@ -85,7 +87,7 @@ const optionsFor = (fileName: string, code: string) => ({
 
 /** Our SDL document and generated schema.ts for a fixture. */
 const ours = (fileName: string, code: string) => {
-  const options = validateGratsOptions(optionsFor(fileName, code));
+  const options = validateGratsOptions(optionsFor(fileName, code, { libraryImport: "grats" }));
   if (options.kind === "ERROR") {
     throw new Error("vendored engine rejected the config");
   }

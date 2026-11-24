@@ -47,7 +47,7 @@ import {
 import { Parser } from "graphql/language/parser.js";
 import { type ExportDefinition } from "./GraphQLAstExtensions.ts";
 
-export const LIBRARY_IMPORT_NAME = "grats";
+export const LIBRARY_IMPORT_NAME = "@dblechoc/gratos";
 export const LIBRARY_NAME = "Grats";
 
 export const TYPE_TAG = "gqlType";
@@ -160,7 +160,7 @@ type FieldTypeContext = {
  */
 export function extract(
   sourceFile: ts.SourceFile,
-  config?: { tsClientEnums?: string | null },
+  config?: { tsClientEnums?: string | null; libraryImport?: string },
 ): DiagnosticsResult<ExtractionSnapshot> {
   const extractor = new Extractor(config);
   return extractor.extract(sourceFile);
@@ -178,11 +178,13 @@ class Extractor {
 
   errors: ts.DiagnosticWithLocation[] = [];
   gql: GraphQLConstructor;
-  config?: { tsClientEnums?: string | null };
+  config?: { tsClientEnums?: string | null; libraryImport?: string };
+  libraryImport: string;
 
-  constructor(config?: { tsClientEnums?: string | null }) {
+  constructor(config?: { tsClientEnums?: string | null; libraryImport?: string }) {
     this.gql = new GraphQLConstructor();
     this.config = config;
+    this.libraryImport = config?.libraryImport ?? LIBRARY_IMPORT_NAME;
   }
 
   markUnresolvedType(node: ts.EntityName, name: NameNode) {
@@ -264,7 +266,7 @@ class Extractor {
         }
         case INFO_TAG: {
           if (!ts.isTypeAliasDeclaration(node)) {
-            this.report(tag, E.userDefinedInfoTag());
+            this.report(tag, E.userDefinedInfoTag(this.libraryImport));
           } else {
             const name = this.gql.name(tag, "INFO_DUMMY_NAME");
             this.recordTypeName(node, name, "INFO");
@@ -2482,7 +2484,7 @@ class Extractor {
     } else if (node.kind === ts.SyntaxKind.BooleanKeyword) {
       return this.gql.nonNullType(node, this.gql.namedType(node, "Boolean"));
     } else if (node.kind === ts.SyntaxKind.NumberKeyword) {
-      return this.report(node, E.ambiguousNumberType());
+      return this.report(node, E.ambiguousNumberType(this.libraryImport));
     } else if (ts.isLiteralTypeNode(node)) {
       // Literal types are only valid in output positions. In input positions,
       // GraphQL cannot enforce that only this specific value is passed.
@@ -2497,7 +2499,7 @@ class Extractor {
       } else if (ts.isStringLiteral(node.literal)) {
         return this.gql.nonNullType(node, this.gql.namedType(node, "String"));
       } else if (ts.isNumericLiteral(node.literal)) {
-        return this.report(node, E.ambiguousNumberLiteralType());
+        return this.report(node, E.ambiguousNumberLiteralType(this.libraryImport));
       }
     } else if (ts.isTypeLiteralNode(node)) {
       return this.report(node, E.unsupportedTypeLiteral());

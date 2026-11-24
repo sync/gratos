@@ -94,4 +94,11 @@ export type GratsConfig = {
    * https://the-guild.dev/graphql/tools/docs/resolvers#resolver-map
    */
   EXPERIMENTAL__emitResolverMap: boolean;
+  /**
+   * The module specifier of the library that exports Grats' types (`Int`,
+   * `Float`, `ID`, `GqlInfo`, `GqlScalar`). The generated TypeScript schema
+   * imports `GqlScalar` from it, and error messages tell you to import
+   * `Int`, `Float` and `GqlInfo` from it.
+   */
+  libraryImport: string;
 };

@@ -39,6 +39,9 @@ const fixturesDir = join(import.meta.dirname, "fixtures");
 const configFixturesDir = join(import.meta.dirname, "configParserFixtures");
 const integrationFixturesDir = join(import.meta.dirname, "integrationFixtures");
 
+/** Upstream's snapshots name the library `grats`; Gratos defaults `libraryImport` to `@dblechoc/gratos`. */
+const UPSTREAM_LIBRARY_IMPORT = "grats";
+
 const ok = (value: Markdown): TransformerResult => ({ kind: "OK", value });
 const err = (error: Markdown | string): TransformerResult => ({ kind: "ERROR", err: error });
 const messageOf = (error: unknown): string =>
@@ -167,6 +170,7 @@ defineFixtureSuite({
       nullableByDefault: true,
       schemaHeader: null,
       tsSchemaHeader: null,
+      libraryImport: UPSTREAM_LIBRARY_IMPORT,
       ...configOverridesOf(code),
     };
 
@@ -235,6 +239,7 @@ defineFixtureSuite({
     const config = {
       nullableByDefault: true,
       importModuleSpecifierEnding: ".js",
+      libraryImport: UPSTREAM_LIBRARY_IMPORT,
       ...configOverridesOf(code),
     };
     const filePath = join(integrationFixturesDir, fileName);

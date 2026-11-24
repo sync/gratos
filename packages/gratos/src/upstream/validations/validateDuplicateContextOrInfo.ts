@@ -10,6 +10,7 @@ import * as E from "../Errors.ts";
 
 export function validateDuplicateContextOrInfo(
   definitions: Iterable<DeclarationDefinition>,
+  libraryImport: string,
 ): DiagnosticsResult<void> {
   const errors: FixableDiagnosticWithLocation[] = [];
   let infoDefinition: null | NameDefinition = null;
@@ -32,7 +33,7 @@ export function validateDuplicateContextOrInfo(
         break;
       case "INFO":
         if (infoDefinition != null) {
-          errors.push(gqlErr(namedDefinition.name, E.userDefinedInfoTag()));
+          errors.push(gqlErr(namedDefinition.name, E.userDefinedInfoTag(libraryImport)));
           continue;
         }
         infoDefinition = namedDefinition;

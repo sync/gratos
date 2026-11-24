@@ -22,8 +22,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
     },
     "src/upstream/codegen/schemaCodegen.ts": {
-      "sha": "db7f49aa525f5bb356c76e0ddf81088ac746f20f",
-      "reason": "M1b mechanical (see the other entries) + M1b graphql 17.1: argument defaults are read from arg.default (graphql 17 leaves the deprecated defaultValue unset for SDL-built schemas) via coerceInputLiteral, so generated defaultValue output is unchanged + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
+      "sha": "209496cf002bd6f4e4b868731e8d8ac70f969dd1",
+      "reason": "M1b mechanical (see the other entries) + M1b graphql 17.1: argument defaults are read from arg.default (graphql 17 leaves the deprecated defaultValue unset for SDL-built schemas) via coerceInputLiteral, so generated defaultValue output is unchanged + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; libraryImport: the generated `GqlScalar` import comes from config.libraryImport instead of `grats`"
     },
     "src/upstream/codegen/TSAstBuilder.ts": {
       "sha": "1e28d66c24067c08f392cac74c7e2726ea330e01",
@@ -41,13 +41,17 @@
       "sha": "5aa4ddffebd52528219ef883f9d19c598183ecc4",
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
+    "src/upstream/configSpecRaw.json": {
+      "sha": "33e3c8e9fa345bd17f1e9e7650d22193c3899ad9",
+      "reason": "M2: libraryImport: the new config option `libraryImport` (default `@dblechoc/gratos`); upstream fixtures run with `grats`"
+    },
     "src/upstream/Errors.ts": {
-      "sha": "7dacad601632b71aea2556e6d857e3a0a73d6e94",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "sha": "c7059dc9fef5ddc1952433d9ee408ec33755138e",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: libraryImport: the three messages that name the library (ambiguousNumberType, ambiguousNumberLiteralType, userDefinedInfoTag) take the configured `libraryImport` instead of `grats`"
     },
     "src/upstream/Extractor.ts": {
-      "sha": "8e27b63aa78e0a5d68fa66d7429dad94f1cdb5cf",
-      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics, along with the closest-tag suggestion that only the removed fix used + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; JSDoc `comment` reads go through compat jsDocComment() (TypeScript 7 always returns a node array; one read is hoisted into a local for narrowing); the recorded JSDoc position uses compat jsDocCommentStart() (TypeScript 7's JSDoc pos includes leading trivia); property/signature questionToken reads use compat questionTokenOf() (TypeScript 7 calls it postfixToken); identifier `.escapedText` (absent on TypeScript 7 nodes) is read as `.text`, which is equal for the compared names (`const`, `undefined`, Grats tag names)"
+      "sha": "0e6e3dfe944c00b4b8a53bd78ac9336df6ad5917",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics, along with the closest-tag suggestion that only the removed fix used + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; JSDoc `comment` reads go through compat jsDocComment() (TypeScript 7 always returns a node array; one read is hoisted into a local for narrowing); the recorded JSDoc position uses compat jsDocCommentStart() (TypeScript 7's JSDoc pos includes leading trivia); property/signature questionToken reads use compat questionTokenOf() (TypeScript 7 calls it postfixToken); identifier `.escapedText` (absent on TypeScript 7 nodes) is read as `.text`, which is equal for the compared names (`const`, `undefined`, Grats tag names); libraryImport: LIBRARY_IMPORT_NAME is now only the default (`@dblechoc/gratos`); the extractor config carries `libraryImport` and passes it to those messages"
     },
     "src/upstream/fixFixable.ts": {
       "removed": true,
@@ -74,8 +78,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/lib.ts": {
-      "sha": "eb4b511018929e013628cade2d89acdd0b07b2c9",
-      "reason": "M1b mechanical (see the other entries) + M1b cut: the initTsPlugin export (language-service plugin) is removed + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
+      "sha": "a07161beb3333714d77c6c6d70abe64c1d3389aa",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: the initTsPlugin export (language-service plugin) is removed + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; libraryImport: passes config.libraryImport to validateDuplicateContextOrInfo"
     },
     "src/upstream/Locate.ts": {
       "removed": true,
@@ -96,6 +100,10 @@
     "src/upstream/runCache.ts": {
       "removed": true,
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "src/upstream/TGratsConfig.ts": {
+      "sha": "f1b2f1f94c112e0176d0ef596fc3c08eac8f421c",
+      "reason": "M2: libraryImport: the new config option `libraryImport` (default `@dblechoc/gratos`), kept in sync with configSpecRaw.json"
     },
     "src/upstream/transforms/addImplicitRootTypes.ts": {
       "sha": "032cd69e0b4fb47bf6fcaa64a1c5444c1e4fdaba",
@@ -182,8 +190,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
     },
     "src/upstream/validations/validateDuplicateContextOrInfo.ts": {
-      "sha": "44d64e64f5727f803674c82c9bcc8c0fb74a55fd",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "sha": "645e9a211d79b29e8697f9e4e19b7eca0573cd3a",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: libraryImport: takes the configured `libraryImport` for the userDefinedInfoTag message"
     },
     "src/upstream/validations/validateMergedInterfaces.ts": {
       "sha": "3567f9fe8c90b37b23d104458afe414271098966",
@@ -200,6 +208,18 @@
     "src/upstream/validations/validateTypenames.ts": {
       "sha": "b0bdaca5425e75a71296e0e8642998dba5073e9d",
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
+    },
+    "test/configParserFixtures/empty.json.expected.md": {
+      "sha": "aa544a8f10b664b6dc43a5e68c09208fe388f227",
+      "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"@dblechoc/gratos\"`"
+    },
+    "test/configParserFixtures/experimentalField.json.expected.md": {
+      "sha": "13bf98dffda6b2b34b08b027b835cd1f3ff4e531",
+      "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"@dblechoc/gratos\"`"
+    },
+    "test/configParserFixtures/multiLineHeader.json.expected.md": {
+      "sha": "9704438b3d41965a2d36e32ffb7c3ea6a97798ad",
+      "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"@dblechoc/gratos\"`"
     },
     "test/fixtures/arguments/NullableArgumentErrors.invalid.ts.expected.md": {
       "sha": "26216dbb32268e9216d4515a365970b46153e746",

@@ -6,7 +6,6 @@ import {
   INPUT_TAG,
   INTERFACE_TAG,
   KILLS_PARENT_ON_EXCEPTION_TAG,
-  LIBRARY_IMPORT_NAME,
   SCALAR_TAG,
   TYPE_TAG,
   UNION_TAG,
@@ -276,12 +275,12 @@ export function expectedOneNonNullishType() {
 }
 
 // TODO: Add code action
-export function ambiguousNumberType() {
-  return `Unexpected number type. GraphQL supports both Int and Float, making \`number\` ambiguous. Instead, import the \`Int\` or \`Float\` type from \`${LIBRARY_IMPORT_NAME}\` and use that. e.g. \`import type { Int, Float } from "${LIBRARY_IMPORT_NAME}";\`.`;
+export function ambiguousNumberType(libraryImport: string) {
+  return `Unexpected number type. GraphQL supports both Int and Float, making \`number\` ambiguous. Instead, import the \`Int\` or \`Float\` type from \`${libraryImport}\` and use that. e.g. \`import type { Int, Float } from "${libraryImport}";\`.`;
 }
 
-export function ambiguousNumberLiteralType() {
-  return `Unexpected numeric literal type. GraphQL supports both Int and Float. To ensure Grats infers the correct type, use the \`Int\` or \`Float\` type from \`${LIBRARY_IMPORT_NAME}\` instead. e.g. \`import type { Int, Float } from "${LIBRARY_IMPORT_NAME}";\`.`;
+export function ambiguousNumberLiteralType(libraryImport: string) {
+  return `Unexpected numeric literal type. GraphQL supports both Int and Float. To ensure Grats infers the correct type, use the \`Int\` or \`Float\` type from \`${libraryImport}\` instead. e.g. \`import type { Int, Float } from "${libraryImport}";\`.`;
 }
 
 export function literalTypeInInputPosition() {
@@ -557,8 +556,8 @@ export function duplicateContextTag(): string {
   return `Unexpected duplicate \`@${CONTEXT_TAG}\` tag. Only one type in a project may be annotated with the \`@${CONTEXT_TAG}\`.`;
 }
 
-export function userDefinedInfoTag(): string {
-  return `Unexpected user-defined \`@${INFO_TAG}\` tag. Use the type \`GqlInfo\` exported from \`grats\`: \`import type { GqlInfo } from "grats";\`.`;
+export function userDefinedInfoTag(libraryImport: string): string {
+  return `Unexpected user-defined \`@${INFO_TAG}\` tag. Use the type \`GqlInfo\` exported from \`${libraryImport}\`: \`import type { GqlInfo } from "${libraryImport}";\`.`;
 }
 
 export function invalidResolverParamType(): string {
