@@ -346,6 +346,33 @@ describe("getParsedCommandLineOfConfigFile", () => {
     expect(parsed.fileNames).toEqual([join(directory, "a.ts")]);
   });
 
+  for (const encoding of ["utf16le", "utf16be"] as const) {
+    it(`reads a ${encoding} tsconfig with a byte order mark, as TypeScript 5 does`, () => {
+      const text = JSON.stringify(
+        { grats: { tsSchema: "./schema.ts" }, compilerOptions: { target: "es1" } },
+        null,
+        2,
+      );
+      const bytes = Buffer.from(`\uFEFF${text}`, "utf16le");
+      if (encoding === "utf16be") {
+        bytes.swap16();
+      }
+      const directory = project({ "a.ts": "export const a = 1;\n" });
+      writeFileSync(join(directory, "tsconfig.json"), bytes);
+      const parsed = getParsedCommandLineOfConfigFile(join(directory, "tsconfig.json"));
+      expect(parsed.raw).toEqual({
+        grats: { tsSchema: "./schema.ts" },
+        compilerOptions: { target: "es1" },
+      });
+      expect(parsed.fileNames).toEqual([join(directory, "a.ts")]);
+      expect(parsed.errors.map((error) => error.code)).toEqual([6046]);
+      expect(parsed.errors[0]?.start).toBe(text.indexOf('"es1"'));
+      expect(format(parsed.errors, directory)).toMatch(
+        /^tsconfig\.json:6:15 - error TS6046: .*\n\n6 {5}"target": "es1"\n {16}~{5}\n/,
+      );
+    });
+  }
+
   it("places config diagnostics after a byte order mark as TypeScript 5 does", () => {
     const text = tsconfig({ target: "es1" });
     const directory = project({ "tsconfig.json": `\uFEFF${text}`, "a.ts": "" });

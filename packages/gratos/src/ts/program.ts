@@ -458,12 +458,31 @@ export const anyOpenProject = (sessions: ReadonlyArray<Session>): Project | unde
 /** Drops a leading UTF-8 byte order mark, as TypeScript does when it reads a file. */
 const stripBom = (text: string): string => (text.startsWith("\uFEFF") ? text.slice(1) : text);
 
+/**
+ * A file's text decoded by its byte order mark, without the mark, as TypeScript 5's sys.readFile
+ * reads it: UTF-16 big or little endian, or else UTF-8.
+ */
+const decodeText = (bytes: Buffer): string => {
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    // Swap a copy's bytes, dropping an odd trailing byte as TypeScript 5 does.
+    const swapped = Buffer.from(bytes.subarray(0, bytes.length & ~1));
+    return swapped.swap16().toString("utf16le", 2);
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return bytes.toString("utf16le", 2);
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return bytes.toString("utf8", 3);
+  }
+  return bytes.toString("utf8");
+};
+
 export const sys = {
   newLine: "\n",
   fileExists: (path: string): boolean => existsSync(path),
   readFile: (path: string): string | undefined => {
     try {
-      return readFileSync(path, "utf8");
+      return decodeText(readFileSync(path));
     } catch {
       return undefined;
     }
@@ -498,7 +517,7 @@ export const findConfigFile = (
  */
 export const readRawConfig = (configFile: string): unknown => {
   const errors: Array<ParseError> = [];
-  const text = stripBom(readFileSync(configFile, "utf8"));
+  const text = decodeText(readFileSync(configFile));
   const raw: unknown = parseJsonc(text, errors, { allowTrailingComma: true });
   if (errors.length > 0) {
     throw new Error(`Gratos: could not parse ${configFile} as JSON with comments`);
