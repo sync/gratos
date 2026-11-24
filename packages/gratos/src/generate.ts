@@ -2,9 +2,10 @@
 // compiler-process lifecycle and errors are Effect; extraction and codegen stay upstream's.
 //
 // generate(tsconfig) reads the tsconfig through FileSystem, decodes its `grats` key with Schema,
-// opens the TypeScript 7 project (the tsgo process lives as long as the caller's Scope), builds
-// the schema and writes each output file only when its content differs. check(tsconfig) does the
-// same without writing, and fails with StaleFilesError when a file is missing or out of date.
+// opens the TypeScript 7 project on a tsgo session of its own (the process lives as long as the
+// caller's Scope), builds the schema and writes each output file only when its content differs.
+// check(tsconfig) does the same without writing, and fails with StaleFilesError when a file is
+// missing or out of date.
 import { dirname, relative, resolve } from "node:path";
 
 import { Data, Effect, FileSystem, Result } from "effect";
@@ -14,7 +15,8 @@ import { getParsedCommandLineOfConfigFile, sys } from "#typescript";
 import type { Diagnostic } from "#typescript";
 
 import { decodeGratsConfig } from "./effect/config.ts";
-import { closeDefaultSessions } from "./ts/session.ts";
+import { withParseSession } from "./ts/program.ts";
+import { acquireSession } from "./ts/session.ts";
 import type { GratsConfig, ParsedCommandLineGrats } from "./upstream/gratsConfig.ts";
 import { buildSchemaAndDocResult } from "./upstream/lib.ts";
 import type { SchemaAndDoc } from "./upstream/lib.ts";
@@ -121,25 +123,29 @@ const diagnosticsError = (diagnostics: ReadonlyArray<Diagnostic>): DiagnosticsEr
   });
 
 /**
- * Opens the TypeScript project for `configPath` as a scoped resource: its tsgo process is closed
- * when the scope closes.
+ * Opens the TypeScript project for `configPath` on a tsgo session of its own, scoped to the
+ * caller: the session's release is registered before the project is opened, so the process is
+ * closed with the scope even when opening fails, and no other session (the facade's default
+ * ones, another generate() call) is touched. Fast loading is on unless the config asks for
+ * TypeScript errors.
  */
-const openProject = (configPath: string) =>
-  Effect.acquireRelease(
-    Effect.try({
-      try: () =>
+const openProject = Effect.fnUntraced(function* (configPath: string, config: GratsConfig) {
+  const session = yield* acquireSession({ blankThirdParty: !config.reportTypeScriptTypeErrors });
+  return yield* Effect.try({
+    try: () =>
+      withParseSession(session, () =>
         getParsedCommandLineOfConfigFile(configPath, undefined, {
           ...sys,
           onUnRecoverableConfigFileDiagnostic: () => {},
         }),
-      catch: (cause) =>
-        new ConfigError({
-          path: configPath,
-          message: `Gratos: TypeScript could not open \`${configPath}\`: ${cause instanceof Error ? cause.message : String(cause)}`,
-        }),
-    }),
-    () => Effect.sync(closeDefaultSessions),
-  );
+      ),
+    catch: (cause) =>
+      new ConfigError({
+        path: configPath,
+        message: `Gratos: TypeScript could not open \`${configPath}\`: ${cause instanceof Error ? cause.message : String(cause)}`,
+      }),
+  });
+});
 
 /** The files Gratos writes for a config, in the order messages list them. */
 const outputs = (
@@ -175,7 +181,7 @@ const build = Effect.fnUntraced(function* (tsconfig: string) {
   const fs = yield* FileSystem.FileSystem;
   const configPath = resolve(tsconfig);
   const { config, warnings } = yield* readConfig(configPath);
-  const parsed = yield* openProject(configPath);
+  const parsed = yield* openProject(configPath, config);
   if (parsed === undefined) {
     return yield* new ConfigError({
       path: configPath,

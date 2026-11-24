@@ -86,6 +86,12 @@ export const readFileOverride = (
   return BLANK_SOURCE;
 };
 
+/** Every session not yet closed, in the order they were opened: default and scoped ones. */
+const liveSessions = new Set<Session>();
+
+/** Every session not yet closed, oldest first, for the printer, which needs any open project. */
+export const openSessionList = (): ReadonlyArray<Session> => [...liveSessions];
+
 const openSession = (options: SessionOptions): Session => {
   const state = {
     blankThirdParty: options.blankThirdParty,
@@ -97,10 +103,13 @@ const openSession = (options: SessionOptions): Session => {
     cwd: process.cwd(),
     fs: { readFile: (fileName) => readFileOverride(state, fileName) },
   });
-  return { ...state, api, current: null };
+  const session: Session = { ...state, api, current: null };
+  liveSessions.add(session);
+  return session;
 };
 
 const closeSession = (session: Session): void => {
+  liveSessions.delete(session);
   session.current?.snapshot.dispose();
   session.current = null;
   session.api.close();

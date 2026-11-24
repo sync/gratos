@@ -214,8 +214,11 @@ export const getPreEmitDiagnostics = (
 /** A config read by getParsedCommandLineOfConfigFile, and the program last opened for it. */
 interface ParsedConfig {
   readonly configPath: string;
-  /** The blanking mode of its session. A later parse may replace that session with a new one. */
-  readonly blankThirdParty: boolean;
+  /**
+   * The session to build its programs on: the default session of its blanking mode (a later
+   * parse may replace that with a new one), or the caller's own (parseConfigFileOnSession).
+   */
+  readonly session: () => Session;
   /**
    * The root file names as returned, frozen and separate from the returned array, to tell
    * whether a caller changed the roots since (even by mutating that array).
@@ -416,7 +419,7 @@ const programForParsedConfig = (
   rootNames: ReadonlyArray<string>,
   options: CompilerOptions,
 ): FacadeProgram => {
-  const session = defaultSession(parsed.blankThirdParty);
+  const session = parsed.session();
   const reusable =
     JSON.stringify(options) === parsed.optionsJson && sameFileNames(rootNames, parsed.fileNames);
   if (reusable && session.current?.project === parsed.program.project) {
@@ -551,27 +554,15 @@ const reportsTypeScriptErrors = (raw: unknown): boolean => {
 };
 
 /**
- * TypeScript 5's getParsedCommandLineOfConfigFile. It opens the project right away: TypeScript
- * 7 reports config errors only on a project. A later createProgram with the returned options
- * and file names reuses that project while it is open (see programForParsedConfig).
- *
- * Every call opens the project on a new tsgo session, as TypeScript 5 reads the config, its
- * root files and their sources again on every call. Reusing a session would keep the config's
- * options, its root files and the third-party files blanked as they were when it was first
- * read. The CLI parses once, so it starts one session either way.
+ * Opens the project for `configPath` on `session` and returns its parsed command line. Programs
+ * that createProgram later builds from the returned options use `sessionOf()`.
  */
-export const getParsedCommandLineOfConfigFile = (
-  configFile: string,
-  _optionsToExtend?: unknown,
-  _host?: unknown,
+const parseConfigOn = (
+  configPath: string,
+  rawConfig: { readonly raw: unknown } | undefined,
+  session: Session,
+  sessionOf: () => Session,
 ): ParsedCommandLine => {
-  const configPath = resolve(configFile);
-  // A tsconfig with syntax errors is left to TypeScript, which reports them with their place as
-  // config diagnostics. Its partial `grats` key is never read.
-  const rawConfig = parseRawConfig(configPath);
-  const raw = rawConfig?.raw;
-  const blankThirdParty = !reportsTypeScriptErrors(raw);
-  const session = restartDefaultSession(blankThirdParty);
   const program = makeProgram(session, openProject(session, configPath));
   const errors = program.getConfigFileParsingDiagnostics();
   if (rawConfig === undefined && errors.length === 0) {
@@ -584,7 +575,7 @@ export const getParsedCommandLineOfConfigFile = (
   const fileNames = program.project.rootFiles;
   parsedConfigs.set(options, {
     configPath,
-    blankThirdParty,
+    session: sessionOf,
     fileNames: Object.freeze([...fileNames]),
     optionsJson: JSON.stringify(options),
     program,
@@ -593,7 +584,57 @@ export const getParsedCommandLineOfConfigFile = (
     options,
     fileNames: [...fileNames],
     errors,
-    raw,
+    raw: rawConfig?.raw,
     program,
   };
+};
+
+/** The caller's session for getParsedCommandLineOfConfigFile, inside withParseSession. */
+let parseSession: Session | null = null;
+
+/**
+ * Runs synchronous `f` with getParsedCommandLineOfConfigFile opening projects on `session`
+ * instead of a restarted default session. The project, and every program createProgram later
+ * builds from the returned options, live on `session`, whose blanking mode the caller chose.
+ * The Effect shell scopes one session to each generate() or check() call, so closing it never
+ * touches another session.
+ */
+export const withParseSession = <A>(session: Session, f: () => A): A => {
+  const previous = parseSession;
+  parseSession = session;
+  try {
+    return f();
+  } finally {
+    parseSession = previous;
+  }
+};
+
+/**
+ * TypeScript 5's getParsedCommandLineOfConfigFile. It opens the project right away: TypeScript
+ * 7 reports config errors only on a project. A later createProgram with the returned options
+ * and file names reuses that project while it is open (see programForParsedConfig).
+ *
+ * Every call opens the project on a new tsgo session, as TypeScript 5 reads the config, its
+ * root files and their sources again on every call. Reusing a session would keep the config's
+ * options, its root files and the third-party files blanked as they were when it was first
+ * read. The CLI parses once, so it starts one session either way. Inside withParseSession, the
+ * caller's (new) session is used instead.
+ */
+export const getParsedCommandLineOfConfigFile = (
+  configFile: string,
+  _optionsToExtend?: unknown,
+  _host?: unknown,
+): ParsedCommandLine => {
+  const configPath = resolve(configFile);
+  // A tsconfig with syntax errors is left to TypeScript, which reports them with their place as
+  // config diagnostics. Its partial `grats` key is never read.
+  const rawConfig = parseRawConfig(configPath);
+  const session = parseSession;
+  if (session !== null) {
+    return parseConfigOn(configPath, rawConfig, session, () => session);
+  }
+  const blankThirdParty = !reportsTypeScriptErrors(rawConfig?.raw);
+  return parseConfigOn(configPath, rawConfig, restartDefaultSession(blankThirdParty), () =>
+    defaultSession(blankThirdParty),
+  );
 };

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { assert, describe, expect, it } from "@effect/vitest";
-import { Effect, FileSystem, PlatformError } from "effect";
+import { Effect, Exit, FileSystem, PlatformError, Scope } from "effect";
 
 import {
   check,
@@ -15,7 +15,14 @@ import {
   generate,
   StaleFilesError,
 } from "../src/generate.ts";
-import { defaultSessionList } from "../src/ts/session.ts";
+import {
+  closeDefaultSessions,
+  defaultSession,
+  defaultSessionList,
+  openProject,
+  openSessionList,
+} from "../src/ts/session.ts";
+import type { Session } from "../src/ts/session.ts";
 
 import { scratchProject } from "./support/scratch.ts";
 
@@ -56,6 +63,19 @@ const memoryFileSystem = (files: Record<string, string>) => {
 };
 
 const smokeConfig = readFileSync(smokeTsconfig, "utf8");
+
+/** The sessions opened since `before` that are still open. */
+const sessionsSince = (before: ReadonlyArray<Session>): ReadonlyArray<Session> =>
+  openSessionList().filter((session) => !before.includes(session));
+
+/** Opens an empty virtual project on `session`: it throws once the session's tsgo is closed. */
+let probeCount = 0;
+const probe = (session: Session): void => {
+  probeCount += 1;
+  const configPath = join(smokeDir, `__gratos_probe_${probeCount}__.tsconfig.json`);
+  session.virtualFiles.set(configPath, JSON.stringify({ compilerOptions: {}, files: [] }));
+  openProject(session, configPath);
+};
 
 describe("generate", () => {
   it.effect("writes both files when they are missing", () => {
@@ -99,17 +119,59 @@ describe("generate", () => {
     }).pipe(Effect.provide(fs.layer));
   });
 
-  it.effect("closes the TypeScript process with the scope", () =>
+  it.effect("closes its own TypeScript process with the scope", () =>
     Effect.gen(function* () {
+      const before = openSessionList();
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* generate(smokeTsconfig);
-          expect(defaultSessionList()).toHaveLength(1);
+          expect(sessionsSince(before)).toHaveLength(1);
         }),
       );
-      expect(defaultSessionList()).toEqual([]);
+      expect(openSessionList()).toEqual(before);
     }).pipe(Effect.provide(memoryFileSystem({ [smokeTsconfig]: smokeConfig }).layer)),
   );
+
+  it.effect("leaves every other TypeScript session open (both blanking modes)", () =>
+    Effect.gen(function* () {
+      // The facade's process-wide sessions, in both blanking modes, as a host process may hold.
+      const blanking = defaultSession(true);
+      const full = defaultSession(false);
+      // Another generate() call, still running in its own scope.
+      const concurrent = yield* Scope.make();
+      yield* generate(smokeTsconfig).pipe(Scope.provide(concurrent));
+      const [other] = sessionsSince([blanking, full]);
+      assert.isDefined(other);
+      yield* Effect.scoped(check(smokeTsconfig));
+      for (const session of [blanking, full, other]) {
+        expect(openSessionList()).toContain(session);
+        probe(session);
+      }
+      expect(defaultSessionList()).toEqual([blanking, full]);
+      yield* Scope.close(concurrent, Exit.void);
+      expect(openSessionList()).not.toContain(other);
+    }).pipe(
+      Effect.provide(
+        memoryFileSystem({
+          [smokeTsconfig]: smokeConfig,
+          [sdlPath]: committedSdl,
+          [tsPath]: committedTs,
+        }).layer,
+      ),
+      Effect.ensuring(Effect.sync(closeDefaultSessions)),
+    ),
+  );
+
+  it.effect("closes its TypeScript process when the project fails to open", () => {
+    // The FileSystem has the tsconfig, but TypeScript reads the disk, where it does not exist.
+    const missing = join(smokeDir, "missing", "tsconfig.json");
+    return Effect.gen(function* () {
+      const before = openSessionList();
+      const error = yield* Effect.flip(Effect.scoped(generate(missing)));
+      assert.instanceOf(error, ConfigError);
+      expect(openSessionList()).toEqual(before);
+    }).pipe(Effect.provide(memoryFileSystem({ [missing]: smokeConfig }).layer));
+  });
 
   it.effect("decodes the grats config with Schema: an unknown option is a ConfigError", () => {
     const fs = memoryFileSystem({
@@ -208,11 +270,12 @@ describe("diagnostics", () => {
     "fails with DiagnosticsError, and hints at Effect.Effect with node_modules blanked",
     () =>
       Effect.gen(function* () {
+        const before = openSessionList();
         const error = yield* Effect.scoped(
           Effect.gen(function* () {
             const failure = yield* Effect.flip(generate(tsconfig));
             // Fast loading was on: effect's own declaration files were read as empty.
-            const [session] = defaultSessionList();
+            const [session] = sessionsSince(before);
             expect(session?.blankThirdParty).toBe(true);
             expect(
               [...(session?.blanked ?? [])].some((file) =>
