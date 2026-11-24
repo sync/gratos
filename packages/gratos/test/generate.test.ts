@@ -2,7 +2,7 @@
 // TypeScript itself (tsgo) reads the project's sources from disk; every file the shell reads or
 // writes (the tsconfig and the generated files) goes through the FileSystem service, so a fake
 // one shows exactly which files it writes.
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { NodeFileSystem } from "@effect/platform-node";
@@ -230,17 +230,41 @@ describe("generate", () => {
     }).pipe(Effect.provide(fs.layer));
   });
 
-  // Real projects on disk: the outputs alias one file only through the file system.
+  // Real projects on disk: the outputs alias one file only through the file system. The schema's
+  // name has an "é" (composed, U+00E9) so that a decomposed spelling can alias it.
+  const schemaName = "sch\u00e9ma.ts";
   for (const [alias, tsClientEnums, prepare] of [
     [
       "a symlinked directory",
-      "./link/schema.ts",
+      `./link/${schemaName}`,
       (dir: string) => {
         mkdirSync(join(dir, "real"));
         symlinkSync(join(dir, "real"), join(dir, "link"));
       },
     ],
-    ["letter case", "./real/SCHEMA.ts", (dir: string) => mkdirSync(join(dir, "real"))],
+    ["letter case", "./real/SCH\u00c9MA.ts", (dir: string) => mkdirSync(join(dir, "real"))],
+    [
+      "a symlink to the missing output",
+      "./enums.ts",
+      (dir: string) => {
+        mkdirSync(join(dir, "real"));
+        symlinkSync(join(dir, "real", schemaName), join(dir, "enums.ts"));
+      },
+    ],
+    [
+      "a hard link",
+      "./enums.ts",
+      (dir: string) => {
+        mkdirSync(join(dir, "real"));
+        writeFileSync(join(dir, "real", schemaName), "");
+        linkSync(join(dir, "real", schemaName), join(dir, "enums.ts"));
+      },
+    ],
+    [
+      "Unicode normalization",
+      "./real/sche\u0301ma.ts", // decomposed: "e" + U+0301
+      (dir: string) => mkdirSync(join(dir, "real")),
+    ],
   ] as const) {
     it.effect(`rejects two outputs that are one file through ${alias}`, () => {
       const project = smokeCopy("output-alias");
@@ -248,7 +272,7 @@ describe("generate", () => {
       const tsconfig = project.path("tsconfig.json");
       const config = readFileSync(tsconfig, "utf8").replace(
         '"tsSchema": "./schema.ts",',
-        `"tsSchema": "./real/schema.ts", "tsClientEnums": "${tsClientEnums}",`,
+        `"tsSchema": "./real/${schemaName}", "tsClientEnums": "${tsClientEnums}",`,
       );
       expect(config).toContain("tsClientEnums");
       writeFileSync(tsconfig, config);

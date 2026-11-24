@@ -204,23 +204,40 @@ const readOutput = (fs: FileSystem.FileSystem, path: string) =>
   );
 
 /**
- * Where a generated file lands, for comparing outputs: the real path of its nearest existing
- * ancestor (symlinks resolved) joined with the rest, lowercased. Two outputs that alias one file
- * through a symlinked directory, or through letter case on a case-insensitive file system
- * (macOS, Windows), then compare equal. Lowercasing also rejects outputs that differ only by
- * case on a case-sensitive one, which no project needs.
+ * Where a generated file lands, for comparing outputs:
+ * - an existing file: its device and inode, so hard links, symlinks and letter case on a
+ *   case-insensitive file system (macOS, Windows) all compare equal;
+ * - a symlink whose target is missing: where the target would be;
+ * - otherwise: the real path of its nearest existing ancestor joined with the rest, in Unicode
+ *   NFC and lowercased. Lowercasing also rejects outputs that differ only by case on a
+ *   case-sensitive file system, which no project needs.
  */
 const destinationOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, path: string) {
+  let target = path;
+  // A chain of symlinks to missing files, bounded as the OS bounds symlink loops.
+  for (let hops = 0; hops < 40; hops += 1) {
+    const info = yield* Effect.option(fs.stat(target));
+    if (Option.isSome(info) && Option.isSome(info.value.ino)) {
+      return `inode:${info.value.dev}:${info.value.ino.value}`;
+    }
+    const link = yield* Effect.option(fs.readLink(target));
+    if (Option.isNone(link)) {
+      break;
+    }
+    target = resolve(dirname(target), link.value);
+  }
   const rest: Array<string> = [];
-  let current = path;
+  let current = target;
   for (;;) {
     const real = yield* Effect.option(fs.realPath(current));
     if (Option.isSome(real)) {
-      return join(real.value, ...rest).toLowerCase();
+      return `path:${join(real.value, ...rest)
+        .normalize("NFC")
+        .toLowerCase()}`;
     }
     const parent = dirname(current);
     if (parent === current) {
-      return path.toLowerCase();
+      return `path:${target.normalize("NFC").toLowerCase()}`;
     }
     rest.unshift(basename(current));
     current = parent;
