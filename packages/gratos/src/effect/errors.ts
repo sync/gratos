@@ -24,6 +24,9 @@ export const effectDerivedContext = (wrapper: EffectWrapper): string =>
 export const streamOutsideSubscription = (): string =>
   "Expected `Stream.Stream` only on fields of `Subscription` (`@gqlSubscriptionField`). On any other type GraphQL would treat the Stream as a list and fail at runtime. Return `Effect.Effect<ReadonlyArray<A>>` for a list, or move the field to `Subscription`.";
 
+export const streamInSubscriptionEvent = (): string =>
+  "Expected `Stream.Stream` only as the source of a subscription field, not inside its event type. Each event is delivered as a plain value, and GraphQL cannot iterate a Stream inside one. Flatten the inner Stream into the source, for example with `Stream.flatten`.";
+
 export const effectOnSubscription = (): string =>
   "Expected a field on `Subscription` not to return `Effect.Effect`. An Effect is not a subscription source: a subscription's events come from a `Stream.Stream`. Return the `Stream.Stream` instead, and build it with `Stream.unwrap` if it needs an Effect to set up.";
 

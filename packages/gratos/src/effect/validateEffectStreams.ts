@@ -6,6 +6,10 @@
 // Plain `AsyncIterable` keeps upstream's behaviour; only lists marked `isEffectStream` are
 // checked.
 //
+// On `Subscription`, a Stream is allowed only as the source: the field's outermost list.
+// `Stream.Stream<Stream.Stream<A>>` or `AsyncIterable<Stream.Stream<A>>` would deliver each event
+// as a Stream, which has no iterator protocol.
+//
 // An Effect on a subscription field is rejected too: the subscription source must be a
 // `Stream.Stream` (or an AsyncIterable). `Effect.Effect<AsyncIterable<A>>` would otherwise compile
 // as a subscription whose source is never run, and whose per-event resolve would lose its
@@ -21,7 +25,11 @@ import { gqlErr } from "../upstream/utils/DiagnosticError.ts";
 import type { DiagnosticsResult } from "../upstream/utils/DiagnosticError.ts";
 import { err, ok } from "../upstream/utils/Result.ts";
 import "./astExtensions.ts";
-import { effectOnSubscription, streamOutsideSubscription } from "./errors.ts";
+import {
+  effectOnSubscription,
+  streamInSubscriptionEvent,
+  streamOutsideSubscription,
+} from "./errors.ts";
 
 /** The first list in a type marked as a `Stream.Stream`, outermost first. */
 const effectStreamIn = (type: TypeNode): TypeNode | null => {
@@ -35,6 +43,12 @@ const effectStreamIn = (type: TypeNode): TypeNode | null => {
   }
 };
 
+/** The event type of a subscription field: the element of its source list, if it has one. */
+const subscriptionEventType = (type: TypeNode): TypeNode | null => {
+  const source = type.kind === Kind.NON_NULL_TYPE ? type.type : type;
+  return source.kind === Kind.LIST_TYPE ? source.type : null;
+};
+
 export const validateEffectStreams = (doc: DocumentNode): DiagnosticsResult<DocumentNode> => {
   const errors: Array<DiagnosticWithLocation> = [];
   const check = (typeName: string, fields: ReadonlyArray<FieldDefinitionNode> | undefined) => {
@@ -42,6 +56,12 @@ export const validateEffectStreams = (doc: DocumentNode): DiagnosticsResult<Docu
       for (const field of fields ?? []) {
         if (field.returnsEffect === true) {
           errors.push(gqlErr(field.type, effectOnSubscription()));
+          continue;
+        }
+        const event = subscriptionEventType(field.type);
+        const stream = event === null ? null : effectStreamIn(event);
+        if (stream !== null) {
+          errors.push(gqlErr(stream, streamInSubscriptionEvent()));
         }
       }
       return;
