@@ -1,5 +1,7 @@
-// Loads the package entry under plain Node and serves one request through every plugin, so every
-// module the core and its plugins reach (eagerly or lazily) is resolved.
+// Loads the package entry under plain Node and serves one successful query through every plugin.
+// The trace covers every module the entry imports statically, plus any module this one request
+// loads lazily; a module that only another path would load (an error, an APQ hit, a jit decline…)
+// is not covered.
 import { buildSchema } from "graphql";
 
 import {
