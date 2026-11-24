@@ -7,7 +7,7 @@
  * unauthenticated API rate limit.
  */
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import { Schema } from "effect";
@@ -59,10 +59,11 @@ const toLocal = (upstreamPath: string): string | undefined => {
 const gitBlobSha = (content: Buffer): string =>
   createHash("sha1").update(`blob ${content.length}\0`).update(content).digest("hex");
 
-const listFiles = (dir: string): Array<string> =>
-  readdirSync(dir, { recursive: true, encoding: "utf8" })
-    .map((entry) => join(dir, entry))
-    .filter((path) => statSync(path).isFile());
+/** Every non-directory entry under `dir`, without following symlinks; a symlink counts as an entry. */
+const listEntries = (dir: string): Array<string> =>
+  readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => !entry.isDirectory())
+    .map((entry) => join(entry.parentPath, entry.name));
 
 const fetchUpstreamTree = async (): Promise<(typeof TreeResponse.Type)["tree"]> => {
   const token = process.env["GITHUB_TOKEN"];
@@ -115,11 +116,10 @@ const main = async (): Promise<number> => {
   ];
   const present = vendoredRoots.flatMap((root) => {
     const absolute = join(packageRoot, root);
-    try {
-      return statSync(absolute).isDirectory() ? listFiles(absolute) : [absolute];
-    } catch {
-      return [];
+    if (!existsSync(absolute)) {
+      return []; // its files are already reported as missing
     }
+    return lstatSync(absolute).isDirectory() ? listEntries(absolute) : [absolute];
   });
   for (const absolute of present) {
     const local = relative(packageRoot, absolute).split(sep).join("/");
