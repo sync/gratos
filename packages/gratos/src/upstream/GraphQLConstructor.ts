@@ -43,6 +43,7 @@ import {
 } from "./resolverSignature.ts";
 import { type ExportDefinition } from "./GraphQLAstExtensions.ts";
 import { returnsEffect } from "../effect/wrappers.ts";
+import { isOptionalMethod } from "../effect/extract.ts";
 
 export class GraphQLConstructor {
   /* Top Level Types */
@@ -184,6 +185,7 @@ export class GraphQLConstructor {
       resolver,
       killsParentOnException: killsParentOnException ?? undefined,
       ...(returnsEffect(node) ? { returnsEffect: true } : {}),
+      ...(isOptionalMethod(node, resolver) ? { optionalMethod: true } : {}),
     };
   }
 

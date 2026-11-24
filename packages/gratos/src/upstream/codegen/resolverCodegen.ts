@@ -12,6 +12,7 @@ import TSAstBuilder from "./TSAstBuilder.ts";
 import { type ExportDefinition } from "../GraphQLAstExtensions.ts";
 import {
   alwaysResolveEffect,
+  optionalMethodCall,
   alwaysResolveMethods,
   isEffectSemanticNonNull,
 } from "../../effect/codegen.ts";
@@ -91,12 +92,20 @@ export default class ResolverCodegen {
           }),
           [
             F.createReturnStatement(
-              F.createCallExpression(
+              (optionalMethodCall(field)
+                ? (callee: ts.Expression, args: ts.Expression[]) =>
+                    F.createCallChain(
+                      callee,
+                      F.createToken(ts.SyntaxKind.QuestionDotToken),
+                      [],
+                      args,
+                    )
+                : (callee: ts.Expression, args: ts.Expression[]) =>
+                    F.createCallExpression(callee, [], args))(
                 F.createPropertyAccessExpression(
                   F.createIdentifier("source"),
                   F.createIdentifier(resolver.name ?? fieldName),
                 ),
-                [],
                 args.map((arg) => {
                   return this.resolverParam(arg);
                 }),
