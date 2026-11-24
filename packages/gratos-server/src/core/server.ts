@@ -268,12 +268,15 @@ const serve = <Ctx>(
       run.controller.abort();
     });
 
+  /** Whether the request is a mutation (not started yet) and the drain has begun. */
+  const drainRefuses = (run: Run): boolean => run.mutation !== undefined && draining;
+
   /**
    * A refusal from a hook (context or onExecute). A mutation that has not started is refused with
    * 503 SERVER_DRAINING instead once the drain has begun, whichever refusal came first.
    */
   const refuse = (run: Run, error: GraphQLError): Response =>
-    respond(run, errorResult([run.mutation !== undefined && draining ? serverDraining() : error]));
+    respond(run, errorResult([drainRefuses(run) ? serverDraining() : error]));
 
   const requestError = (run: Run, message: string, status: number): Response =>
     respond(run, errorResult([new GraphQLError(message)]), status);
@@ -366,7 +369,10 @@ const serve = <Ctx>(
         return answer(refuse(run, error));
       }
       logger.error("gratos-server: the context phase failed.", error);
-      return answer(respond(run, errorResult([unexpected(error)])));
+      // A mutation that never started is refused once the drain has begun, whatever stopped it.
+      return answer(
+        respond(run, errorResult([drainRefuses(run) ? serverDraining() : unexpected(error)])),
+      );
     }
   };
 

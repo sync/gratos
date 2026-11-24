@@ -621,6 +621,50 @@ describe("control.drain", () => {
       expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
     });
 
+    it("a context factory that fails with an ordinary Error during the drain is a 503 (logged)", async () => {
+      const context = gate();
+      const error = vi.fn();
+      const failure = new Error("session store down");
+      const server = createServer({
+        schema: basicSchema(),
+        logger: { warn: () => {}, error },
+        context: () =>
+          context.promise.then(() => {
+            throw failure;
+          }),
+      });
+      const request = post({ query: "mutation { bump }" });
+      const pending = send(server, request);
+      await flush();
+      await server.control.drain();
+      context.resolve();
+      const sent = await pending;
+      expect(sent.status).toBe(503);
+      expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
+      expect(error).toHaveBeenCalledExactlyOnceWith(
+        "gratos-server: the context phase failed.",
+        failure,
+      );
+      expect(await mutationOf(request)?.started).toBe(false);
+    });
+
+    it("without a drain, the same failure is a masked 500", async () => {
+      const error = vi.fn();
+      const server = createServer({
+        schema: basicSchema(),
+        logger: { warn: () => {}, error },
+        context: () => {
+          throw new Error("session store down");
+        },
+      });
+      const sent = await gql(server, "mutation { bump }");
+      expect(sent.status).toBe(500);
+      expect(sent.body).toEqual({
+        errors: [{ message: "Unexpected error.", extensions: { http: { status: 500 } } }],
+      });
+      expect(error).toHaveBeenCalledTimes(1);
+    });
+
     it("drain after the gate: both fields commit before the drain resolves", async () => {
       const context = gate();
       const { server, executor, events, first, second, firstStarted } = twoFieldServer({
