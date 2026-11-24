@@ -332,6 +332,9 @@ export const anyOpenProject = (sessions: ReadonlyArray<Session>): Project | unde
 
 // ---- Config files ----
 
+/** Drops a leading UTF-8 byte order mark, as TypeScript does when it reads a file. */
+const stripBom = (text: string): string => (text.startsWith("\uFEFF") ? text.slice(1) : text);
+
 export const sys = {
   newLine: "\n",
   fileExists: (path: string): boolean => existsSync(path),
@@ -372,7 +375,7 @@ export const findConfigFile = (
  */
 export const readRawConfig = (configFile: string): unknown => {
   const errors: Array<ParseError> = [];
-  const text = readFileSync(configFile, "utf8");
+  const text = stripBom(readFileSync(configFile, "utf8"));
   const raw: unknown = parseJsonc(text, errors, { allowTrailingComma: true });
   if (errors.length > 0) {
     throw new Error(`Gratos: could not parse ${configFile} as JSON with comments`);
