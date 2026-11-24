@@ -272,6 +272,24 @@ describe("generate", () => {
     ],
     ["letter case", "./real/SCH\u00c9MA.ts", (dir: string) => mkdirSync(join(dir, "real"))],
     [
+      // The schema exists: on a case-sensitive file system the other spelling is a separate,
+      // missing file, compared by its path key.
+      "letter case, the schema already written",
+      "./real/SCH\u00c9MA.ts",
+      (dir: string) => {
+        mkdirSync(join(dir, "real"));
+        writeFileSync(join(dir, "real", schemaName), "");
+      },
+    ],
+    [
+      "Unicode normalization, the schema already written",
+      "./real/sche\u0301ma.ts", // decomposed: "e" + U+0301
+      (dir: string) => {
+        mkdirSync(join(dir, "real"));
+        writeFileSync(join(dir, "real", schemaName), "");
+      },
+    ],
+    [
       "a symlink to the missing output",
       "./enums.ts",
       (dir: string) => {

@@ -203,22 +203,29 @@ const readOutput = (fs: FileSystem.FileSystem, path: string) =>
     Effect.mapError(outputError("read", path)),
   );
 
+/** A path key: letter case and Unicode spelling never tell two outputs apart. */
+const pathKey = (physical: string): string => `path:${physical.normalize("NFC").toLowerCase()}`;
+
 /**
- * Where a generated file lands, for comparing outputs:
- * - an existing file: its device and inode, so hard links, symlinks and letter case on a
- *   case-insensitive file system (macOS, Windows) all compare equal;
- * - a symlink whose target is missing: where the target would be;
- * - otherwise: the real path of its nearest existing ancestor joined with the rest, in Unicode
- *   NFC and lowercased. Lowercasing also rejects outputs that differ only by case on a
- *   case-sensitive file system, which no project needs.
+ * Where a generated file lands, as keys for comparing outputs: two outputs collide when they share
+ * any key.
+ * - Always a path key: the real path (symlinks resolved, a symlink to a missing file followed to
+ *   where its target would be) of the nearest existing ancestor joined with the rest, in Unicode
+ *   NFC and lowercased. Letter case and Unicode spelling then never tell two outputs apart, on
+ *   any file system and whether or not the files exist yet.
+ * - For an existing file, also its device and inode, which catches hard links.
  */
-const destinationOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, path: string) {
+const destinationKeysOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, path: string) {
+  const keys: Array<string> = [];
   let target = path;
   // A chain of symlinks to missing files, bounded as the OS bounds symlink loops.
   for (let hops = 0; hops < 40; hops += 1) {
     const info = yield* Effect.option(fs.stat(target));
-    if (Option.isSome(info) && Option.isSome(info.value.ino)) {
-      return `inode:${info.value.dev}:${info.value.ino.value}`;
+    if (Option.isSome(info)) {
+      if (Option.isSome(info.value.ino)) {
+        keys.push(`inode:${info.value.dev}:${info.value.ino.value}`);
+      }
+      break;
     }
     const link = yield* Effect.option(fs.readLink(target));
     if (Option.isNone(link)) {
@@ -237,13 +244,13 @@ const destinationOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, pa
   for (;;) {
     const real = yield* Effect.option(fs.realPath(current));
     if (Option.isSome(real)) {
-      return `path:${join(real.value, ...rest)
-        .normalize("NFC")
-        .toLowerCase()}`;
+      keys.push(pathKey(join(real.value, ...rest)));
+      return keys;
     }
     const parent = dirname(current);
     if (parent === current) {
-      return `path:${target.normalize("NFC").toLowerCase()}`;
+      keys.push(pathKey(target));
+      return keys;
     }
     rest.unshift(basename(current));
     current = parent;
@@ -279,9 +286,21 @@ const build = Effect.fnUntraced(function* (tsconfig: string) {
     return yield* diagnosticsError(result.err);
   }
   const planned = outputs(configPath, config, result.value);
-  const destinations = yield* Effect.forEach(planned, (output) => destinationOf(fs, output.path));
-  const collision =
-    planned[destinations.findIndex((destination, i) => destinations.indexOf(destination) !== i)];
+  const destinations = yield* Effect.forEach(planned, (output) =>
+    destinationKeysOf(fs, output.path),
+  );
+  // The first output that shares a key with an earlier one.
+  const seen = new Set<string>();
+  let collision: (typeof planned)[number] | undefined;
+  for (const [i, keys] of destinations.entries()) {
+    if (keys.some((key) => seen.has(key))) {
+      collision = planned[i];
+      break;
+    }
+    for (const key of keys) {
+      seen.add(key);
+    }
+  }
   if (collision !== undefined) {
     // Writing both would leave whichever came last, so every run would rewrite the file and
     // --check would never pass (for example `graphqlSchema: "schema.gql"` with metadata on,
