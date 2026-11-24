@@ -160,6 +160,26 @@ describe("createProgram with the options of a parsed config", () => {
     expect(program.getSemanticDiagnostics().map((diagnostic) => diagnostic.code)).toEqual([7006]);
   });
 
+  it("builds fewer roots with the caller's options after the config was edited and parsed again", () => {
+    // Only the roots changed, so every option must still come from the caller, not from the
+    // tsconfig as it now is on disk.
+    const directory = project({
+      "tsconfig.json": tsconfig(),
+      "a.ts": "export const f = (x) => x;\n",
+      "b.ts": "export const b = 2;\n",
+    });
+    const configPath = join(directory, "tsconfig.json");
+    const first = getParsedCommandLineOfConfigFile(configPath);
+    expect(first.options["strict"]).toBe(true);
+    writeFileSync(configPath, JSON.stringify({ compilerOptions: { strict: false } }));
+    expect(getParsedCommandLineOfConfigFile(configPath).options["strict"]).toBe(false);
+
+    const program = createProgram([join(directory, "a.ts")], first.options);
+    expect(sourceFileNames(program)).toEqual([join(directory, "a.ts")]);
+    expect(program.getCompilerOptions()["strict"]).toBe(true);
+    expect(program.getSemanticDiagnostics().map((diagnostic) => diagnostic.code)).toEqual([7006]);
+  });
+
   it("keeps a wildcard alias substitution unnormalized until TypeScript expands it", () => {
     const root = project({
       // "@s/a/b" expands to ./lib/a/b/../x, which is ./lib/a/x. Normalizing first would turn

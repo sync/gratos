@@ -3,9 +3,9 @@
 // TypeScript 7 opens programs only from a tsconfig. Programs built from a tsconfig that
 // getParsedCommandLineOfConfigFile read open that real tsconfig, with fast loading unless the
 // Grats config asks for TypeScript errors; with other roots or options, a virtual tsconfig
-// extends it. Any other program (the fixture harness, API users) gets a virtual tsconfig with
-// explicit `files` and the given compiler options, served by the session's readFile callback,
-// and loads every file in full.
+// beside it holds those roots and all of those options. Any other program (the fixture harness,
+// API users) gets a virtual tsconfig with explicit `files` and the given compiler options,
+// served by the session's readFile callback, and loads every file in full.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
@@ -356,21 +356,15 @@ const absolutePaths = (paths: unknown, options: CompilerOptions): unknown => {
   );
 };
 
-/**
- * `options` as a tsconfig's compilerOptions. `context` is the full set of options they belong
- * to, which gives relative `paths` their base.
- */
-const toTsconfigOptions = (
-  options: CompilerOptions,
-  context: CompilerOptions = options,
-): CompilerOptions =>
+/** `options` as a tsconfig's compilerOptions, relative `paths` made absolute. */
+const toTsconfigOptions = (options: CompilerOptions): CompilerOptions =>
   Object.fromEntries(
     Object.entries(options).flatMap(([key, value]): Array<[string, unknown]> => {
       if (DROPPED_OPTIONS.has(key) || value === undefined) {
         return [];
       }
       if (key === "paths") {
-        return [[key, absolutePaths(value, context)]];
+        return [[key, absolutePaths(value, options)]];
       }
       const names = ENUM_OPTIONS.get(key);
       if (names !== undefined && typeof value === "number") {
@@ -409,54 +403,34 @@ const sameFileNames = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): bool
 /**
  * The program for a config read by getParsedCommandLineOfConfigFile. Its own program is reused
  * only while it is still the session's open project and the caller kept its roots and options.
- * After another project was opened, or another config parsed, the config is reopened. With
- * other roots or options, a virtual tsconfig extends it with exactly those roots and the changed
- * options.
+ * Otherwise a virtual tsconfig beside the config builds exactly the caller's roots with all of
+ * the caller's options, as TypeScript 5's createProgram would: the config may have changed on
+ * disk since it was parsed (a later parse restarts the session), so nothing is read from it.
  */
 const programForParsedConfig = (
   parsed: ParsedConfig,
   rootNames: ReadonlyArray<string>,
   options: CompilerOptions,
 ): FacadeProgram => {
-  const { configPath } = parsed;
   const session = defaultSession(parsed.blankThirdParty);
-  const sameOptions = JSON.stringify(options) === parsed.optionsJson;
-  if (sameOptions && sameFileNames(rootNames, parsed.fileNames)) {
-    if (session.current?.project !== parsed.program.project) {
-      // The config may have changed on disk since it was parsed (a later parse restarts the
-      // session), so build exactly what the caller passed, as TypeScript 5 would.
-      parsed.program = openVirtualProgram(
-        session,
-        {
-          compilerOptions: toTsconfigOptions(options),
-          files: rootNames.map((fileName) => resolve(fileName)),
-          include: [],
-        },
-        dirname(configPath),
-      );
-    }
+  const reusable =
+    JSON.stringify(options) === parsed.optionsJson && sameFileNames(rootNames, parsed.fileNames);
+  if (reusable && session.current?.project === parsed.program.project) {
     return parsed.program;
   }
-  const original: CompilerOptions = JSON.parse(parsed.optionsJson);
-  const changed = Object.fromEntries(
-    Object.keys({ ...original, ...options }).flatMap((key): Array<[string, unknown]> => {
-      if (JSON.stringify(options[key]) === JSON.stringify(original[key])) {
-        return [];
-      }
-      // A removed option is reset to its default with null, as in an extending tsconfig.
-      return [[key, options[key] ?? null]];
-    }),
-  );
-  return openVirtualProgram(
+  const program = openVirtualProgram(
     session,
     {
-      extends: configPath,
-      compilerOptions: toTsconfigOptions(changed, options),
+      compilerOptions: toTsconfigOptions(options),
       files: rootNames.map((fileName) => resolve(fileName)),
       include: [],
     },
-    dirname(configPath),
+    dirname(parsed.configPath),
   );
+  if (reusable) {
+    parsed.program = program;
+  }
+  return program;
 };
 
 /** TypeScript 5's createProgram(rootNames, options, host). */
