@@ -7,6 +7,7 @@ import {
   createScanner,
   forEachChild,
   forEachLeadingCommentRange,
+  forEachTrailingCommentRange,
   isTokenKind,
   ScriptTarget,
   SyntaxKind,
@@ -48,12 +49,23 @@ export const jsDocComment = (node: { readonly comment?: JSDocCommentValue }): JS
 
 /**
  * Where a JSDoc comment's text starts (its `/**`). TypeScript 5's JSDoc node starts there;
- * TypeScript 7's starts at its host's full start, before the leading trivia.
+ * TypeScript 7's starts after the previous token or comment, before the trivia that precedes it.
+ *
+ * The comment is the one in that trivia that ends where the node ends. Leading comment ranges
+ * only include comments after the first line break (unless the trivia starts the file), and
+ * trailing ranges only those before it, so both are searched. `getStart()` is not enough: on
+ * TypeScript 7 it stops at any earlier comment in the trivia, such as a `//` line.
  */
-export const jsDocCommentStart = (jsDoc: Node): number =>
-  forEachLeadingCommentRange(jsDoc.getSourceFile().text, jsDoc.pos, (pos, end) =>
-    end === jsDoc.end ? pos : undefined,
-  ) ?? jsDoc.pos;
+export const jsDocCommentStart = (jsDoc: Node): number => {
+  const text = jsDoc.getSourceFile().text;
+  const endsAtJsDoc = (pos: number, end: number): number | undefined =>
+    end === jsDoc.end ? pos : undefined;
+  return (
+    forEachTrailingCommentRange(text, jsDoc.pos, endsAtJsDoc) ??
+    forEachLeadingCommentRange(text, jsDoc.pos, endsAtJsDoc) ??
+    jsDoc.pos
+  );
+};
 
 /**
  * The `?` of a property or method declaration or signature. TypeScript 7 stores it as

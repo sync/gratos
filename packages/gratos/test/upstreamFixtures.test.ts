@@ -38,6 +38,8 @@ const typesFile = join(packageDir, "src", "upstream", "Types.ts");
 const fixturesDir = join(import.meta.dirname, "fixtures");
 const configFixturesDir = join(import.meta.dirname, "configParserFixtures");
 const integrationFixturesDir = join(import.meta.dirname, "integrationFixtures");
+/** Gratos's own schema fixtures (not vendored): TypeScript 7 port regressions and per-version variants. */
+const ts7FixturesDir = join(import.meta.dirname, "ts7Fixtures");
 
 /** Upstream's snapshots name the library `grats`; Gratos defaults `libraryImport` to `@dblechoc/gratos`. */
 const UPSTREAM_LIBRARY_IMPORT = "grats";
@@ -107,6 +109,18 @@ const tsVersionSkipReason = (code: string): string | undefined => {
   return gate === undefined || satisfiesTsVersion(gate)
     ? undefined
     : `gated to TypeScript ${gate}, running ${tsVersion}`;
+};
+
+/**
+ * A `<name>.ts<major>.ts` fixture is a per-TypeScript-version variant of an upstream fixture: it
+ * runs only on that TypeScript major, with that version's snapshot.
+ */
+const VARIANT_PATTERN = /\.ts(\d+)\.ts$/;
+const variantSkipReason = (fileName: string): string | undefined => {
+  const major = VARIANT_PATTERN.exec(fileName)?.[1];
+  return major === undefined || major === tsVersion.split(".")[0]
+    ? undefined
+    : `TypeScript ${major} variant, running ${tsVersion}`;
 };
 
 /**
@@ -238,6 +252,15 @@ defineFixtureSuite({
   ignoreFilePattern: null,
   skipReason: tsVersionSkipReason,
   transformer: schemaFixtureTransformer(fixturesDir),
+});
+
+defineFixtureSuite({
+  name: "ts7Fixtures",
+  fixturesDir: ts7FixturesDir,
+  testFilePattern: /\.ts$/,
+  ignoreFilePattern: null,
+  skipReason: (code, fileName) => tsVersionSkipReason(code) ?? variantSkipReason(fileName),
+  transformer: schemaFixtureTransformer(ts7FixturesDir),
 });
 
 defineFixtureSuite({
