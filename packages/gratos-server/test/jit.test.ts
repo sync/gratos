@@ -16,8 +16,9 @@ import {
   readOnly,
   sha256Hex,
 } from "../src/index.ts";
-import type { Executor, JitOptions, JsonObject, Plugin, Server } from "../src/index.ts";
+import type { Executor, JsonObject, Plugin, Server } from "../src/index.ts";
 import { gql, post, send } from "./support/http.ts";
+import { watchedJit } from "./support/jit.ts";
 import type { Sent } from "./support/http.ts";
 import { basicSchema, makeSchema } from "./support/schema.ts";
 
@@ -118,31 +119,6 @@ const jitPhases = () => {
     },
   };
   return { compiled, plugin };
-};
-
-const watchedJit = (options: JitOptions) => {
-  const ran: Array<"jit" | "next" | "declined"> = [];
-  const inner = jit(options);
-  const plugin: Plugin = {
-    ...inner,
-    onExecute: (input, args) => {
-      const executor = inner.onExecute?.(input, args);
-      if (executor === undefined) {
-        ran.push("declined");
-        return undefined;
-      }
-      return (next) => {
-        let delegated = false;
-        const result = executor(() => {
-          delegated = true;
-          return next();
-        });
-        ran.push(delegated ? "next" : "jit");
-        return result;
-      };
-    },
-  };
-  return { plugin, ran };
 };
 
 const repeat = async (times: number, run: () => Promise<Sent>): Promise<Array<Sent>> => {

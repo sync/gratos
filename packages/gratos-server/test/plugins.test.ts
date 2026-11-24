@@ -23,6 +23,7 @@ import {
 } from "../src/index.ts";
 import type { Plugin } from "../src/index.ts";
 import { gate, gql, post, send } from "./support/http.ts";
+import { watchedJit } from "./support/jit.ts";
 import { basicSchema } from "./support/schema.ts";
 
 const persisted = (sha256Hash: string, version = 1) => ({
@@ -193,12 +194,14 @@ const maskSchema = () =>
 
 describe("maskErrors()", () => {
   it.each([
-    ["graphql-js", 99],
-    ["graphql-jit", 1],
-  ])("masks unexpected errors and keeps deliberate ones (%s)", async (_name, after) => {
-    const server = createServer({ schema: maskSchema(), plugins: [jit({ after }), maskErrors()] });
+    ["graphql-js", 99, ["next", "next"]],
+    ["graphql-jit", 1, ["jit", "jit"]],
+  ])("masks unexpected errors and keeps deliberate ones (%s)", async (_name, after, executors) => {
+    const watched = watchedJit({ after });
+    const server = createServer({ schema: maskSchema(), plugins: [watched.plugin, maskErrors()] });
     await gql(server, "{ count fails hello }");
     const sent = await gql(server, "{ count fails hello }");
+    expect(watched.ran).toEqual(executors);
     expect(sent.body?.data).toEqual({ count: 1, fails: null, hello: null });
     const byPath = Object.fromEntries(
       (sent.body?.errors ?? []).map((error) => [String(error.path), error]),
