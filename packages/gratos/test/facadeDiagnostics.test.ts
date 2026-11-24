@@ -1,11 +1,19 @@
 // The TypeScript 7 facade's diagnostics (src/ts/diagnostics.ts), checked against TypeScript
 // 5.9.2's own sortAndDeduplicateDiagnostics and formatter on the same inputs.
-import { sortAndDeduplicateDiagnostics as sortAndDeduplicateDiagnostics5 } from "typescript-baseline";
+import {
+  createSourceFile as createSourceFile5,
+  formatDiagnosticsWithColorAndContext as formatDiagnosticsWithColorAndContext5,
+  ScriptTarget as ScriptTarget5,
+  sortAndDeduplicateDiagnostics as sortAndDeduplicateDiagnostics5,
+} from "typescript-baseline";
 import type { Diagnostic as Diagnostic5 } from "typescript-baseline";
 import { describe, expect, it } from "vitest";
 
 import { DiagnosticCategory } from "../src/ts/index.ts";
-import { sortAndDeduplicateDiagnostics } from "../src/ts/diagnostics.ts";
+import {
+  formatDiagnosticsWithColorAndContext,
+  sortAndDeduplicateDiagnostics,
+} from "../src/ts/diagnostics.ts";
 import type { Diagnostic, DiagnosticMessageChain } from "../src/ts/diagnostics.ts";
 
 // TypeScript 5 compares diagnostic files by `path`; the facade by `fileName`.
@@ -31,6 +39,11 @@ const chain = (
   next,
 });
 
+/** The same diagnostics, typed for TypeScript 5, which reads only the fields they have. */
+const asTypeScript5 = (diagnostics: ReadonlyArray<Diagnostic>): Array<Diagnostic5> =>
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, quality/no-chained-type-assertions -- see above.
+  diagnostics as unknown as Array<Diagnostic5>;
+
 /** The indices in `input` of what TypeScript 5.9.2 and the facade keep, in order. */
 const kept = (input: ReadonlyArray<Diagnostic>) => {
   const indices = new Map<object, number>(input.map((entry, index) => [entry, index]));
@@ -38,9 +51,7 @@ const kept = (input: ReadonlyArray<Diagnostic>) => {
     output.map((entry) => indices.get(entry) ?? -1);
   return {
     facade: indicesOf(sortAndDeduplicateDiagnostics(input)),
-    // TypeScript 5's comparers read only the fields these diagnostics have (and `file.path`).
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion, quality/no-chained-type-assertions -- see above.
-    typescript5: indicesOf(sortAndDeduplicateDiagnostics5(input as unknown as Array<Diagnostic5>)),
+    typescript5: indicesOf(sortAndDeduplicateDiagnostics5(asTypeScript5(input))),
   };
 };
 
@@ -86,5 +97,33 @@ describe("sortAndDeduplicateDiagnostics", () => {
     const { facade, typescript5 } = kept(input);
     expect(facade).toEqual(typescript5);
     expect(facade).toHaveLength(4);
+  });
+});
+
+describe("formatDiagnosticsWithColorAndContext", () => {
+  it("keeps the file name's spelling when the host canonicalizes names, as TypeScript 5 does", () => {
+    const sourceFile = createSourceFile5(
+      "/Work/Project/Src/Order.ts",
+      "const a = b;\n",
+      ScriptTarget5.Latest,
+    );
+    const input = [diagnostic({ file: sourceFile })];
+    for (const currentDirectory of ["/work/PROJECT", "/WORK/project/src/models", "/elsewhere"]) {
+      const host = {
+        getCurrentDirectory: () => currentDirectory,
+        getCanonicalFileName: (fileName: string) => fileName.toLowerCase(),
+        getNewLine: () => "\n",
+      };
+      const facade = formatDiagnosticsWithColorAndContext(input, host);
+      const typescript5 = formatDiagnosticsWithColorAndContext5(asTypeScript5(input), host);
+      expect(facade).toBe(typescript5);
+    }
+    expect(
+      formatDiagnosticsWithColorAndContext(input, {
+        getCurrentDirectory: () => "/work/PROJECT",
+        getCanonicalFileName: (fileName) => fileName.toLowerCase(),
+        getNewLine: () => "\n",
+      }),
+    ).toContain("Src/Order.ts");
   });
 });

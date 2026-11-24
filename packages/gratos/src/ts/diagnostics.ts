@@ -6,7 +6,7 @@
 // formatDiagnosticsWithColorAndContext from TypeScript 5.9.2 (src/compiler/program.ts) byte for
 // byte. It needs only `fileName` and `text` from a source file, so it formats diagnostics on
 // TypeScript 7 source files and on the line-map shims of createSourceFile alike.
-import { isAbsolute, relative, sep } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 
 import { computeLineStarts } from "typescript/unstable/ast";
 import { DiagnosticCategory } from "typescript/unstable/sync";
@@ -307,15 +307,39 @@ const categoryName = (category: DiagnosticCategory): string => {
   }
 };
 
+/** A path's root, then its other components, normalized. */
+const pathComponents = (path: string): Array<string> => {
+  const [root = "", ...components] = resolve(path).split(sep);
+  return [root, ...components.filter((component) => component !== "")];
+};
+
+/**
+ * TypeScript 5's convertToRelativePath (getPathComponentsRelativeTo in src/compiler/path.ts):
+ * canonical names only decide where the two paths part, and the result keeps the file name's own
+ * spelling. Roots (drive letters) match whatever their case.
+ */
 const toRelativePath = (fileName: string, host: FormatDiagnosticsHost): string => {
   if (!isAbsolute(fileName)) {
     return fileName;
   }
-  const relativePath = relative(
-    host.getCanonicalFileName(host.getCurrentDirectory()),
-    host.getCanonicalFileName(fileName),
-  );
-  return sep === "/" ? relativePath : relativePath.replaceAll(sep, "/");
+  const from = pathComponents(host.getCurrentDirectory());
+  const to = pathComponents(fileName);
+  let start = 0;
+  for (; start < from.length && start < to.length; start++) {
+    const fromComponent = host.getCanonicalFileName(from[start] ?? "");
+    const toComponent = host.getCanonicalFileName(to[start] ?? "");
+    const same =
+      start === 0
+        ? fromComponent.toUpperCase() === toComponent.toUpperCase()
+        : fromComponent === toComponent;
+    if (!same) {
+      break;
+    }
+  }
+  if (start === 0) {
+    return to.join("/");
+  }
+  return [...from.slice(start).map(() => ".."), ...to.slice(start)].join("/");
 };
 
 const formatLocation = (
