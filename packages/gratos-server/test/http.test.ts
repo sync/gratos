@@ -122,6 +122,9 @@ describe("Accept negotiation", () => {
       'application/graphql-response+json, application/graphql-response+json;profile="special";q=0',
       GRJ,
     ],
+    // A comma or semicolon inside a quoted parameter value stays in its range.
+    ['application/json;profile="legacy, application/json;q=0, current", application/json', JSON_],
+    [String.raw`application/json;profile="a\"b, application/json;q=0", application/json`, JSON_],
   ])("%s gives %s", async (accept, contentType) => {
     const sent = await send(server, post({ query: "{count}" }, { accept }));
     expect(sent.status).toBe(200);

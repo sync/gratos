@@ -27,8 +27,39 @@ const rangeRank = (range: string, mediaType: MediaType): number => {
 /** The charset the core encodes in (`utf-8`, also spelt `utf8`). */
 const UTF8 = /^utf-?8$/;
 
+/** A quoted-string's content: the quotes removed and each backslash escape read as the escaped character. */
 const unquote = (value: string): string =>
-  value.length >= 2 && value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
+  value.length >= 2 && value.startsWith('"') && value.endsWith('"')
+    ? value.slice(1, -1).replaceAll(/\\(.)/g, "$1")
+    : value;
+
+/**
+ * Splits a header value on `separator`, except inside a quoted-string (RFC 9110 §5.6.4), where a
+ * backslash escapes the next character. A comma in a quoted parameter value therefore stays in
+ * its media range.
+ */
+const splitOutsideQuotes = (value: string, separator: "," | ";"): Array<string> => {
+  const parts: Array<string> = [];
+  let current = "";
+  let quoted = false;
+  let escaped = false;
+  for (const char of value) {
+    if (escaped) {
+      escaped = false;
+    } else if (quoted && char === "\\") {
+      escaped = true;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (!quoted && char === separator) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts;
+};
 
 /** One media range of an Accept header. */
 interface MediaRange {
@@ -41,7 +72,9 @@ interface MediaRange {
 }
 
 const parseRange = (part: string): MediaRange => {
-  const [range = "", ...pieces] = part.split(";").map((piece) => piece.trim().toLowerCase());
+  const [range = "", ...pieces] = splitOutsideQuotes(part, ";").map((piece) =>
+    piece.trim().toLowerCase(),
+  );
   let charset: string | undefined;
   let hasOtherParameters = false;
   let quality = 1;
@@ -93,7 +126,7 @@ export const negotiate = (accept: string | null): MediaType | undefined => {
   if (accept === null || accept.trim() === "") {
     return GRAPHQL_RESPONSE_JSON;
   }
-  const ranges = accept.split(",").map(parseRange);
+  const ranges = splitOutsideQuotes(accept, ",").map(parseRange);
   let best: { mediaType: MediaType; quality: number } | undefined;
   for (const mediaType of SUPPORTED) {
     let matched: { quality: number; specificity: number } | undefined;
