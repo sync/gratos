@@ -9,19 +9,21 @@
 // - files loaded: the program's source files, with third-party files read as empty;
 // - cold build ms: wall time of one `gratos` process, from spawn to exit;
 // - peak RSS: sampled over the whole process tree (Node plus the tsgo child), because the Go
-//   child is not counted in Node's maxRSS.
+//   child is not counted in Node's maxRSS (bench/rss.ts). Each run needs at least one valid
+//   sample: one whose `ps` succeeded and held the CLI process.
 //
 // `--record` writes the result as the new baseline, with the runner class it was measured on.
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
 import { join } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 
 import { Schema } from "effect";
 
 import { getParsedCommandLineOfConfigFile } from "../src/ts/program.ts";
 import { closeDefaultSessions } from "../src/ts/session.ts";
+
+import { requireValidPeak, samplePeakRss } from "./rss.ts";
 
 const MODEL_COUNT = 300;
 const RUNS = 5;
@@ -114,46 +116,16 @@ const writeFixture = (): void => {
   }
 };
 
-/** RSS (kB) of every process, with its parent, from one `ps` call (macOS and Linux). */
-const processTable = (): Promise<Array<{ pid: number; ppid: number; rssKb: number }>> =>
-  new Promise((resolvePromise) => {
-    const ps = spawn("ps", ["-A", "-o", "pid=,ppid=,rss="], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    let output = "";
-    ps.stdout.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-    });
-    ps.on("close", () => {
-      resolvePromise(
-        output
-          .split("\n")
-          .map((line) => line.trim().split(/\s+/).map(Number))
-          .filter((fields) => fields.length === 3 && fields.every(Number.isFinite))
-          .map(([pid = 0, ppid = 0, rssKb = 0]) => ({ pid, ppid, rssKb })),
-      );
-    });
-  });
-
-/** Total RSS (kB) of `root` and all its descendants. */
-const treeRssKb = async (root: number): Promise<number> => {
-  const table = await processTable();
-  const tree = new Set([root]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const row of table) {
-      if (!tree.has(row.pid) && tree.has(row.ppid)) {
-        tree.add(row.pid);
-        grew = true;
-      }
-    }
-  }
-  return table.filter((row) => tree.has(row.pid)).reduce((sum, row) => sum + row.rssKb, 0);
-};
-
-/** One cold build: wall time, and the peak RSS of the process tree sampled while it runs. */
-const coldBuild = async (): Promise<{ ms: number; peakRssKb: number; samples: number }> => {
+/**
+ * One cold build: wall time, and the peak RSS of the process tree sampled while it runs. A run
+ * with no valid RSS sample (every `ps` failed, or none held the CLI process) fails the bench.
+ */
+const coldBuild = async (): Promise<{
+  ms: number;
+  peakRssKb: number;
+  samples: number;
+  invalidSamples: number;
+}> => {
   const start = performance.now();
   const child = spawn(
     process.execPath,
@@ -167,26 +139,20 @@ const coldBuild = async (): Promise<{ ms: number; peakRssKb: number; samples: nu
   const exited = new Promise<{ code: number | null; ms: number }>((resolvePromise) => {
     child.on("exit", (code) => resolvePromise({ code, ms: performance.now() - start }));
   });
-  let running = true;
-  let peakRssKb = 0;
-  let samples = 0;
-  const sampler = (async () => {
-    while (running && child.pid !== undefined) {
-      const rss = await treeRssKb(child.pid);
-      if (running) {
-        peakRssKb = Math.max(peakRssKb, rss);
-        samples += 1;
-      }
-      await sleep(SAMPLE_INTERVAL_MS);
-    }
-  })();
+  if (child.pid === undefined) {
+    throw new Error("bench: could not start gratos");
+  }
+  const peak = await samplePeakRss(child.pid, exited, { intervalMs: SAMPLE_INTERVAL_MS });
   const { code, ms } = await exited;
-  running = false;
-  await sampler;
   if (code !== 0) {
     throw new Error(`gratos failed on the bench fixture:\n${stderr}`);
   }
-  return { ms, peakRssKb, samples };
+  return {
+    ms,
+    peakRssKb: requireValidPeak(peak),
+    samples: peak.validSamples,
+    invalidSamples: peak.invalidSamples,
+  };
 };
 
 const fileStats = () => {
@@ -278,6 +244,7 @@ const result = {
     ms: Math.round(build.ms),
     peakRssMb: Math.round(build.peakRssKb / 1024),
     samples: build.samples,
+    invalidSamples: build.invalidSamples,
   })),
   files,
   runner,
