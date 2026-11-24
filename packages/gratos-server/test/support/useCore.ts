@@ -13,7 +13,7 @@ import {
   readOnly,
   reportErrors,
   serverTiming,
-} from "../../src/index.ts";
+} from "@dblechoc/gratos-server";
 
 const schema = buildSchema("type Query { count: Int }");
 const server = createServer({
