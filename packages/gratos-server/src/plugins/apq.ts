@@ -1,8 +1,9 @@
 // Automatic persisted queries, Apollo's protocol: `extensions.persistedQuery` is
 // `{ version: 1, sha256Hash }`. A hash-only request is answered from the store, or refused with
 // PERSISTED_QUERY_NOT_FOUND so the client resends the query. A query is stored under its hash
-// only once it has passed validation (apq's onExecute runs after the document cache). apq() goes
-// first in the plugin list and never claims an operation.
+// only once it has passed validation (apq's onExecute runs after the document cache), and only
+// when the validated document is that exact text. apq() goes first in the plugin list and never
+// claims an operation.
 import { GraphQLError } from "graphql";
 
 import { isJsonObject } from "../core/http.ts";
@@ -77,11 +78,15 @@ export const apq = (options: ApqOptions = {}): Plugin => {
       pending.set(request, { hash, query: params.query });
       return undefined;
     },
-    onExecute: ({ request }) => {
+    onExecute: ({ request, document }) => {
       const toStore = pending.get(request);
       if (toStore !== undefined) {
         pending.delete(request);
-        store.set(toStore.hash, toStore.query);
+        // Only the exact text the core parsed and validated: a later onParams hook may have
+        // replaced the query (the core parses with locations, so `loc.source.body` is that text).
+        if (document.loc?.source.body === toStore.query) {
+          store.set(toStore.hash, toStore.query);
+        }
       }
       return undefined;
     },

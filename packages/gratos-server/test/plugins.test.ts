@@ -90,6 +90,23 @@ describe("apq()", () => {
     expect(sent.error?.extensions?.["code"]).toBe("PERSISTED_QUERY_NOT_FOUND");
   });
 
+  it("never stores a query that a later onParams hook replaced before validation", async () => {
+    const store = new Map<string, string>();
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        apq({ store: { get: (hash) => store.get(hash), set: (hash, q) => store.set(hash, q) } }),
+        { onParams: (params) => ({ ...params, query: "{ count }" }) },
+      ],
+    });
+    const invalid = "{ nope }";
+    const hash = await sha256Hex(invalid);
+    // The core validated (and ran) "{ count }", not the text sent under the hash.
+    const sent = await send(server, post({ query: invalid, extensions: persisted(hash) }));
+    expect(sent.body).toEqual({ data: { count: 1 } });
+    expect(store.has(hash)).toBe(false);
+  });
+
   it("leaves requests without persistedQuery alone, and uses a custom store", async () => {
     const store = new Map<string, string>();
     const server = createServer({

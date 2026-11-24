@@ -291,6 +291,7 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
     let document: DocumentNode;
     const parseStart = performance.now();
     try {
+      // With locations: `document.loc.source.body` is the validated text (apq() relies on it).
       document = parse(query, { maxLexicalTokens: maxTokens });
     } catch (error) {
       reportPhase(run.request, "parse", parseStart, performance.now());
