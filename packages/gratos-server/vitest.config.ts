@@ -1,3 +1,7 @@
+import { mergeConfig } from "vitest/config";
+
 import shared from "../../vitest.shared.ts";
 
-export default shared;
+export default mergeConfig(shared, {
+  test: { server: { deps: { inline: ["graphql-jit"] } } },
+});
