@@ -695,6 +695,7 @@ class Codegen {
           [F.createReturnStatement(F.createIdentifier("payload"))],
         ),
         "resolve",
+        true,
       ),
     ];
   }

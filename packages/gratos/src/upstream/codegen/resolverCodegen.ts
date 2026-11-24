@@ -268,9 +268,10 @@ export default class ResolverCodegen {
     field: GraphQLField<unknown, unknown>,
     method_: ts.MethodDeclaration | null,
     methodName: string,
+    subscriptionEvent: boolean = false,
   ): ts.MethodDeclaration | null {
     const semanticNonNull = fieldDirective(field, SEMANTIC_NON_NULL_DIRECTIVE);
-    if (semanticNonNull == null || isEffectSemanticNonNull(field)) {
+    if (semanticNonNull == null || isEffectSemanticNonNull(field, subscriptionEvent)) {
       return method_;
     }
 
