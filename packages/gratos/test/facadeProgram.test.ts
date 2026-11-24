@@ -320,6 +320,29 @@ describe("getParsedCommandLineOfConfigFile", () => {
     expect(program.getSourceFile(link)?.text).toBe(text);
   });
 
+  it("loads a file in full once its symlink points out of node_modules, in the same session", () => {
+    // No new parse: createProgram reopens the parsed config's session, whose earlier snapshot
+    // blanked the file while the symlink pointed into node_modules.
+    const text = "export const shared = 2;\n";
+    const directory = project({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+      "src/main.ts": "export const m = 1;\n",
+      "node_modules/dep/shared.ts": "export const shared = 1;\n",
+      "packages/dep/shared.ts": text,
+    });
+    const link = join(directory, "src", "shared.ts");
+    symlinkSync(join(directory, "node_modules", "dep", "shared.ts"), link);
+    const parsed = getParsedCommandLineOfConfigFile(join(directory, "tsconfig.json"));
+    expect(sourceFileNames(parsed.program)).toEqual([join(directory, "src", "main.ts")]);
+
+    unlinkSync(link);
+    symlinkSync(join(directory, "packages", "dep", "shared.ts"), link);
+    const program = createProgram([link], parsed.options);
+    expect(program.session).toBe(parsed.program.session);
+    expect(sourceFileNames(program)).toEqual([link]);
+    expect(program.getSourceFile(link)?.text).toBe(text);
+  });
+
   it("reports an invalid compiler option at its place in the tsconfig", () => {
     const text = tsconfig({ target: "es1" });
     const directory = project({ "tsconfig.json": text, "a.ts": "export const a = 1;\n" });

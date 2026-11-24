@@ -47,7 +47,7 @@ export interface Session {
   readonly virtualFiles: Map<string, string>;
   /** Every real file name tsgo asked for. */
   readonly filesRead: Set<string>;
-  /** File names and realpaths served as `export {};`. */
+  /** File names and realpaths served as `export {};`, as they were last read. */
   readonly blanked: Set<string>;
   /** The snapshot holding the most recently opened project, if any. */
   current: {
@@ -75,6 +75,10 @@ export const readFileOverride = (
   }
   const realpath = realpathOrSelf(fileName);
   if (realpath.startsWith(bundledLibDirectory + sep) || !isUnderNodeModules(realpath)) {
+    // An earlier snapshot of this session may have blanked it (a symlink into node_modules since
+    // retargeted); it is served in full now.
+    session.blanked.delete(fileName);
+    session.blanked.delete(realpath);
     return undefined;
   }
   session.blanked.add(fileName);
