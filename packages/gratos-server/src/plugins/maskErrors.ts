@@ -15,6 +15,19 @@ export interface MaskErrorsOptions {
 export const isUnexpectedError = (error: GraphQLError): boolean =>
   error.originalError !== undefined && !(error.originalError instanceof GraphQLError);
 
+/** A generic error at the same place. graphql-jit errors carry `locations` without `nodes`. */
+const mask = (error: GraphQLError, message: string): GraphQLError => {
+  const masked = new GraphQLError(message, {
+    nodes: error.nodes,
+    source: error.source,
+    positions: error.positions,
+    path: error.path,
+  });
+  return masked.locations === undefined && error.locations !== undefined
+    ? Object.assign(masked, { locations: error.locations })
+    : masked;
+};
+
 export const maskErrors = (options: MaskErrorsOptions = {}): Plugin => {
   const message = options.message ?? "Unexpected error.";
   return {
@@ -27,16 +40,7 @@ export const maskErrors = (options: MaskErrorsOptions = {}): Plugin => {
       }
       return {
         ...payload,
-        errors: errors.map((error) =>
-          isUnexpectedError(error)
-            ? new GraphQLError(message, {
-                nodes: error.nodes,
-                source: error.source,
-                positions: error.positions,
-                path: error.path,
-              })
-            : error,
-        ),
+        errors: errors.map((error) => (isUnexpectedError(error) ? mask(error, message) : error)),
       };
     },
   };

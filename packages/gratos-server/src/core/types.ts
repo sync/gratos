@@ -89,7 +89,9 @@ export interface ServerInit {
  * Body rule: a plugin that replaces the Response in `onResponse` must keep `res.body`, either
  * reusing it (`new Response(res.body, …)`) or wrapping it in a pass-through stream. It must never
  * drop it, because body wrappers (such as the Effect layer's span end) depend on it. With that
- * rule, plugin order does not matter for body wrappers.
+ * rule, plugin order does not matter for body wrappers. A wrapping stream should pull on demand
+ * (`highWaterMark: 0`) and forward `cancel` to the original body, so a client that leaves reaches
+ * the core (whose signal a body cancel aborts).
  */
 export interface Plugin<Ctx = unknown> {
   readonly name?: string;

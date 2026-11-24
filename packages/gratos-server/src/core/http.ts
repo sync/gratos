@@ -147,18 +147,24 @@ export const statusOf = (result: ExecutionResult, mediaType: MediaType): number 
   return 200;
 };
 
-/** A one-chunk JSON body that calls `onCancel` when the consumer cancels it. */
+/**
+ * A one-chunk JSON body that calls `onCancel` when the consumer cancels it. It is pulled only on
+ * demand (highWaterMark 0), so a cancel that comes before the transport reads still reaches it.
+ */
 const jsonBody = (text: string, onCancel: () => void): ReadableStream<Uint8Array> => {
   const bytes = new TextEncoder().encode(text);
-  return new ReadableStream<Uint8Array>({
-    pull: (controller) => {
-      controller.enqueue(bytes);
-      controller.close();
+  return new ReadableStream<Uint8Array>(
+    {
+      pull: (controller) => {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+      cancel: () => {
+        onCancel();
+      },
     },
-    cancel: () => {
-      onCancel();
-    },
-  });
+    { highWaterMark: 0 },
+  );
 };
 
 export const jsonResponse = (
