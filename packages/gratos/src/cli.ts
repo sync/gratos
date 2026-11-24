@@ -3,6 +3,7 @@
 //
 //   gratos [--tsconfig <path>]          writes the schema files that are out of date
 //   gratos --check [--tsconfig <path>]  writes nothing; exits 1 if a file is out of date
+//   gratos --version (-v, or upstream Grats' -V)
 //
 // Without --tsconfig it uses the nearest tsconfig.json from the current directory. Node runs
 // this file from source (type stripping); it loads the TypeScript 7 facade only, never the
@@ -10,7 +11,7 @@
 import { runMain } from "@effect/platform-node/NodeRuntime";
 import { layer as NodeServicesLayer } from "@effect/platform-node/NodeServices";
 import { Console, Effect, Option, Schema } from "effect";
-import { Command, Flag } from "effect/cli";
+import { CliConfig, Command, Flag, GlobalFlag } from "effect/cli";
 
 import packageJson from "../package.json" with { type: "json" };
 
@@ -19,6 +20,18 @@ import type { GenerateResult, GratsError } from "./generate.ts";
 
 const PackageJson = Schema.Struct({ version: Schema.String });
 const { version } = Schema.decodeUnknownSync(PackageJson)(packageJson);
+
+/**
+ * effect/cli's built-in `--version` (alias `-v`), also accepting `-V`: upstream Grats' CLI
+ * (commander) documents `-V, --version`. Every other built-in is kept as it is.
+ */
+const versionFlag = {
+  ...GlobalFlag.Version,
+  flag: GlobalFlag.Version.flag.pipe(Flag.withAlias("V")),
+} satisfies GlobalFlag.Action<boolean>;
+const cliConfig = CliConfig.layer({
+  builtIns: GlobalFlag.BuiltIns.map((flag) => (flag === GlobalFlag.Version ? versionFlag : flag)),
+});
 
 const reportFiles = (result: GenerateResult, checked: boolean) =>
   Effect.forEach(
@@ -68,6 +81,6 @@ const gratos = Command.make(
 
 Command.run(gratos, { version }).pipe(
   Effect.tapDefect((defect) => Console.error("Gratos: unexpected error", defect)),
-  Effect.provide(NodeServicesLayer),
+  Effect.provide([NodeServicesLayer, cliConfig]),
   runMain({ disableErrorReporting: true }),
 );

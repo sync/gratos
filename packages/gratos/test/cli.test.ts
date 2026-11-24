@@ -243,4 +243,14 @@ describe("gratos CLI", () => {
     const version = execFileSync(cli, ["--version"], { encoding: "utf8" });
     expect(version).toBe("gratos v0.0.0\n");
   });
+
+  // Upstream Grats documents `-V, --version`; effect/cli's built-in alias is `-v`.
+  it.each(["--version", "-v", "-V"])("prints its version for %s and exits 0", (flag) => {
+    const run = gratos([flag]);
+    expect({ status: run.status, stdout: run.stdout, stderr: run.stderr }).toEqual({
+      status: 0,
+      stdout: "gratos v0.0.0\n",
+      stderr: "",
+    });
+  });
 });
