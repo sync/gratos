@@ -21,7 +21,15 @@ import { createRequire } from "node:module";
 import { join, relative, sep } from "node:path";
 
 import { Predicate, Schema } from "effect";
-import { buildASTSchema, findBreakingChanges, findDangerousChanges, parse, print } from "graphql";
+import {
+  buildASTSchema,
+  findBreakingChanges,
+  findDangerousChanges,
+  isObjectType,
+  parse,
+  print,
+} from "graphql";
+import type { GraphQLSchema } from "graphql";
 import { printExecutableSchema as oraclePrintExecutableSchema } from "grats-upstream/dist/src/printSchema.js";
 import { buildSchemaAndDocResult as oracleBuildSchemaAndDocResult } from "grats-upstream/dist/src/lib.js";
 import { validateGratsOptions as oracleValidateGratsOptions } from "grats-upstream/dist/src/gratsConfig.js";
@@ -30,6 +38,7 @@ import { describe, expect, it } from "vitest";
 import { withCodegenDeltas, withUpstreamCodegen } from "../src/effect/codegen.ts";
 import type { CodegenDelta } from "../src/effect/codegen.ts";
 import { printExecutableSchema } from "../src/upstream/printSchema.ts";
+import { SEMANTIC_NON_NULL_DIRECTIVE } from "../src/upstream/publicDirectives.ts";
 import { validateGratsOptions } from "../src/upstream/gratsConfig.ts";
 import { buildSchemaAndDocResult } from "../src/upstream/lib.ts";
 import type { Metadata, ResolverDefinition } from "../src/upstream/metadata.ts";
@@ -110,6 +119,7 @@ const ours = (fileName: string, code: string) => {
     printExecutableSchema(schema, resolvers, options.value.raw.grats, join(fixturesDir, fileName));
   return {
     doc,
+    schema,
     resolvers,
     emitsResolverMap: options.value.raw.grats.EXPERIMENTAL__emitResolverMap,
     /** schema.ts as upstream generates it: every Gratos codegen delta off. */
@@ -156,10 +166,16 @@ const changedVendoredFiles = Object.keys(
   ).changes,
 );
 
-/** The resolver definitions of every object type field, as codegen sees them. */
-const resolverDefinitions = (resolvers: Metadata): Array<ResolverDefinition> =>
-  Object.values(resolvers.types).flatMap((fields) =>
-    Object.values(fields).map((field) => field.resolver),
+/** Every object type field with its resolver definition, as codegen sees them. */
+const resolverFields = (
+  resolvers: Metadata,
+): Array<{ typeName: string; fieldName: string; resolver: ResolverDefinition }> =>
+  Object.entries(resolvers.types).flatMap(([typeName, fields]) =>
+    Object.entries(fields).map(([fieldName, field]) => ({
+      typeName,
+      fieldName,
+      resolver: field.resolver,
+    })),
   );
 
 /** Upstream's isDefaultResolverSignature for a method: upstream emits no resolve for it. */
@@ -168,23 +184,57 @@ const isUpstreamDefaultMethod = (fieldName: string, resolver: ResolverDefinition
   (resolver.name === null || resolver.name === fieldName) &&
   (resolver.arguments ?? []).every((argument, i) => i === 0 && argument.kind === "argumentsObject");
 
+/** A resolver with a GqlInfo parameter: the jit marker's trigger. */
+const usesInfo = (resolver: ResolverDefinition): boolean =>
+  resolver.kind !== "property" &&
+  (resolver.arguments ?? []).some((argument) => argument.kind === "information");
+
+const isSemanticNonNull = (schema: GraphQLSchema, typeName: string, fieldName: string): boolean => {
+  const type = schema.getType(typeName);
+  if (!isObjectType(type)) {
+    return false;
+  }
+  const directives = type.getFields()[fieldName]?.astNode?.directives ?? [];
+  return directives.some((directive) => directive.name.value === SEMANTIC_NON_NULL_DIRECTIVE);
+};
+
+/**
+ * The explicit resolve the methodResolvers delta must emit for an upstream-default method, as
+ * upstream's resolverCodegen would print it: `source` plus the parameters its arguments use, and
+ * the field's own method called with them in the resolver's argument order (upstream's
+ * resolverParam), wrapped in assertNonNull for a semantically non-null field.
+ */
+const expectedMethodResolve = (
+  schema: GraphQLSchema,
+  typeName: string,
+  fieldName: string,
+  resolver: ResolverDefinition,
+): string => {
+  const callArgs = (resolver.kind === "method" ? (resolver.arguments ?? []) : []).map(
+    (argument) => {
+      if (argument.kind !== "argumentsObject") {
+        throw new Error(`not an upstream-default method argument: ${argument.kind}`);
+      }
+      return "args";
+    },
+  );
+  const params = callArgs.length === 0 ? "source" : "source, args";
+  const call = `source.${fieldName}(${callArgs.join(", ")})`;
+  const body = isSemanticNonNull(schema, typeName, fieldName) ? `assertNonNull(${call})` : call;
+  return `${typeName}.${fieldName}: resolve(${params}) { return ${body}; }`;
+};
+
 /** Fixtures each codegen delta applies to, from the engine's resolver metadata. */
 const appliesTo: Record<CodegenDelta, (mine: ReturnType<typeof ours>) => boolean> = {
   // §8: a method field that upstream resolves with graphql-js' default resolver.
   methodResolvers: (mine) =>
-    Object.values(mine.resolvers.types).some((fields) =>
-      Object.entries(fields).some(([fieldName, field]) =>
-        isUpstreamDefaultMethod(fieldName, field.resolver),
-      ),
+    resolverFields(mine.resolvers).some(({ fieldName, resolver }) =>
+      isUpstreamDefaultMethod(fieldName, resolver),
     ),
   // A resolver with a GqlInfo parameter, in a schema.ts with field configs (not a resolver map).
   jitMarker: (mine) =>
     !mine.emitsResolverMap &&
-    resolverDefinitions(mine.resolvers).some(
-      (resolver) =>
-        resolver.kind !== "property" &&
-        (resolver.arguments ?? []).some((argument) => argument.kind === "information"),
-    ),
+    resolverFields(mine.resolvers).some(({ resolver }) => usesInfo(resolver)),
   // An Effect.Effect resolver or property: upstream fixtures have none.
   effectSemanticNonNull: () => false,
   effectResolvers: () => false,
@@ -192,24 +242,22 @@ const appliesTo: Record<CodegenDelta, (mine: ReturnType<typeof ours>) => boolean
 
 /**
  * The nodes each delta must add, one per field it applies to, from the engine's resolver
- * metadata: for methodResolvers the method each explicit resolve calls, for jitMarker one marker
- * per field (named by its resolver).
+ * metadata, each named by its parent type and field: for methodResolvers the exact explicit
+ * resolve (expectedMethodResolve), for jitMarker the marker on the field whose resolver takes
+ * the GqlInfo.
  */
 const expectedNodes: Record<CodegenDelta, (mine: ReturnType<typeof ours>) => Array<string>> = {
   methodResolvers: (mine) =>
-    Object.values(mine.resolvers.types).flatMap((fields) =>
-      Object.entries(fields).flatMap(([fieldName, field]) =>
-        isUpstreamDefaultMethod(fieldName, field.resolver) ? [fieldName] : [],
-      ),
+    resolverFields(mine.resolvers).flatMap(({ typeName, fieldName, resolver }) =>
+      isUpstreamDefaultMethod(fieldName, resolver)
+        ? [expectedMethodResolve(mine.schema, typeName, fieldName, resolver)]
+        : [],
     ),
   jitMarker: (mine) =>
     mine.emitsResolverMap
       ? []
-      : resolverDefinitions(mine.resolvers).flatMap((resolver) =>
-          resolver.kind !== "property" &&
-          (resolver.arguments ?? []).some((argument) => argument.kind === "information")
-            ? ["jit"]
-            : [],
+      : resolverFields(mine.resolvers).flatMap(({ typeName, fieldName, resolver }) =>
+          usesInfo(resolver) ? [`${typeName}.${fieldName}: jit`] : [],
         ),
   effectSemanticNonNull: () => [],
   effectResolvers: () => [],
@@ -217,20 +265,32 @@ const expectedNodes: Record<CodegenDelta, (mine: ReturnType<typeof ours>) => Arr
 
 // A delta's nodes as codegen prints them, preceded by the comma it adds to the property before
 // and followed by `,` when another property follows. Undoing one removes it and that comma.
+// Only the shapes an upstream-default method can take (no arguments, or the arguments object):
+// upstream prints every other explicit resolve itself, and one the delta got wrong stays put.
 const METHOD_RESOLVE =
   /,\n( +)resolve\((source|source, args)\) \{\n\1 {4}return (.+);\n\1\}(,?)(?=\n)/g;
 const METHOD_CALL = /^(assertNonNull\()?source\.(\w+)\((|args)\)(\)?)$/;
 const JIT_MARKER =
   /,\n( +)extensions: \{\n\1 {4}gratos: \{\n\1 {8}jit: false\n\1 {4}\}\n\1\}(,?)(?=\n)/g;
+/** One jit marker block with its leading comma (and its trailing one, when present). */
+const JIT_MARKER_BLOCK = new RegExp(JIT_MARKER.source);
 const GRAPHQL_IMPORT = /^import \{ (.*) \} from "graphql";$/m;
+const TYPE_CONFIG = /= new GraphQL\w+Type\(\{\n +name: "(\w+)",$/gm;
 
-/** The `name` of the field config that a property at `indent`, at `offset`, belongs to. */
-const enclosingFieldName = (ts: string, offset: number, indent: string): string | undefined => {
+/**
+ * The parent type and field (`Type.field`) of the field config that a property at `indent`, at
+ * `offset`, belongs to: the field's `name` at the property's indent, and the `name` of the type
+ * config around it.
+ */
+const enclosingField = (ts: string, offset: number, indent: string): string | undefined => {
   const before = ts.slice(0, offset);
   const nameLine = before.lastIndexOf(`\n${indent}name: "`);
-  return nameLine === -1
-    ? undefined
-    : /^name: "(\w+)",$/m.exec(before.slice(nameLine + 1 + indent.length))?.[1];
+  const fieldName =
+    nameLine === -1
+      ? undefined
+      : /^name: "(\w+)",$/m.exec(before.slice(nameLine + 1 + indent.length))?.[1];
+  const typeName = [...before.matchAll(TYPE_CONFIG)].at(-1)?.[1];
+  return fieldName === undefined || typeName === undefined ? undefined : `${typeName}.${fieldName}`;
 };
 
 const graphqlImports = (ts: string): Array<string> =>
@@ -239,16 +299,20 @@ const graphqlImports = (ts: string): Array<string> =>
 interface UndoneDelta {
   /** schema.ts with the delta's nodes undone. */
   readonly ts: string;
-  /** The nodes undone: the called method of each explicit resolve, or "jit" per marker. */
+  /**
+   * The nodes undone, each as `Type.field: <node>`: the explicit resolve as printed, or `jit`
+   * per marker. A strict check compares them with expectedNodes.
+   */
   readonly nodes: Array<string>;
 }
 
 /**
  * `ts` with exactly the nodes `delta` adds put back as upstream prints them, and the nodes it
- * found. An explicit method resolve goes; one wrapped in assertNonNull becomes upstream's
- * `assertNonNull(defaultFieldResolver(…))` resolve again, whose import the delta dropped (the
- * only other line it may change). Anything else the delta changed stays, so the result differs
- * from the oracle's.
+ * found, each named by the field it sits on. An explicit resolve calling the field's own method
+ * goes; one wrapped in assertNonNull becomes upstream's `assertNonNull(defaultFieldResolver(…))`
+ * resolve again, whose import the delta dropped (the only other line it may change). Anything
+ * else the delta changed stays, so the result differs from the oracle's; a node with the wrong
+ * signature or on the wrong field differs from expectedNodes.
  */
 const undoDelta = (delta: CodegenDelta, ts: string, oracleTs: string): UndoneDelta => {
   const nodes: Array<string> = [];
@@ -266,17 +330,18 @@ const undoDelta = (delta: CodegenDelta, ts: string, oracleTs: string): UndoneDel
           offset: number,
         ) => {
           const call = METHOD_CALL.exec(expression);
+          const field = enclosingField(ts, offset, indent);
           const wrapped = call?.[1] !== undefined;
           // Only the field's own method: upstream already resolves a renamed method explicitly.
           if (
             call === null ||
-            call[2] !== enclosingFieldName(ts, offset, indent) ||
-            wrapped !== (call[4] === ")") ||
-            (params === "source") !== (call[3] === "")
+            field === undefined ||
+            call[2] !== field.slice(field.indexOf(".") + 1) ||
+            wrapped !== (call[4] === ")")
           ) {
             return match;
           }
-          nodes.push(call[2] ?? "");
+          nodes.push(`${field}: resolve(${params}) { return ${expression}; }`);
           if (!wrapped) {
             return after;
           }
@@ -299,8 +364,8 @@ const undoDelta = (delta: CodegenDelta, ts: string, oracleTs: string): UndoneDel
     }
     case "jitMarker":
       return {
-        ts: ts.replaceAll(JIT_MARKER, (_match, _indent: string, after: string) => {
-          nodes.push("jit");
+        ts: ts.replaceAll(JIT_MARKER, (_match, indent: string, after: string, offset: number) => {
+          nodes.push(`${enclosingField(ts, offset, indent) ?? "?"}: jit`);
           return after;
         }),
         nodes,
@@ -309,6 +374,44 @@ const undoDelta = (delta: CodegenDelta, ts: string, oracleTs: string): UndoneDel
     case "effectResolvers":
       return { ts, nodes };
   }
+};
+
+/**
+ * Undoes `deltas` from `ts` in turn: the nodes found and the nodes expected, sorted, and `ts`
+ * with them undone.
+ */
+const accountForDeltas = (
+  deltas: ReadonlyArray<CodegenDelta>,
+  ts: string,
+  mine: ReturnType<typeof ours>,
+  oracleTs: string,
+) => {
+  const nodes: Array<string> = [];
+  const undone = deltas.reduce((current, delta) => {
+    const result = undoDelta(delta, current, oracleTs);
+    nodes.push(...result.nodes);
+    return result.ts;
+  }, ts);
+  return {
+    nodes: nodes.toSorted(),
+    expected: deltas.flatMap((delta) => expectedNodes[delta](mine)).toSorted(),
+    undone,
+  };
+};
+
+/**
+ * Requires that `ts` is the oracle's schema.ts plus exactly the expected nodes of `deltas`: each
+ * on its own field, with the exact signature, and the oracle's byte for byte once undone.
+ */
+const expectOnlyDeltaNodes = (
+  deltas: ReadonlyArray<CodegenDelta>,
+  ts: string,
+  mine: ReturnType<typeof ours>,
+  oracleTs: string,
+): void => {
+  const { nodes, expected, undone } = accountForDeltas(deltas, ts, mine, oracleTs);
+  expect({ deltas, nodes }).toEqual({ deltas, nodes: expected });
+  expect(undone).toBe(oracleTs);
 };
 
 const DELTAS: ReadonlyArray<CodegenDelta> = [
@@ -325,6 +428,13 @@ const changedBy: Record<CodegenDelta | "any", Set<string>> = {
   effectSemanticNonNull: new Set(),
   effectResolvers: new Set(),
   any: new Set(),
+};
+
+/** A fixture's resolver metadata, its schema.ts with only `delta` on, and the oracle's schema.ts. */
+const deltaOutputs = (fixture: string, delta: CodegenDelta) => {
+  const code = readFileSync(join(fixturesDir, fixture), "utf8");
+  const mine = ours(fixture, code);
+  return { mine, ts: mine.tsWith(delta), oracleTs: oracle(fixture, code).ts };
 };
 
 describe("parity with grats@0.0.36", () => {
@@ -358,22 +468,13 @@ describe("parity with grats@0.0.36", () => {
         const ts = mine.tsWith(delta);
         const changed = ts !== reference.ts;
         expect({ delta, changed }).toEqual({ delta, changed: appliesTo[delta](mine) });
-        const undone = undoDelta(delta, ts, reference.ts);
-        expect({ delta, nodes: undone.nodes.toSorted() }).toEqual({
-          delta,
-          nodes: expectedNodes[delta](mine).toSorted(),
-        });
-        expect(undone.ts).toBe(reference.ts);
+        expectOnlyDeltaNodes([delta], ts, mine, reference.ts);
         if (changed) {
           changedBy[delta].add(fixture);
         }
       }
       // The shipped output (every delta on) is the oracle's plus exactly those nodes.
-      const shipped = DELTAS.reduce(
-        (ts, delta) => undoDelta(delta, ts, reference.ts).ts,
-        mine.shippedTs,
-      );
-      expect(shipped).toBe(reference.ts);
+      expectOnlyDeltaNodes(DELTAS, mine.shippedTs, mine, reference.ts);
       if (mine.shippedTs !== reference.ts) {
         changedBy.any.add(fixture);
       }
@@ -389,6 +490,51 @@ describe("parity with grats@0.0.36", () => {
       expect(findDangerousChanges(oursSchema, theirsSchema)).toEqual([]);
     });
   }
+
+  // The attribution check itself must reject a delta node with the wrong signature or on the
+  // wrong field, although undoing such a node still gives the oracle's schema.ts.
+  describe("rejects a mis-emitted delta node", () => {
+    it("an explicit method resolve that drops the field's arguments", () => {
+      const { mine, ts, oracleTs } = deltaOutputs("generics/genericOverArg.ts", "methodResolvers");
+      const good = accountForDeltas(["methodResolvers"], ts, mine, oracleTs);
+      expect(good.nodes).toEqual([
+        "SomeInputSomeClass.someField: resolve(source, args) { return source.someField(args); }",
+      ]);
+      expect(good.nodes).toEqual(good.expected);
+      const dropped = ts.replace(
+        /resolve\(source, args\) \{\n( +)return source\.someField\(args\);/,
+        "resolve(source) {\n$1return source.someField();",
+      );
+      expect(dropped).not.toBe(ts);
+      const bad = accountForDeltas(["methodResolvers"], dropped, mine, oracleTs);
+      expect(bad.undone).toBe(oracleTs);
+      expect(bad.nodes).not.toEqual(bad.expected);
+    });
+
+    it("a jit marker moved to another field", () => {
+      const { mine, ts, oracleTs } = deltaOutputs(
+        "resolver_info/StaticMethodWithInfoValue.ts",
+        "jitMarker",
+      );
+      const good = accountForDeltas(["jitMarker"], ts, mine, oracleTs);
+      expect(good.nodes).toEqual(["Query.greeting: jit"]);
+      expect(good.nodes).toEqual(good.expected);
+      const marker = JIT_MARKER_BLOCK.exec(ts)?.[0] ?? "";
+      expect(marker).not.toBe("");
+      expect(marker.endsWith(",")).toBe(true);
+      const moved = ts
+        .replace(marker, ",")
+        .replace(
+          'name: "someField",\n                    type: GraphQLString',
+          `name: "someField",\n                    type: GraphQLString${marker.replace(/,$/, "")}`,
+        );
+      expect(moved).not.toBe(ts);
+      const bad = accountForDeltas(["jitMarker"], moved, mine, oracleTs);
+      expect(bad.undone).toBe(oracleTs);
+      expect(bad.nodes).toEqual(["SomeType.someField: jit"]);
+      expect(bad.nodes).not.toEqual(bad.expected);
+    });
+  });
 
   // Runs after the per-fixture tests (vitest runs a file's tests in order).
   it("attributes every schema.ts difference to a codegen delta", () => {
