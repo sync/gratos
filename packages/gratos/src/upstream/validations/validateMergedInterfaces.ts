@@ -1,11 +1,11 @@
-import * as ts from "typescript";
-import * as E from "../Errors.js";
+import * as ts from "typescript-baseline";
+import * as E from "../Errors.ts";
 import {
-  DiagnosticsWithoutLocationResult,
+  type DiagnosticsWithoutLocationResult,
   tsErr,
   tsRelated,
-} from "../utils/DiagnosticError.js";
-import { err, ok } from "../utils/Result.js";
+} from "../utils/DiagnosticError.ts";
+import { err, ok } from "../utils/Result.ts";
 
 /**
  * Prevent using merged interfaces as GraphQL interfaces.

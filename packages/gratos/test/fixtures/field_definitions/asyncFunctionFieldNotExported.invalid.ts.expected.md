@@ -22,34 +22,3 @@ src/tests/fixtures/field_definitions/asyncFunctionFieldNotExported.invalid.ts:2:
 2 async function greet(_: Query): Promise<string> {
                  ~~~~~
 ```
-
-#### Code Action: "Add export keyword to function with @gqlField" (add-export-keyword-to-function)
-
-```diff
-- Original
-+ Fixed
-
-@@ -1,3 +1,3 @@
-  /** @gqlField */
-- async function greet(_: Query): Promise<string> {
-+ export async function greet(_: Query): Promise<string> {
-    return "Hello, World!";
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Add export keyword to function with @gqlField" in grats/src/tests/fixtures/field_definitions/asyncFunctionFieldNotExported.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-/** @gqlField */
-export async function greet(_: Query): Promise<string> {
-  return "Hello, World!";
-}
-
-/** @gqlType */
-type Query = unknown;
-```

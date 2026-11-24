@@ -22,32 +22,3 @@ src/tests/fixtures/input_type_one_of/simpleOneOfDeprecatedTag.invalid.ts:3:4 - e
 4  */
   ~
 ```
-
-#### Code Action: "Remove @oneOf tag" (remove-oneOf-tag)
-
-```diff
-- Original
-+ Fixed
-
-@@ -2,4 +2,3 @@
-   * @gqlInput
--  * @oneOf
--  */
-+  * */
-  export type Greeting = { firstName: string } | { lastName: string };
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Remove @oneOf tag" in grats/src/tests/fixtures/input_type_one_of/simpleOneOfDeprecatedTag.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-/**
- * @gqlInput
- * */
-export type Greeting = { firstName: string } | { lastName: string };
-```

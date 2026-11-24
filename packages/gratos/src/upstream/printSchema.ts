@@ -1,15 +1,15 @@
 import {
-  DocumentNode,
+  type DocumentNode,
   GraphQLSchema,
   print,
   specifiedScalarTypes,
 } from "graphql";
-import { GratsConfig } from "./gratsConfig.js";
-import { codegen } from "./codegen/schemaCodegen.js";
-import { Metadata } from "./metadata.js";
-import { resolverMapCodegen } from "./codegen/resolverMapCodegen.js";
-import { codegenEnums } from "./codegen/enumCodegen.js";
-import { mapDefinitions } from "./utils/visitor.js";
+import { type GratsConfig } from "./gratsConfig.ts";
+import { codegen } from "./codegen/schemaCodegen.ts";
+import { type Metadata } from "./metadata.ts";
+import { resolverMapCodegen } from "./codegen/resolverMapCodegen.ts";
+import { codegenEnums } from "./codegen/enumCodegen.ts";
+import { mapDefinitions } from "./utils/visitor.ts";
 
 /**
  * Prints code for a TypeScript module that exports a GraphQLSchema.

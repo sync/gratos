@@ -195,6 +195,9 @@ catalogs:
     effect:
       specifier: 4.1.5
       version: 4.1.5
+    graphql:
+      specifier: 17.1.0
+      version: 17.1.0
     oxfmt:
       specifier: 0.80.0
       version: 0.80.0
@@ -284,6 +287,16 @@ importers:
         version: 5.1.1(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6))
 
   packages/gratos:
+    dependencies:
+      commander:
+        specifier: 14.0.1
+        version: 14.0.1
+      graphql:
+        specifier: 'catalog:'
+        version: 17.1.0
+      typescript-baseline:
+        specifier: npm:typescript@5.9.2
+        version: typescript@5.9.2
     devDependencies:
       '@effect/vitest':
         specifier: 'catalog:'
@@ -294,6 +307,9 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.1.5
+      grats-upstream:
+        specifier: npm:grats@0.0.36
+        version: grats@0.0.36
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -989,6 +1005,10 @@ packages:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
     engines: {node: '>=18'}
 
+  commander@14.0.1:
+    resolution: {integrity: sha512-2JkV3gUZUVrbNA+1sjBOYLsMZ5cEEl8GTFP2a4AVz5hvasAMCQ1D2l2le/cX+pV4N6ZU17zjUahLpIXRrnWL8A==}
+    engines: {node: '>=20'}
+
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
@@ -1023,6 +1043,19 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  graphql@16.15.0:
+    resolution: {integrity: sha512-32kz9FecohDiC/tgcViwnRXM7HFBVTPiW7pHO+DikKOI5KjhU/jNULOReXsrFqt2WAYbE9xFXsTffJw6iTO8qw==}
+    engines: {node: ^12.22.0 || ^14.16.0 || ^16.0.0 || >=17.0.0}
+
+  graphql@17.1.0:
+    resolution: {integrity: sha512-JKCOa7rSQNrket/JFhuua86hljUO+IIpyUHfKxlKD6FEfbrLX8jc1FDrA0KPKI+s8OspBCF/5npYccAICHXPpQ==}
+    engines: {node: ^22.0.0 || ^24.0.0 || >=26.0.0}
+
+  grats@0.0.36:
+    resolution: {integrity: sha512-fp5uCLfMGm6n9ZFOnsaB6NXb4/mydfmN4ri1QJI7xPWPsNM1Q0rhgukWIScEG5JCZ7iwZInadhJwLUl6XHsoCQ==}
+    engines: {node: '>=20 <=24'}
+    hasBin: true
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -1155,6 +1188,11 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
+  semver@7.8.6:
+    resolution: {integrity: sha512-9lpSSU4Mly3mrtruwLs1eLK6+gzbzqeBFwRNjIjE+9LuDpWdYctrQlQ3ej1Ilgi7gknpsTRnPoLP8DpCHqHIJw==}
+    engines: {node: '>=10'}
+    hasBin: true
+
   source-map-js@1.2.4:
     resolution: {integrity: sha512-J7ZjMvHd9O1fcT/5V09QWaaSl2BbWx3F6O08spde82Namf9UB0GxRVIPiNbVsdKkoizHiSpTodo3vp2bAy91MA==}
     engines: {node: '>=6.0.0'}
@@ -1188,6 +1226,11 @@ packages:
 
   turbo@2.11.13:
     resolution: {integrity: sha512-2EZ8StW6tqaj71HGF60oUOmJrPQHidmZ5dcwv2VORofya9JthVrfZhxbzRMx/QxjPwYi754i2h5RFsZSDzpnaQ==}
+    hasBin: true
+
+  typescript@5.9.2:
+    resolution: {integrity: sha512-CWBzXQrc/qOkhidw1OzBTQuYRbfyxDXJMVJ1XNwUHGROVmuaeiEm3OslpZ1RV96d7SKKjZKrSJu3+t/xlw3R9A==}
+    engines: {node: '>=14.17'}
     hasBin: true
 
   typescript@7.0.2:
@@ -1653,6 +1696,8 @@ snapshots:
 
   chai@6.3.0: {}
 
+  commander@14.0.1: {}
+
   detect-libc@2.1.2: {}
 
   effect@4.1.5: {}
@@ -1673,6 +1718,17 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  graphql@16.15.0: {}
+
+  graphql@17.1.0: {}
+
+  grats@0.0.36:
+    dependencies:
+      commander: 14.0.1
+      graphql: 16.15.0
+      semver: 7.8.6
+      typescript: 5.9.2
 
   lightningcss-android-arm64@1.33.0:
     optional: true
@@ -1809,6 +1865,8 @@ snapshots:
       '@rolldown/binding-win32-arm64-msvc': 1.2.19
       '@rolldown/binding-win32-x64-msvc': 1.2.19
 
+  semver@7.8.6: {}
+
   source-map-js@1.2.4: {}
 
   std-env@4.3.0: {}
@@ -1846,6 +1904,8 @@ snapshots:
       '@turbo/linux-arm64': 2.11.13
       '@turbo/windows-64': 2.11.13
       '@turbo/windows-arm64': 2.11.13
+
+  typescript@5.9.2: {}
 
   typescript@7.0.2:
     optionalDependencies:

@@ -1,12 +1,12 @@
 import {
-  DocumentNode,
-  EnumTypeExtensionNode,
-  InterfaceTypeDefinitionNode,
-  InterfaceTypeExtensionNode,
-  ObjectTypeDefinitionNode,
-  ObjectTypeExtensionNode,
-  ScalarTypeDefinitionNode,
-  SchemaExtensionNode,
+  type DocumentNode,
+  type EnumTypeExtensionNode,
+  type InterfaceTypeDefinitionNode,
+  type InterfaceTypeExtensionNode,
+  type ObjectTypeDefinitionNode,
+  type ObjectTypeExtensionNode,
+  type ScalarTypeDefinitionNode,
+  type SchemaExtensionNode,
 } from "graphql";
 
 type Mapper = {

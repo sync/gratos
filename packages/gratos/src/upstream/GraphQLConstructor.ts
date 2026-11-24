@@ -1,47 +1,47 @@
 import {
   Kind,
-  ListTypeNode,
-  NamedTypeNode,
+  type ListTypeNode,
+  type NamedTypeNode,
   Location as GraphQLLocation,
-  NameNode,
+  type NameNode,
   Source,
   Token,
   TokenKind,
-  TypeNode,
-  NonNullTypeNode,
-  StringValueNode,
-  ConstValueNode,
-  ConstDirectiveNode,
-  ConstArgumentNode,
-  UnionTypeDefinitionNode,
-  FieldDefinitionNode,
-  InputValueDefinitionNode,
-  FloatValueNode,
-  IntValueNode,
-  NullValueNode,
-  BooleanValueNode,
-  ConstListValueNode,
-  ConstObjectValueNode,
-  ConstObjectFieldNode,
-  ObjectTypeDefinitionNode,
-  EnumValueDefinitionNode,
-  ScalarTypeDefinitionNode,
-  InputObjectTypeDefinitionNode,
-  EnumTypeDefinitionNode,
-  InterfaceTypeDefinitionNode,
-  ASTNode,
-  ObjectTypeExtensionNode,
-  DirectiveDefinitionNode,
-  EnumValueNode,
+  type TypeNode,
+  type NonNullTypeNode,
+  type StringValueNode,
+  type ConstValueNode,
+  type ConstDirectiveNode,
+  type ConstArgumentNode,
+  type UnionTypeDefinitionNode,
+  type FieldDefinitionNode,
+  type InputValueDefinitionNode,
+  type FloatValueNode,
+  type IntValueNode,
+  type NullValueNode,
+  type BooleanValueNode,
+  type ConstListValueNode,
+  type ConstObjectValueNode,
+  type ConstObjectFieldNode,
+  type ObjectTypeDefinitionNode,
+  type EnumValueDefinitionNode,
+  type ScalarTypeDefinitionNode,
+  type InputObjectTypeDefinitionNode,
+  type EnumTypeDefinitionNode,
+  type InterfaceTypeDefinitionNode,
+  type ASTNode,
+  type ObjectTypeExtensionNode,
+  type DirectiveDefinitionNode,
+  type EnumValueNode,
 } from "graphql";
-import * as ts from "typescript";
-import { uniqueId } from "./utils/helpers.js";
-import { DiagnosticResult, TsLocatableNode } from "./utils/DiagnosticError.js";
+import * as ts from "typescript-baseline";
+import { uniqueId } from "./utils/helpers.ts";
+import { type DiagnosticResult, type TsLocatableNode } from "./utils/DiagnosticError.ts";
 import {
-  InputValueDefinitionNodeOrResolverArg,
-  ResolverSignature,
-} from "./resolverSignature.js";
-import { ExportDefinition } from "./GraphQLAstExtensions.js";
+  type InputValueDefinitionNodeOrResolverArg,
+  type ResolverSignature,
+} from "./resolverSignature.ts";
+import { type ExportDefinition } from "./GraphQLAstExtensions.ts";
 
 export class GraphQLConstructor {
   /* Top Level Types */

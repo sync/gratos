@@ -1,12 +1,12 @@
 import {
-  ConstDirectiveNode,
-  DefinitionNode,
-  DocumentNode,
+  type ConstDirectiveNode,
+  type DefinitionNode,
+  type DocumentNode,
   Kind,
   Location,
   parse,
 } from "graphql";
-import { uniqueId } from "./utils/helpers.js";
+import { uniqueId } from "./utils/helpers.ts";
 
 /**
  * Grats supports some additional, non-spec server directives in order to

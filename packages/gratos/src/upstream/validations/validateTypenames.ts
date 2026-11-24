@@ -1,4 +1,4 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 import {
   GraphQLInterfaceType,
   GraphQLSchema,
@@ -7,13 +7,13 @@ import {
   isType,
 } from "graphql";
 import {
-  DiagnosticsWithoutLocationResult,
+  type DiagnosticsWithoutLocationResult,
   gqlErr,
   gqlRelated,
-} from "../utils/DiagnosticError.js";
-import { err, ok } from "../utils/Result.js";
-import { nullThrows } from "../utils/helpers.js";
-import * as E from "../Errors.js";
+} from "../utils/DiagnosticError.ts";
+import { err, ok } from "../utils/Result.ts";
+import { nullThrows } from "../utils/helpers.ts";
+import * as E from "../Errors.ts";
 
 /**
  * Ensure that every type which implements an interface or is a member of a

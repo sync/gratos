@@ -1,16 +1,16 @@
 import {
-  GraphQLAbstractType,
-  GraphQLArgument,
+  type GraphQLAbstractType,
+  type GraphQLArgument,
   GraphQLDirective,
   GraphQLEnumType,
-  GraphQLEnumValue,
-  GraphQLField,
-  GraphQLInputField,
+  type GraphQLEnumValue,
+  type GraphQLField,
+  type GraphQLInputField,
   GraphQLInputObjectType,
-  GraphQLInputType,
+  type GraphQLInputType,
   GraphQLInterfaceType,
   GraphQLObjectType,
-  GraphQLOutputType,
+  type GraphQLOutputType,
   GraphQLScalarType,
   GraphQLSchema,
   GraphQLUnionType,
@@ -25,16 +25,17 @@ import {
   isScalarType,
   isUnionType,
   valueFromASTUntyped,
+  coerceInputLiteral,
 } from "graphql";
-import * as ts from "typescript";
-import { extend, nullThrows } from "../utils/helpers.js";
-import { GratsConfig } from "../gratsConfig.js";
-import { naturalCompare } from "../utils/naturalCompare.js";
-import TSAstBuilder, { JsonValue } from "./TSAstBuilder.js";
-import ResolverCodegen from "./resolverCodegen.js";
-import { Metadata } from "../metadata.js";
-import { ConstDirectiveNode } from "graphql/language/index.js";
-import { ExportDefinition } from "../GraphQLAstExtensions.js";
+import * as ts from "typescript-baseline";
+import { extend, nullThrows } from "../utils/helpers.ts";
+import { type GratsConfig } from "../gratsConfig.ts";
+import { naturalCompare } from "../utils/naturalCompare.ts";
+import TSAstBuilder, { type JsonValue } from "./TSAstBuilder.ts";
+import ResolverCodegen from "./resolverCodegen.ts";
+import { type Metadata } from "../metadata.ts";
+import { type ConstDirectiveNode } from "graphql/language/index.js";
+import { type ExportDefinition } from "../GraphQLAstExtensions.ts";
 
 // These directives will be added to the schema by default, so we don't need to
 // include them in the generated schema.
@@ -72,12 +73,14 @@ class Codegen {
   _typeNameMappings: Map<string, string> = new Map();
   _typeDefinitions: Set<string> = new Set();
 
+  public _schema: GraphQLSchema;
   constructor(
-    public _schema: GraphQLSchema,
+    _schema: GraphQLSchema,
     _resolvers: Metadata,
     config: GratsConfig,
     destination: string,
   ) {
+    this._schema = _schema;
     this.ts = new TSAstBuilder(destination, config.importModuleSpecifierEnding);
     this.resolvers = new ResolverCodegen(this.ts, _resolvers);
   }
@@ -696,10 +699,10 @@ class Codegen {
       this.deprecated(arg),
       F.createPropertyAssignment("type", this.typeReference(arg.type)),
       // TODO: arg.defaultValue seems to be missing for complex objects
-      arg.defaultValue !== undefined
+      defaultValueOf(arg) !== undefined
         ? F.createPropertyAssignment(
             "defaultValue",
-            this.defaultValue(arg.defaultValue),
+            this.defaultValue(defaultValueOf(arg)),
           )
         : null,
       this.extensions(arg.astNode?.directives),
@@ -976,4 +979,17 @@ class Codegen {
 
     return this.ts.print();
   }
+}
+
+// graphql 17 keeps a default read from SDL as `arg.default.literal`; the deprecated
+// `arg.defaultValue` (what graphql 16 set) is undefined. Recover the runtime value so the
+// generated `defaultValue:` stays the same as before.
+function defaultValueOf(arg: GraphQLArgument): unknown {
+  if (arg.default === undefined) {
+    return arg.defaultValue;
+  }
+  if (arg.default.literal !== undefined) {
+    return coerceInputLiteral(arg.default.literal, arg.type);
+  }
+  return arg.default.value;
 }

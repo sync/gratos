@@ -1,59 +1,50 @@
 import {
-  FieldDefinitionNode,
-  InputValueDefinitionNode,
+  type FieldDefinitionNode,
+  type InputValueDefinitionNode,
   Kind,
-  NamedTypeNode,
-  NameNode,
-  TypeNode,
-  StringValueNode,
-  ConstValueNode,
-  ConstDirectiveNode,
-  ConstArgumentNode,
-  EnumValueDefinitionNode,
-  ConstObjectFieldNode,
-  ConstObjectValueNode,
-  ConstListValueNode,
+  type NamedTypeNode,
+  type NameNode,
+  type TypeNode,
+  type StringValueNode,
+  type ConstValueNode,
+  type ConstDirectiveNode,
+  type ConstArgumentNode,
+  type EnumValueDefinitionNode,
+  type ConstObjectFieldNode,
+  type ConstObjectValueNode,
+  type ConstListValueNode,
   assertName,
-  DefinitionNode,
-  version as graphqlJSVersion,
+  type DefinitionNode,
   TokenKind,
   GraphQLError,
 } from "graphql";
-import { gte as semverGte } from "semver";
 import {
   tsErr,
   tsRelated,
-  DiagnosticsResult,
+  type DiagnosticsResult,
   gqlErr,
-  DiagnosticResult,
-} from "./utils/DiagnosticError.js";
-import { err, ok } from "./utils/Result.js";
-import * as ts from "typescript";
+  type DiagnosticResult,
+} from "./utils/DiagnosticError.ts";
+import { err, ok } from "./utils/Result.ts";
+import * as ts from "typescript-baseline";
 import {
-  DeclarationDefinition,
-  NameDefinition,
+  type DeclarationDefinition,
+  type NameDefinition,
   UNRESOLVED_REFERENCE_NAME,
-} from "./TypeContext.js";
-import * as E from "./Errors.js";
-import { traverseJSDocTags } from "./utils/JSDoc.js";
-import { GraphQLConstructor, loc } from "./GraphQLConstructor.js";
-import { relativePath } from "./gratsRoot.js";
-import { ISSUE_URL } from "./Errors.js";
-import { detectInvalidComments } from "./comments.js";
+} from "./TypeContext.ts";
+import * as E from "./Errors.ts";
+import { traverseJSDocTags } from "./utils/JSDoc.ts";
+import { GraphQLConstructor, loc } from "./GraphQLConstructor.ts";
+import { relativePath } from "./gratsRoot.ts";
+import { ISSUE_URL } from "./Errors.ts";
+import { detectInvalidComments } from "./comments.ts";
+import { extend, invariant, type TsIdentifier } from "./utils/helpers.ts";
 import {
-  bestMatch,
-  extend,
-  invariant,
-  levenshteinDistance,
-  TsIdentifier,
-} from "./utils/helpers.js";
-import * as Act from "./CodeActions.js";
-import {
-  InputValueDefinitionNodeOrResolverArg,
-  ResolverArgument,
-} from "./resolverSignature.js";
+  type InputValueDefinitionNodeOrResolverArg,
+  type ResolverArgument,
+} from "./resolverSignature.ts";
 import { Parser } from "graphql/language/parser.js";
-import { ExportDefinition } from "./GraphQLAstExtensions.js";
+import { type ExportDefinition } from "./GraphQLAstExtensions.ts";
 
 export const LIBRARY_IMPORT_NAME = "grats";
 export const LIBRARY_NAME = "Grats";
@@ -105,8 +96,6 @@ export const TAGS = [
 
 export type TagName = (typeof TAGS)[number];
 
-// https://github.com/graphql/graphql-js/releases/tag/v16.9.0
-const ONE_OF_MIN_GRAPHQL_JS_VERSION = "16.9.0";
 export const OPERATION_TYPES = new Set(["Query", "Mutation", "Subscription"]);
 
 type ArgDefaults = Map<string, ts.Expression>;
@@ -238,11 +227,6 @@ class Extractor {
               oneOf,
               "The `@oneOf` tag has been deprecated. Grats will now automatically add the `@oneOf` directive if you define your input type as a TypeScript union. You can remove the `@oneOf` tag.",
               [],
-              {
-                fixName: "remove-oneOf-tag",
-                description: "Remove @oneOf tag",
-                changes: [Act.removeNode(oneOf)],
-              },
             );
           } else {
             this.extractInput(node, tag);
@@ -309,16 +293,7 @@ class Extractor {
           break;
         }
         case "specifiedBy":
-          this.report(tag, E.specifiedByDeprecated(), [], {
-            fixName: "replace-specifiedBy-with-gqlAnnotate",
-            description: "Replace @specifiedBy with @gqlAnnotate",
-            changes: [
-              Act.replaceNode(
-                tag,
-                `@gqlAnnotate specifiedBy(url: "${tag.comment}")`,
-              ),
-            ],
-          });
+          this.report(tag, E.specifiedByDeprecated(), []);
           break;
         default:
           {
@@ -335,31 +310,16 @@ class Extractor {
                     tag.tagName,
                     E.wrongCasingForGratsTag(tag.tagName.text, t),
                     [],
-                    {
-                      fixName: "fix-grats-tag-casing",
-                      description: `Change to @${t}`,
-                      changes: [Act.replaceNode(tag.tagName, t)],
-                    },
                   );
                   reported = true;
                   break;
                 }
               }
               if (!reported) {
-                const suggested = bestMatch(
-                  ALL_GQL_TAGS,
-                  (t) => -levenshteinDistance(t, tag.tagName.text),
-                );
-
                 this.report(
                   tag.tagName,
                   E.invalidGratsTag(tag.tagName.text),
                   [],
-                  {
-                    fixName: `change-to-${suggested}`,
-                    description: `Change to @${suggested}`,
-                    changes: [Act.replaceNode(tag.tagName, suggested)],
-                  },
                 );
               }
             }
@@ -414,21 +374,8 @@ class Extractor {
       } else if (this.hasTag(parent, INPUT_TAG)) {
         // You don't need to add `@gqlField` to input types, but it's an
         // easy mistake to think you might need to. We report a helpful
-        // error in this case and offer a fix.
-        const docblock = tag.parent;
-        const isOnlyTag =
-          ts.isJSDoc(docblock) &&
-          docblock.tags?.length === 1 &&
-          !docblock.comment;
-
-        const action = isOnlyTag
-          ? Act.removeNode(docblock)
-          : Act.removeNode(tag);
-        this.report(tag, E.gqlFieldTagOnInputType(), [], {
-          fixName: "remove-gql-field-from-input",
-          description: "Remove @gqlField tag",
-          changes: [action],
-        });
+        // error in this case.
+        this.report(tag, E.gqlFieldTagOnInputType(), []);
       } else if (
         !this.hasTag(parent, TYPE_TAG) &&
         !this.hasTag(parent, INTERFACE_TAG)
@@ -789,12 +736,6 @@ class Extractor {
         declaration.name,
         E.fieldVariableNotTopLevelExported(),
         [],
-        {
-          fixName: "add-export-keyword-to-arrow-function",
-          description:
-            "Add export keyword to exported arrow function with @gqlField",
-          changes: [Act.prefixNode(node, "export ")],
-        },
       );
     }
 
@@ -860,11 +801,6 @@ class Extractor {
         classBlameNode,
         E.staticMethodFieldClassNotExported(),
         [tsRelated(tag, "Field defined here")],
-        {
-          fixName: "add-export-keyword-to-class",
-          description: "Add export keyword to class with static @gqlField",
-          changes: [Act.prefixNode(classNode, "export ")],
-        },
       );
     }
     const isDefault = classNode.modifiers?.some((modifier) => {
@@ -1090,11 +1026,7 @@ class Extractor {
     });
 
     if (!isExported) {
-      return this.report(node.name, E.functionFieldNotNamedExport(), [], {
-        fixName: "add-export-keyword-to-function",
-        description: "Add export keyword to function with @gqlField",
-        changes: [Act.prefixNode(node, "export ")],
-      });
+      return this.report(node.name, E.functionFieldNotNamedExport(), []);
     }
     const defaultKeyword = node.modifiers?.find((modifier) => {
       return modifier.kind === ts.SyntaxKind.DefaultKeyword;
@@ -1119,11 +1051,7 @@ class Extractor {
       (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
     );
     if (!isExported) {
-      this.report(node.name, E.scalarNotExported(), [], {
-        fixName: "add-export-keyword-to-scalar",
-        description: "Add export keyword to type alias with @gqlScalar",
-        changes: [Act.prefixNode(node, "export ")],
-      });
+      this.report(node.name, E.scalarNotExported(), []);
     }
 
     const exported: ExportDefinition = {
@@ -1215,15 +1143,6 @@ class Extractor {
   extractOneOfInputFields(
     node: ts.UnionTypeNode,
   ): Array<InputValueDefinitionNode> | null {
-    if (!semverGte(graphqlJSVersion, ONE_OF_MIN_GRAPHQL_JS_VERSION)) {
-      return this.report(
-        node,
-        E.oneOfNotSupportedGraphql(
-          ONE_OF_MIN_GRAPHQL_JS_VERSION,
-          graphqlJSVersion,
-        ),
-      );
-    }
     const fields: InputValueDefinitionNode[] = [];
     for (const member of node.types) {
       const field = this.collectOneOfInputField(member);
@@ -1510,7 +1429,6 @@ class Extractor {
         node.name,
         E.typeNameMissingInitializer(),
         [],
-        this.fixTypenameProperty(node, expectedName),
       );
       return false;
     }
@@ -1520,7 +1438,6 @@ class Extractor {
         node.initializer,
         E.typeNameInitializeNotExpression(expectedName),
         [],
-        this.fixTypenameProperty(node, expectedName),
       );
       return false;
     }
@@ -1530,7 +1447,6 @@ class Extractor {
         node.initializer.expression,
         E.typeNameInitializeNotString(expectedName),
         [],
-        this.fixTypenameProperty(node, expectedName),
       );
       return false;
     }
@@ -1543,7 +1459,6 @@ class Extractor {
           node.initializer.expression.text,
         ),
         [],
-        this.fixTypenameProperty(node, expectedName),
       );
       return false;
     }
@@ -1553,7 +1468,6 @@ class Extractor {
         node.initializer.type,
         E.typeNameTypeNotReferenceNode(expectedName),
         [],
-        this.fixTypenameProperty(node, expectedName),
       );
       return false;
     }
@@ -1563,7 +1477,6 @@ class Extractor {
         node.initializer.type.typeName,
         E.typeNameTypeNameNotIdentifier(expectedName),
         [],
-        this.fixTypenameProperty(node, expectedName),
       );
       return false;
     }
@@ -1573,7 +1486,6 @@ class Extractor {
         node.initializer.type.typeName,
         E.typeNameTypeNameNotConst(expectedName),
         [],
-        this.fixTypenameProperty(node, expectedName),
       );
       return false;
     }
@@ -1581,34 +1493,12 @@ class Extractor {
     return true;
   }
 
-  fixTypenameProperty(node: ts.Node, expectedName: string): ts.CodeFixAction {
-    return {
-      fixName: "fix-typename-property",
-      description: "Create Grats-compatible `__typename` property",
-      changes: [
-        Act.replaceNode(node, `__typename = "${expectedName}" as const;`),
-      ],
-    };
-  }
-
-  fixTypenameType(node: ts.Node, expectedName: string): ts.CodeFixAction {
-    return {
-      fixName: "fix-typename-type",
-      description: "Create Grats-compatible `__typename` type",
-      changes: [Act.replaceNode(node, `"${expectedName}"`)],
-    };
-  }
-
   isValidTypenamePropertySignature(
     node: ts.PropertySignature,
     expectedName: string,
   ) {
     if (node.type == null) {
-      this.report(node, E.typeNameMissingTypeAnnotation(expectedName), [], {
-        fixName: "add-typename-type",
-        description: "Add Grats-compatible `__typename` type",
-        changes: [Act.suffixNode(node, `: "${expectedName}"`)],
-      });
+      this.report(node, E.typeNameMissingTypeAnnotation(expectedName), []);
       return false;
     }
     return this.isValidTypenamePropertyType(node.type, expectedName);
@@ -1620,7 +1510,6 @@ class Extractor {
         node,
         E.typeNameTypeNotStringLiteral(expectedName),
         [],
-        this.fixTypenameType(node, expectedName),
       );
       return false;
     }
@@ -1629,7 +1518,6 @@ class Extractor {
         node,
         E.typeNameDoesNotMatchExpected(expectedName),
         [],
-        this.fixTypenameType(node, expectedName),
       );
       return false;
     }
@@ -1782,11 +1670,7 @@ class Extractor {
     const tag = this.findTag(node, FIELD_TAG);
     if (tag == null) return null;
     if (node.modifiers == null) {
-      return this.report(node, E.parameterWithoutModifiers(), [], {
-        fixName: "add-public-modifier",
-        description: "Add 'public' modifier",
-        changes: [Act.prefixNode(node.name!, "public ")],
-      });
+      return this.report(node, E.parameterWithoutModifiers(), []);
     }
 
     const isParameterProperty = node.modifiers.some(
@@ -1798,11 +1682,7 @@ class Extractor {
     );
 
     if (!isParameterProperty) {
-      return this.report(node, E.parameterWithoutModifiers(), [], {
-        fixName: "add-public-modifier-to-existing",
-        description: "Add 'public' modifier",
-        changes: [Act.prefixNode(node.name!, "public ")],
-      });
+      return this.report(node, E.parameterWithoutModifiers(), []);
     }
 
     const notPublic = node.modifiers.find(
@@ -1812,11 +1692,7 @@ class Extractor {
     );
 
     if (notPublic != null) {
-      return this.report(notPublic, E.parameterPropertyNotPublic(), [], {
-        fixName: "make-parameter-property-public",
-        description: "Make parameter property public",
-        changes: [Act.replaceNode(notPublic, "public")],
-      });
+      return this.report(notPublic, E.parameterPropertyNotPublic(), []);
     }
 
     const name = this.entityName(node, tag);
@@ -2006,11 +1882,6 @@ class Extractor {
         node.name,
         E.expectedNullableArgumentToBeOptional(),
         [],
-        {
-          fixName: "add-question-token-to-arg",
-          description: "Make argument optional",
-          changes: [Act.suffixNode(node.name, "?")],
-        },
       );
     }
 
@@ -2036,11 +1907,6 @@ class Extractor {
           node.questionToken,
           E.nonNullTypeCannotBeOptional(),
           [],
-          {
-            fixName: "add-null-to-optional-type",
-            description: "Add '| null' to the type",
-            changes: [Act.suffixNode(node.type!, " | null")],
-          },
         );
       }
       type = this.gql.nullableType(type);
@@ -2074,11 +1940,7 @@ class Extractor {
     });
 
     if (this.config?.tsClientEnums != null && !isExported) {
-      this.report(node, E.enumNotExported(), [], {
-        fixName: "add-export-keyword-to-enum",
-        description: "Add export keyword to enum with @gqlEnum",
-        changes: [Act.prefixNode(node, "export ")],
-      });
+      this.report(node, E.enumNotExported(), []);
       return;
     }
 
@@ -2480,11 +2342,7 @@ class Extractor {
         // later when we try to use this as a GraphQL type.
         if (name.kind === "OK") {
           name = err(
-            tsErr(param.questionToken, E.nonNullTypeCannotBeOptional(), [], {
-              fixName: "add-null-to-optional-parameter-type",
-              description: "Add '| null' to the parameter type",
-              changes: [Act.suffixNode(param.type!, " | null")],
-            }),
+            tsErr(param.questionToken, E.nonNullTypeCannotBeOptional(), []),
           );
         }
       }
@@ -2769,11 +2627,7 @@ class Extractor {
         return tsRelated(tag, "Additional tag");
       });
 
-      return this.report(tags[0], E.duplicateTag(tagName), additionalTags, {
-        fixName: "remove-duplicate-tag",
-        description: `Remove duplicate @${tagName} tag`,
-        changes: tags.slice(1).map((tag) => Act.removeNode(tag)), // Remove all but the first tag
-      });
+      return this.report(tags[0], E.duplicateTag(tagName), additionalTags);
     }
     return tags[0];
   }

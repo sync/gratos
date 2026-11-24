@@ -27,39 +27,3 @@ src/tests/fixtures/typename/PropertySignatureTypenameIncorrectName.invalid.ts:3:
 3   __typename: "Group";
                 ~~~~~~~
 ```
-
-#### Code Action: "Create Grats-compatible `__typename` type" (fix-typename-type)
-
-```diff
-- Original
-+ Fixed
-
-@@ -2,3 +2,3 @@
-  export class User implements IPerson {
--   __typename: "Group";
-+   __typename: "User";
-    /** @gqlField */
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Create Grats-compatible `__typename` type" in grats/src/tests/fixtures/typename/PropertySignatureTypenameIncorrectName.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-/** @gqlType */
-export class User implements IPerson {
-  __typename: "User";
-  /** @gqlField */
-  name: string;
-}
-
-/** @gqlInterface */
-export interface IPerson {
-  /** @gqlField */
-  name: string;
-}
-```

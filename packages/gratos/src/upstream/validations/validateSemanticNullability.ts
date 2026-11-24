@@ -1,19 +1,19 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 import {
-  ConstDirectiveNode,
-  GraphQLField,
+  type ConstDirectiveNode,
+  type GraphQLField,
   GraphQLSchema,
   isInterfaceType,
 } from "graphql";
 import {
-  DiagnosticsWithoutLocationResult,
+  type DiagnosticsWithoutLocationResult,
   gqlErr,
   gqlRelated,
-} from "../utils/DiagnosticError.js";
-import { err, ok } from "../utils/Result.js";
-import { GratsConfig } from "../gratsConfig.js";
-import { SEMANTIC_NON_NULL_DIRECTIVE } from "../publicDirectives.js";
-import { astNode } from "../utils/helpers.js";
+} from "../utils/DiagnosticError.ts";
+import { err, ok } from "../utils/Result.ts";
+import { type GratsConfig } from "../gratsConfig.ts";
+import { SEMANTIC_NON_NULL_DIRECTIVE } from "../publicDirectives.ts";
+import { astNode } from "../utils/helpers.ts";
 
 /**
  * Ensure that all semantically non-nullable fields on an interface are also

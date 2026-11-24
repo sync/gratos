@@ -1,9 +1,9 @@
-import * as ts from "typescript";
-import { err, ok, Result } from "./utils/Result.js";
-import { invariant } from "./utils/helpers.js";
-import { locationlessErr } from "./utils/DiagnosticError.js";
-import { GratsConfigSpec } from "./configSpec.js";
-import type { GratsConfig } from "./TGratsConfig.js";
+import * as ts from "typescript-baseline";
+import { err, ok, type Result } from "./utils/Result.ts";
+import { invariant } from "./utils/helpers.ts";
+import { locationlessErr } from "./utils/DiagnosticError.ts";
+import { GratsConfigSpec } from "./configSpec.ts";
+import type { GratsConfig } from "./TGratsConfig.ts";
 
 /**
  * For Grats's config object we need the following:
@@ -19,7 +19,7 @@ import type { GratsConfig } from "./TGratsConfig.js";
  * the playground.
  */
 
-export { GratsConfig };
+export { type GratsConfig };
 
 export type ParsedCommandLineGrats = Omit<ts.ParsedCommandLine, "raw"> & {
   raw: {

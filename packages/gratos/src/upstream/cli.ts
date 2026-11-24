@@ -3,37 +3,26 @@
 // LLM agent docs: See the llm-docs/ directory in the package root for
 // Markdown documentation covering all Grats features and configuration.
 
-import * as E from "./Errors.js";
-import { Location } from "graphql";
-import { getParsedTsConfig } from "./index.js";
-import {
-  SchemaAndDoc,
-  buildSchemaAndDocResult,
-  extractSchemaAndDoc,
-} from "./lib.js";
+import * as E from "./Errors.ts";
+import { getParsedTsConfig } from "./index.ts";
+import { type SchemaAndDoc, buildSchemaAndDocResult } from "./lib.ts";
 import { Command } from "commander";
 import { writeFileSync, readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { locate } from "./Locate.js";
 import {
   printGratsSDL,
   printExecutableSchema,
   printEnumsModule,
-} from "./printSchema.js";
-import * as ts from "typescript";
+} from "./printSchema.ts";
+import * as ts from "typescript-baseline";
 import {
-  diagnosticsMessage,
   locationlessErr,
   ReportableDiagnostics,
-  DiagnosticsWithoutLocationResult,
-} from "./utils/DiagnosticError.js";
-import { GratsConfig, ParsedCommandLineGrats } from "./gratsConfig.js";
-import { err, ok } from "./utils/Result.js";
-import { cacheFromProgram, cachesAreEqual, RunCache } from "./runCache.js";
-import { withFixesFixed, FixOptions, applyFixes } from "./fixFixable.js";
-
-type BuildOptions = FixOptions;
+  type DiagnosticsWithoutLocationResult,
+} from "./utils/DiagnosticError.ts";
+import { type GratsConfig, type ParsedCommandLineGrats } from "./gratsConfig.ts";
+import { err, ok } from "./utils/Result.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -66,128 +55,18 @@ program
     "--tsconfig <TSCONFIG>",
     "Path to tsconfig.json. Defaults to auto-detecting based on the current working directory",
   )
-  .option("--watch", "Watch for changes and rebuild schema files as needed")
-  .option("--fix", "Automatically fix fixable diagnostics")
-  .action(async ({ tsconfig, watch, fix }) => {
-    if (watch) {
-      startWatchMode(tsconfig, { fix, log: console.error });
-    } else {
-      runBuild(tsconfig, { fix, log: console.error });
-    }
-  });
-
-program
-  .command("locate")
-  .argument("<ENTITY>", "GraphQL entity to locate. E.g. `User` or `User.id`")
-  .option(
-    "--tsconfig <TSCONFIG>",
-    "Path to tsconfig.json. Defaults to auto-detecting based on the current working directory",
-  )
-  .action((entity, { tsconfig }) => {
-    const { config } = handleDiagnostics(getTsConfig(tsconfig));
-
-    const { schema } = handleDiagnostics(buildSchemaAndDocResult(config));
-
-    const loc = locate(schema, entity);
-    if (loc.kind === "ERROR") {
-      console.error(loc.err);
-      process.exit(1);
-    }
-    console.log(formatLoc(loc.value));
+  .action(async ({ tsconfig }) => {
+    runBuild(tsconfig);
   });
 
 program.parse();
 
 /**
- * Run the compiler in watch mode.
- */
-function startWatchMode(tsconfig: string, options: BuildOptions) {
-  const configInfo = handleDiagnostics(
-    withFixesFixed(() => getTsConfig(tsconfig), options),
-  );
-  const { configPath } = configInfo;
-  let config = configInfo.config;
-  const watchHost = ts.createWatchCompilerHost(
-    configPath,
-    {},
-    ts.sys,
-    ts.createSemanticDiagnosticsBuilderProgram,
-    (diagnostic) => reportDiagnostics([diagnostic]),
-    (diagnostic) => {
-      // Some messages we handle ourselves since we ignore some updates. e.g.
-      // when we observe a change we ourselves created.
-      switch (diagnostic.code) {
-        case 6031: // Starting compilation in watch mode...
-        case 6032: // File change detected. Starting incremental compilation...
-          return;
-        default:
-          reportDiagnostics([diagnostic]);
-      }
-    },
-  );
-
-  let lastRunCache: RunCache | null = null;
-  watchHost.afterProgramCreate = (builderProgram) => {
-    const program = builderProgram.getProgram();
-    const runCache = cacheFromProgram(program);
-
-    if (lastRunCache != null) {
-      const tsSchemaPath = resolve(
-        dirname(configPath),
-        config.raw.grats.tsSchema,
-      );
-      const ignorePaths = new Set([tsSchemaPath]);
-      if (cachesAreEqual(lastRunCache, runCache, ignorePaths)) {
-        return;
-      }
-      reportDiagnostics([
-        diagnosticsMessage(
-          "File change detected. Starting incremental compilation...",
-        ),
-      ]);
-    }
-
-    lastRunCache = runCache;
-
-    function fixOrReport(diagnostics: ts.Diagnostic[]) {
-      if (options.fix && applyFixes(diagnostics, options)) {
-        // Watch mode should re-run after applying fixes
-        return;
-      }
-      reportDiagnostics(diagnostics);
-    }
-
-    // It's possible our config was updated, so re-read it.
-    const configResult = getTsConfig(tsconfig);
-    if (configResult.kind === "ERROR") {
-      fixOrReport(configResult.err);
-      return;
-    }
-    config = configResult.value.config;
-    // For now we just rebuild the schema on every change.
-    const schemaResult = extractSchemaAndDoc(config, program);
-    if (schemaResult.kind === "ERROR") {
-      fixOrReport(schemaResult.err);
-      return;
-    }
-    writeSchemaFilesAndReport(schemaResult.value, config, configPath);
-  };
-  reportDiagnostics([
-    diagnosticsMessage("Starting compilation in watch mode..."),
-  ]);
-  ts.createWatchProgram(watchHost);
-}
-
-/**
  * Run the compiler performing a single build.
  */
-function runBuild(tsconfig: string, options: BuildOptions) {
-  const { config, configPath } = handleDiagnostics(
-    withFixesFixed(() => getTsConfig(tsconfig), options),
-  );
-  const schemaAndDoc = handleDiagnostics(
-    withFixesFixed(() => buildSchemaAndDocResult(config), options),
-  );
+function runBuild(tsconfig: string) {
+  const { config, configPath } = handleDiagnostics(getTsConfig(tsconfig));
+  const schemaAndDoc = handleDiagnostics(buildSchemaAndDocResult(config));
   writeSchemaFilesAndReport(schemaAndDoc, config, configPath);
 }
 
@@ -237,18 +116,6 @@ function writeSchemaFilesAndReport(
 /**
  * Utility function to report diagnostics to the console.
  */
-function reportDiagnostics(diagnostics: ts.Diagnostic[]) {
-  const reportable = ReportableDiagnostics.fromDiagnostics(diagnostics);
-  reportReportableDiagnostics(reportable);
-}
-
-function reportReportableDiagnostics(reportable: ReportableDiagnostics) {
-  console.error(reportable.formatDiagnosticsWithColorAndContext());
-}
-
-/**
- * Utility function to report diagnostics to the console.
- */
 function handleDiagnostics<T>(result: DiagnosticsWithoutLocationResult<T>): T {
   if (result.kind === "ERROR") {
     const reportable = ReportableDiagnostics.fromDiagnostics(result.err);
@@ -273,12 +140,4 @@ function getTsConfig(tsconfig?: string): DiagnosticsWithoutLocationResult<{
     return err(optionsResult.err);
   }
   return ok({ configPath, config: optionsResult.value });
-}
-
-// Format a location for printing to the console. Tools like VS Code and iTerm
-// will automatically turn this into a clickable link.
-export function formatLoc(loc: Location) {
-  return `${loc.source.name}:${loc.startToken.line + 1}:${
-    loc.startToken.column + 1
-  }`;
 }

@@ -22,34 +22,3 @@ src/tests/fixtures/arguments/OptionalNonNullableArgument.invalid.ts:4:33 - error
 4   hello({ greeting }: { greeting?: string }): string {
                                   ~
 ```
-
-#### Code Action: "Add '| null' to the type" (add-null-to-optional-type)
-
-```diff
-- Original
-+ Fixed
-
-@@ -3,3 +3,3 @@
-    /** @gqlField */
--   hello({ greeting }: { greeting?: string }): string {
-+   hello({ greeting }: { greeting?: string | null }): string {
-      return `${greeting ?? "Hello"} World!`;
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Add '| null' to the type" in grats/src/tests/fixtures/arguments/OptionalNonNullableArgument.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-/** @gqlType */
-export default class SomeType {
-  /** @gqlField */
-  hello({ greeting }: { greeting?: string | null }): string {
-    return `${greeting ?? "Hello"} World!`;
-  }
-}
-```

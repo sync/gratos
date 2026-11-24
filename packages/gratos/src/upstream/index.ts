@@ -1,18 +1,18 @@
 // LLM agent docs: See the llm-docs/ directory in the package root for
 // Markdown documentation covering all Grats features and configuration.
 
-import * as ts from "typescript";
-import { ParsedCommandLineGrats, validateGratsOptions } from "./gratsConfig.js";
-import { DiagnosticsWithoutLocationResult } from "./utils/DiagnosticError.js";
-import { err } from "./utils/Result.js";
+import * as ts from "typescript-baseline";
+import { type ParsedCommandLineGrats, validateGratsOptions } from "./gratsConfig.ts";
+import { type DiagnosticsWithoutLocationResult } from "./utils/DiagnosticError.ts";
+import { err } from "./utils/Result.ts";
 
-export { printSDLWithoutMetadata } from "./printSchema.js";
-export * from "./Types.js";
-export * from "./lib.js";
+export { printSDLWithoutMetadata } from "./printSchema.ts";
+export * from "./Types.ts";
+export * from "./lib.ts";
 // Used by the experimental TypeScript plugin
-export { extract } from "./Extractor.js";
-export { codegen } from "./codegen/schemaCodegen.js";
-export { ReportableDiagnostics } from "./utils/DiagnosticError.js";
+export { extract } from "./Extractor.ts";
+export { codegen } from "./codegen/schemaCodegen.ts";
+export { ReportableDiagnostics } from "./utils/DiagnosticError.ts";
 
 // #FIXME: Report diagnostics instead of throwing!
 export function getParsedTsConfig(

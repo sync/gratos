@@ -32,35 +32,3 @@ src/tests/fixtures/user_error/DuplicateOneOfTag.invalid.ts:3:4 - error: Unexpect
       ~
     Additional tag
 ```
-
-#### Code Action: "Remove duplicate @oneOf tag" (remove-duplicate-tag)
-
-```diff
-- Original
-+ Fixed
-
-@@ -3,4 +3,3 @@
-   * @oneOf
--  * @oneOf
--  */
-+  * */
-  type Foo = {
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Remove duplicate @oneOf tag" in grats/src/tests/fixtures/user_error/DuplicateOneOfTag.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-/**
- * @gqlInput
- * @oneOf
- * */
-type Foo = {
-  a: string;
-};
-```

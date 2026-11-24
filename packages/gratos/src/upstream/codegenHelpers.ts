@@ -1,4 +1,4 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 
 export const ASSERT_NON_NULL_HELPER = "assertNonNull";
 const F = ts.factory;
