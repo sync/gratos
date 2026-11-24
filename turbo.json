@@ -8,7 +8,9 @@
     ".node-version"
   ],
   "tasks": {
-    "transit": { "dependsOn": ["^transit"] },
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
     "codegen": {
       "dependsOn": ["^transit"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.base.json"],
@@ -30,9 +32,28 @@
         "$TURBO_ROOT$/vitest.shared.ts"
       ]
     },
-    "//#fmt:check": { "inputs": ["$TURBO_DEFAULT$"] },
-    "//#lint": { "inputs": ["$TURBO_DEFAULT$"] },
-    "check": { "dependsOn": ["//#fmt:check", "//#lint", "typecheck", "test", "codegen:check"] },
-    "dev": { "cache": false, "persistent": true }
+    "//#fmt:check": {
+      "inputs": ["$TURBO_DEFAULT$"]
+    },
+    "//#lint": {
+      "inputs": ["$TURBO_DEFAULT$"]
+    },
+    "check": {
+      "dependsOn": [
+        "//#fmt:check",
+        "//#lint",
+        "//#typecheck:root",
+        "typecheck",
+        "test",
+        "codegen:check"
+      ]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "//#typecheck:root": {
+      "inputs": ["$TURBO_DEFAULT$"]
+    }
   }
 }

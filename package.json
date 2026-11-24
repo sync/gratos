@@ -9,7 +9,8 @@
     "test": "turbo run test",
     "lint": "oxlint .",
     "fmt": "oxfmt .",
-    "fmt:check": "oxfmt --check ."
+    "fmt:check": "oxfmt --check .",
+    "typecheck:root": "tsc -p tsconfig.json"
   },
   "devDependencies": {
     "@cloudflare/oxlint-config": "catalog:",

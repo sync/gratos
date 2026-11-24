@@ -28,7 +28,7 @@ All packages are `private: true` until publishing is decided.
 - All TypeScript compiler API access goes through `packages/gratos/src/ts/`.
 - Never use `--preserve-symlinks`, injected dependencies or `pnpm deploy`: they break type stripping of workspace packages.
 - Only erasable TypeScript syntax (`erasableSyntaxOnly`): no enums, namespaces or parameter properties.
-- The installed grats skill refers to `node_modules/grats/llm-docs/…`. In this repo those docs live in `packages/gratos/llm-docs/`.
+- The installed grats skill refers to `node_modules/grats/llm-docs/…`. Milestone M1a vendors those docs into `packages/gratos/llm-docs/`. Until then, read them upstream at https://github.com/captbaritone/grats/tree/v0.0.36/llm-docs.
 
 ## Delivery
 
