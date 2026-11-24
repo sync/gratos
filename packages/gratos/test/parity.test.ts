@@ -11,16 +11,16 @@
 // TypeScript or Query Result output was changed (only the listed SDL/message/cut snapshots were).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 
 import { Predicate, Schema } from "effect";
 import { buildASTSchema, findBreakingChanges, findDangerousChanges, parse, print } from "graphql";
-import { codegen as oracleCodegen } from "grats-upstream/dist/src/codegen/schemaCodegen.js";
+import { printExecutableSchema as oraclePrintExecutableSchema } from "grats-upstream/dist/src/printSchema.js";
 import { buildSchemaAndDocResult as oracleBuildSchemaAndDocResult } from "grats-upstream/dist/src/lib.js";
 import { validateGratsOptions as oracleValidateGratsOptions } from "grats-upstream/dist/src/gratsConfig.js";
 import { describe, expect, it } from "vitest";
 
-import { codegen } from "../src/upstream/codegen/schemaCodegen.ts";
+import { printExecutableSchema } from "../src/upstream/printSchema.ts";
 import { validateGratsOptions } from "../src/upstream/gratsConfig.ts";
 import { buildSchemaAndDocResult } from "../src/upstream/lib.ts";
 
@@ -62,7 +62,7 @@ const fixtures = readdirSync(fixturesDir, { recursive: true, withFileTypes: true
   .filter(
     (entry) => entry.isFile() && entry.name.endsWith(".ts") && !entry.name.includes(".invalid."),
   )
-  .map((entry) => relative(fixturesDir, join(entry.parentPath, entry.name)))
+  .map((entry) => relative(fixturesDir, join(entry.parentPath, entry.name)).split(sep).join("/"))
   .toSorted();
 
 /** Same gate as upstream's runner: fixtures with a `tsVersion` header only run on TS 5.0.2. */
@@ -96,7 +96,12 @@ const ours = (fileName: string, code: string) => {
   const { schema, doc, resolvers } = result.value;
   return {
     doc,
-    ts: codegen(schema, resolvers, options.value.raw.grats, join(fixturesDir, fileName)),
+    ts: printExecutableSchema(
+      schema,
+      resolvers,
+      options.value.raw.grats,
+      join(fixturesDir, fileName),
+    ),
   };
 };
 
@@ -113,7 +118,12 @@ const oracle = (fileName: string, code: string) => {
   const { schema, doc, resolvers } = result.value;
   return {
     sdl: printWithOracleGraphql(doc),
-    ts: oracleCodegen(schema, resolvers, options.value.raw.grats, join(fixturesDir, fileName)),
+    ts: oraclePrintExecutableSchema(
+      schema,
+      resolvers,
+      options.value.raw.grats,
+      join(fixturesDir, fileName),
+    ),
   };
 };
 
@@ -164,7 +174,8 @@ describe("parity with grats@0.0.36", () => {
     it.skipIf(isTsVersionGated(fixture))(fixture, () => {
       const mine = ours(fixture, code);
       const reference = oracle(fixture, code);
-      // Generated schema.ts: same TypeScript 5.9.2 printer on both sides, so byte for byte.
+      // The complete generated schema.ts (with tsSchemaHeader, or the resolver map when configured):
+      // same TypeScript 5.9.2 printer on both sides, so byte for byte.
       expect(mine.ts).toBe(reference.ts);
 
       const theirs = parse(reference.sdl);
