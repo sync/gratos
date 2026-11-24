@@ -38,13 +38,7 @@ import { GraphQLConstructor, loc } from "./GraphQLConstructor.ts";
 import { relativePath } from "./gratsRoot.ts";
 import { ISSUE_URL } from "./Errors.ts";
 import { detectInvalidComments } from "./comments.ts";
-import {
-  bestMatch,
-  extend,
-  invariant,
-  levenshteinDistance,
-  type TsIdentifier,
-} from "./utils/helpers.ts";
+import { extend, invariant, type TsIdentifier } from "./utils/helpers.ts";
 import {
   type InputValueDefinitionNodeOrResolverArg,
   type ResolverArgument,
@@ -322,11 +316,6 @@ class Extractor {
                 }
               }
               if (!reported) {
-                const suggested = bestMatch(
-                  ALL_GQL_TAGS,
-                  (t) => -levenshteinDistance(t, tag.tagName.text),
-                );
-
                 this.report(
                   tag.tagName,
                   E.invalidGratsTag(tag.tagName.text),

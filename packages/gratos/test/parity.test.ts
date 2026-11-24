@@ -4,8 +4,12 @@
 // For every valid schema fixture, the oracle's SDL is printed by its graphql 16, re-printed
 // through graphql 17's parse/print, and must equal ours byte for byte. graphql 17's
 // findBreakingChanges / findDangerousChanges must also report nothing in either direction.
-// (The integration fixtures' "Query Result" snapshots, recorded by upstream, already pass.)
-import { readdirSync, readFileSync } from "node:fs";
+//
+// Generated TypeScript and query results are compared with upstream's own recordings: the
+// `.expected.md` snapshots that upstream's engine wrote. The fixture suites assert equality with
+// them, and the check below proves from vendor-changes.json that no snapshot holding upstream's
+// TypeScript or Query Result output was changed (only the listed SDL/message/cut snapshots were).
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, relative } from "node:path";
 
@@ -98,7 +102,40 @@ const oracleSdl = (fileName: string, code: string): string => {
   return printWithOracleGraphql(result.value.doc);
 };
 
+/** Snapshots recorded in vendor-changes.json, which lists every intentionally changed vendored file. */
+const LedgerChanges = Schema.Struct({ changes: Schema.Record(Schema.String, Schema.Unknown) });
+const changedVendoredFiles = Object.keys(
+  Schema.decodeUnknownSync(LedgerChanges)(
+    JSON.parse(readFileSync(join(import.meta.dirname, "..", "vendor-changes.json"), "utf8")),
+  ).changes,
+);
+
 describe("parity with grats@0.0.36", () => {
+  it("compares every eligible fixture", () => {
+    // 236 valid schema fixtures, plus 2 that only run on TS 5.0.2 (skipped, as upstream does).
+    expect(fixtures.length).toBe(238);
+  });
+
+  it("keeps upstream's recorded query results and generated TypeScript", () => {
+    expect(
+      changedVendoredFiles.filter((file) => file.startsWith("test/integrationFixtures/")),
+    ).toEqual([]);
+    const changedSnapshotsWithTypeScript = changedVendoredFiles
+      .filter((file) => file.startsWith("test/fixtures/") && file.endsWith(".expected.md"))
+      .filter((file) => {
+        const path = join(import.meta.dirname, "..", file);
+        // Removed files (the cut locate fixtures) are in the ledger too.
+        return existsSync(path) && readFileSync(path, "utf8").includes("### TypeScript");
+      });
+    // These 3 changed only their SDL (graphql 17 prints object literals with spaces); their
+    // TypeScript sections are untouched, which the git history of each file shows.
+    expect(changedSnapshotsWithTypeScript.toSorted()).toEqual([
+      "test/fixtures/arguments/PositionalArgDeprecatedWithDefault.ts.expected.md",
+      "test/fixtures/default_values/DefaultArgumentObjectLiteral.ts.expected.md",
+      "test/fixtures/enums/NonNullEnumDefaultInInputObject.ts.expected.md",
+    ]);
+  });
+
   it("runs the oracle on graphql 16", () => {
     expect(oracle.version.startsWith("16.")).toBe(true);
   });

@@ -152,6 +152,12 @@ const main = async (): Promise<number> => {
   }
 
   const ledger = readLedger();
+  if (ledger.upstream !== UPSTREAM_REF) {
+    process.stderr.write(
+      `verify-vendor: vendor-changes.json is for ${ledger.upstream}, not ${UPSTREAM_REF}\n`,
+    );
+    return 1;
+  }
   const changes = { ...ledger.changes };
   const problems: Array<string> = [];
   for (const [local, upstreamSha] of expected) {
@@ -210,7 +216,8 @@ const main = async (): Promise<number> => {
     }
   }
 
-  if (recordReason !== undefined) {
+  // Record only a run that is otherwise clean, so a failed run never approves anything.
+  if (recordReason !== undefined && problems.length === 0) {
     const sorted = Object.fromEntries(
       Object.entries(changes).toSorted(([a], [b]) => a.localeCompare(b)),
     );

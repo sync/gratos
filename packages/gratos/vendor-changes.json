@@ -46,8 +46,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/Extractor.ts": {
-      "sha": "bf966f0ae972f55118ecd668763535d62fd571e7",
-      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics"
+      "sha": "2377c98bc75d78503443a4623ae3616d3ed0e5cc",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics, along with the closest-tag suggestion that only the removed fix used"
     },
     "src/upstream/fixFixable.ts": {
       "removed": true,
