@@ -4,6 +4,7 @@
 // property's type node), so the engine would see tags on more nodes than on TypeScript 5.
 import {
   isBinaryExpression,
+  isElementAccessExpression,
   isExpressionStatement,
   isIdentifier,
   isJSDoc,
@@ -13,16 +14,24 @@ import {
   isJSDocTemplateTag,
   isJSDocTypeTag,
   isModuleDeclaration,
+  isNumericLiteral,
+  isObjectLiteralExpression,
   isParenthesizedExpression,
+  isPrefixUnaryExpression,
+  isPropertyAccessExpression,
   isVariableStatement,
+  isVoidExpression,
+  NodeFlags,
   SyntaxKind,
 } from "typescript/unstable/ast";
 import type {
   BinaryExpression,
+  ElementAccessExpression,
   JSDoc,
   JSDocTag,
   Node,
   ParameterDeclaration,
+  PropertyAccessExpression,
   TypeParameterDeclaration,
 } from "typescript/unstable/ast";
 
@@ -172,10 +181,193 @@ const nestedModuleDeclaration = (node: Node): Node | undefined => {
   return body?.kind === SyntaxKind.ModuleDeclaration ? body : undefined;
 };
 
-/** A simplified getAssignmentDeclarationKind: TS files have no JS-style assignment declarations. */
+// ---- getAssignmentDeclarationKind for binary expressions, as TypeScript 5.9.2 ----
+
+const skipParentheses = (node: Node): Node => {
+  let current = node;
+  while (isParenthesizedExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+};
+
+const isStringOrNumericLiteralLike = (node: Node): boolean =>
+  node.kind === SyntaxKind.StringLiteral ||
+  node.kind === SyntaxKind.NoSubstitutionTemplateLiteral ||
+  isNumericLiteral(node);
+
+const isSignedNumericLiteral = (node: Node): boolean =>
+  isPrefixUnaryExpression(node) &&
+  (node.operator === SyntaxKind.PlusToken || node.operator === SyntaxKind.MinusToken) &&
+  isNumericLiteral(node.operand);
+
+const isLiteralLikeElementAccess = (node: Node): node is ElementAccessExpression =>
+  isElementAccessExpression(node) && isStringOrNumericLiteralLike(node.argumentExpression);
+
+const isEntityNameExpression = (node: Node): boolean =>
+  isIdentifier(node) ||
+  (isPropertyAccessExpression(node) &&
+    isIdentifier(node.name) &&
+    isEntityNameExpression(node.expression));
+
+const isBindableStaticElementAccessExpression = (
+  node: Node,
+  excludeThisKeyword: boolean,
+): boolean =>
+  isLiteralLikeElementAccess(node) &&
+  ((!excludeThisKeyword && node.expression.kind === SyntaxKind.ThisKeyword) ||
+    isEntityNameExpression(node.expression) ||
+    isBindableStaticAccessExpression(node.expression, true));
+
+const isBindableStaticAccessExpression = (node: Node, excludeThisKeyword = false): boolean =>
+  (isPropertyAccessExpression(node) &&
+    ((!excludeThisKeyword && node.expression.kind === SyntaxKind.ThisKeyword) ||
+      (isIdentifier(node.name) && isBindableStaticNameExpression(node.expression, true)))) ||
+  isBindableStaticElementAccessExpression(node, excludeThisKeyword);
+
+const isBindableStaticNameExpression = (node: Node, excludeThisKeyword: boolean): boolean =>
+  isEntityNameExpression(node) || isBindableStaticAccessExpression(node, excludeThisKeyword);
+
+const elementOrPropertyAccessName = (node: Node): string | undefined => {
+  let name: Node | undefined;
+  if (isPropertyAccessExpression(node)) {
+    name = node.name;
+  } else if (isElementAccessExpression(node)) {
+    name = skipParentheses(node.argumentExpression);
+  }
+  if (name === undefined) {
+    return undefined;
+  }
+  if (isIdentifier(name)) {
+    return name.text;
+  }
+  if (isStringOrNumericLiteralLike(name)) {
+    const text: unknown = Reflect.get(name, "text");
+    return typeof text === "string" ? text : undefined;
+  }
+  return undefined;
+};
+
+const isDynamicElementAccess = (node: ElementAccessExpression): boolean => {
+  const argument = skipParentheses(node.argumentExpression);
+  return !isStringOrNumericLiteralLike(argument) && !isSignedNumericLiteral(argument);
+};
+
+const isVoidZero = (node: Node): boolean =>
+  isVoidExpression(node) && isNumericLiteral(node.expression) && node.expression.text === "0";
+
+const rightMostAssignedExpression = (node: Node): Node => {
+  let current = node;
+  while (isBinaryExpression(current) && current.operatorToken.kind === SyntaxKind.EqualsToken) {
+    current = current.right;
+  }
+  return current;
+};
+
+const initializerOfBinaryExpression = (expression: BinaryExpression): Node => {
+  let current = expression;
+  while (isBinaryExpression(current.right)) {
+    current = current.right;
+  }
+  return current.right;
+};
+
+/** TypeScript 5's AssignmentDeclarationKind values that this port tells apart. */
+const AssignmentDeclarationKind = {
+  None: 0,
+  ExportsProperty: 1,
+  ModuleExports: 2,
+  PrototypeProperty: 3,
+  ThisProperty: 4,
+  Property: 5,
+  Prototype: 6,
+} as const;
+type AssignmentDeclarationKind =
+  (typeof AssignmentDeclarationKind)[keyof typeof AssignmentDeclarationKind];
+
+const propertyAccessAssignmentKind = (
+  left: PropertyAccessExpression | ElementAccessExpression,
+): AssignmentDeclarationKind => {
+  if (left.expression.kind === SyntaxKind.ThisKeyword) {
+    return AssignmentDeclarationKind.ThisProperty;
+  }
+  if (
+    (isPropertyAccessExpression(left) || isLiteralLikeElementAccess(left)) &&
+    isIdentifier(left.expression) &&
+    left.expression.text === "module" &&
+    elementOrPropertyAccessName(left) === "exports"
+  ) {
+    return AssignmentDeclarationKind.ModuleExports;
+  }
+  if (!isBindableStaticNameExpression(left.expression, true)) {
+    return AssignmentDeclarationKind.None;
+  }
+  if (
+    isBindableStaticAccessExpression(left.expression) &&
+    elementOrPropertyAccessName(left.expression) === "prototype"
+  ) {
+    return AssignmentDeclarationKind.PrototypeProperty;
+  }
+  let nextToLast: Node = left;
+  while (
+    (isPropertyAccessExpression(nextToLast) || isElementAccessExpression(nextToLast)) &&
+    !isIdentifier(nextToLast.expression)
+  ) {
+    nextToLast = nextToLast.expression;
+  }
+  const id =
+    isPropertyAccessExpression(nextToLast) || isElementAccessExpression(nextToLast)
+      ? nextToLast.expression
+      : undefined;
+  if (
+    id !== undefined &&
+    isIdentifier(id) &&
+    (id.text === "exports" ||
+      (id.text === "module" && elementOrPropertyAccessName(nextToLast) === "exports")) &&
+    isBindableStaticAccessExpression(left)
+  ) {
+    return AssignmentDeclarationKind.ExportsProperty;
+  }
+  if (
+    isBindableStaticNameExpression(left, true) ||
+    (isElementAccessExpression(left) && isDynamicElementAccess(left))
+  ) {
+    return AssignmentDeclarationKind.Property;
+  }
+  return AssignmentDeclarationKind.None;
+};
+
+/**
+ * TypeScript 5's getAssignmentDeclarationKind for a binary expression: an assignment to a
+ * property access is a declaration; an assignment to a bare identifier is not. Outside JS files
+ * only property assignments count.
+ */
+const assignmentDeclarationKind = (expression: BinaryExpression): AssignmentDeclarationKind => {
+  const left = expression.left;
+  let kind: AssignmentDeclarationKind = AssignmentDeclarationKind.None;
+  if (
+    expression.operatorToken.kind === SyntaxKind.EqualsToken &&
+    (isPropertyAccessExpression(left) || isElementAccessExpression(left)) &&
+    !isVoidZero(rightMostAssignedExpression(expression))
+  ) {
+    kind =
+      isBindableStaticNameExpression(left.expression, true) &&
+      elementOrPropertyAccessName(left) === "prototype" &&
+      isObjectLiteralExpression(initializerOfBinaryExpression(expression))
+        ? AssignmentDeclarationKind.Prototype
+        : propertyAccessAssignmentKind(left);
+  }
+  return kind === AssignmentDeclarationKind.Property ||
+    (expression.flags & NodeFlags.JavaScriptFile) !== 0
+    ? kind
+    : AssignmentDeclarationKind.None;
+};
+
+/** `x.y = x.y || function () {}`: the function, which takes the statement's JSDoc. */
 const sourceOfDefaultedAssignment = (node: Node): Node | undefined =>
   isExpressionStatement(node) &&
-  isAssignmentExpression(node.expression) &&
+  isBinaryExpression(node.expression) &&
+  assignmentDeclarationKind(node.expression) !== AssignmentDeclarationKind.None &&
   isBinaryExpression(node.expression.right) &&
   (node.expression.right.operatorToken.kind === SyntaxKind.BarBarToken ||
     node.expression.right.operatorToken.kind === SyntaxKind.QuestionQuestionToken)
