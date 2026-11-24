@@ -192,6 +192,13 @@ const maskSchema = () =>
     },
   });
 
+/** A query with an enum argument, so a variable value can earn an execution-time suggestion. */
+const paintSchema = () =>
+  basicSchema(
+    { Query: { paint: (_s, args: { color: string }) => args.color } },
+    "enum Color { RED GREEN } extend type Query { paint(color: Color!): String }",
+  );
+
 describe("maskErrors()", () => {
   it.each([
     ["graphql-js", 99, ["next", "next"]],
@@ -230,11 +237,23 @@ describe("maskErrors()", () => {
   });
 
   it("turns on hideSuggestions for validation and execution", async () => {
-    const server = createServer({ schema: basicSchema(), plugins: [maskErrors()] });
+    const server = createServer({ schema: paintSchema(), plugins: [maskErrors()] });
+    const plain = createServer({ schema: paintSchema() });
+    // Validation.
     const validation = await gql(server, "{ hell }");
     expect(validation.error?.message).toBe('Cannot query field "hell" on type "Query".');
-    const plain = createServer({ schema: basicSchema() });
     expect((await gql(plain, "{ hell }")).error?.message).toMatch(/Did you mean "hello"\?/);
+    // Execution: variable values are coerced when the operation executes, after validation.
+    const paint = "query ($color: Color!) { paint(color: $color) }";
+    const variables = { color: "REDD" };
+    const execution = await gql(server, paint, { variables });
+    expect(execution.status).toBe(400);
+    expect(execution.error?.message).toBe(
+      'Variable "$color" has invalid value: Value "REDD" does not exist in "Color" enum.',
+    );
+    expect((await gql(plain, paint, { variables })).error?.message).toBe(
+      'Variable "$color" has invalid value: Value "REDD" does not exist in "Color" enum. Did you mean the enum value "RED"?',
+    );
   });
 });
 
