@@ -1,0 +1,12 @@
+{
+  "runner": {
+    "platform": "darwin-arm64",
+    "cpu": "Apple M1 Max",
+    "cores": 10,
+    "memoryGb": 32,
+    "node": "v26.13.0"
+  },
+  "filesLoaded": 363,
+  "coldBuildMs": 750,
+  "peakRssMb": 290
+}

@@ -48,19 +48,31 @@ export function getSchema(): GraphQLSchema {
             return {
                 adieu: {
                     name: "adieu",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.adieu();
+                    }
                 },
                 farewell: {
                     name: "farewell",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.farewell();
+                    }
                 },
                 goodbye: {
                     name: "goodbye",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.goodbye();
+                    }
                 },
                 hello: {
                     name: "hello",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.hello();
+                    }
                 }
             };
         }

@@ -39,6 +39,9 @@ export function getSchema(): GraphQLSchema {
                             type: new GraphQLNonNull(GraphQLString),
                             defaultValue: "hello"
                         }
+                    },
+                    resolve(source, args) {
+                        return source.hello(args);
                     }
                 }
             };

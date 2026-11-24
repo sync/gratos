@@ -46,6 +46,8 @@ export {
   isFunctionDeclaration,
   isGetAccessorDeclaration,
   isIdentifier,
+  isImportDeclaration,
+  isImportSpecifier,
   isInterfaceDeclaration,
   isLiteralTypeNode,
   isMethodDeclaration,

@@ -2,8 +2,8 @@
   "upstream": "captbaritone/grats@5ab66166446b4f80263cda1a13de7d3a69a1c2f8",
   "changes": {
     "src/upstream/cli.ts": {
-      "sha": "d50dfaa190647621bc187b0c98e6447e6c7c86f0",
-      "reason": "M1b mechanical (see the other entries) + M1b cut: --watch, --fix and the locate command are removed (commander stays until M2 swaps in node:util parseArgs) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; the commander CLI parser is replaced by node:util parseArgs (same --tsconfig, --version/-V and --help/-h options, no new dependency), and readPackageVersion() accepts the package name `@dblechoc/gratos`"
+      "removed": true,
+      "reason": "M1b mechanical (see the other entries) + M1b cut: --watch, --fix and the locate command are removed (commander stays until M2 swaps in node:util parseArgs) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; the commander CLI parser is replaced by node:util parseArgs (same --tsconfig, --version/-V and --help/-h options, no new dependency), and readPackageVersion() accepts the package name `@dblechoc/gratos` + M3: removed; the `gratos` CLI is src/cli.ts on effect/cli and the Effect shell src/generate.ts (spec: parseArgs → effect/cli)"
     },
     "src/upstream/CodeActions.ts": {
       "removed": true,
@@ -14,16 +14,16 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
     },
     "src/upstream/codegen/resolverCodegen.ts": {
-      "sha": "eac0a9e4ec0ee511a5f6285b516f92e87acc56d7",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; `{ ...method, body }` (an object spread drops TypeScript 7's prototype-backed node fields) becomes factory.updateMethodDeclaration(), with questionTokenOf()"
+      "sha": "368cb978216a2f9d9c7367e0b68b76d65f216a25",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; `{ ...method, body }` (an object spread drops TypeScript 7's prototype-backed node fields) becomes factory.updateMethodDeclaration(), with questionTokenOf() + M3: isDefaultResolverSignature returns false for every method field (spec §8, src/effect/codegen.ts alwaysResolveMethods); maybeApplySemanticNullRuntimeCheck emits no assertNonNull around an Effect-returning field (isEffectSemanticNonNull) + M3 review (S1): maybeApplySemanticNullRuntimeCheck takes a subscriptionEvent flag (default false) and passes it to isEffectSemanticNonNull, so a subscription per-event resolve keeps assertNonNull whatever its source is annotated with + M3 review (S4): resolveMethod takes the GraphQL field (optional) and emits an explicit resolve for a default-signature field when src/effect/codegen.ts alwaysResolveEffect says so (a same-name Effect.Effect property or getter) + M3 round 3 (S13): an optional method field (name?(): T) is marked optionalMethod (src/effect/extract.ts), and its explicit resolve calls the method with ?. (optionalMethodCall), so a source that omits it resolves to null as graphql-js' default resolver did"
     },
     "src/upstream/codegen/resolverMapCodegen.ts": {
-      "sha": "a0e005acfcc9a91c7e2fb9ca813d31cd601b787d",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
+      "sha": "c6ba0cfe7ffc67864a198138308b01a8e4a8e4d5",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline + M3 review (S4): resolversMethods passes the field to resolveMethod"
     },
     "src/upstream/codegen/schemaCodegen.ts": {
-      "sha": "209496cf002bd6f4e4b868731e8d8ac70f969dd1",
-      "reason": "M1b mechanical (see the other entries) + M1b graphql 17.1: argument defaults are read from arg.default (graphql 17 leaves the deprecated defaultValue unset for SDL-built schemas) via coerceInputLiteral, so generated defaultValue output is unchanged + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; libraryImport: the generated `GqlScalar` import comes from config.libraryImport instead of `grats`"
+      "sha": "3298dc076709c755c3a4f0810002e522b224a42a",
+      "reason": "M1b mechanical (see the other entries) + M1b graphql 17.1: argument defaults are read from arg.default (graphql 17 leaves the deprecated defaultValue unset for SDL-built schemas) via coerceInputLiteral, so generated defaultValue output is unchanged + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; libraryImport: the generated `GqlScalar` import comes from config.libraryImport instead of `grats` + M3: extensions() merges the `gratos` markers (jit, semanticNonNull; src/effect/codegen.ts gratosFieldMarkers) into the one extensions object beside `grats.directives`, and creates it when only markers exist; fieldConfig passes them for fields with a resolve method + M3 review (S1): the subscription per-event identity resolve(payload) passes subscriptionEvent = true to maybeApplySemanticNullRuntimeCheck + M3 review (S4): fieldMethods passes the field to resolveMethod for the resolve method"
     },
     "src/upstream/codegen/TSAstBuilder.ts": {
       "sha": "1e28d66c24067c08f392cac74c7e2726ea330e01",
@@ -46,12 +46,12 @@
       "reason": "M2: libraryImport: the new config option `libraryImport` (default `@dblechoc/gratos`); upstream fixtures run with `grats`"
     },
     "src/upstream/Errors.ts": {
-      "sha": "c7059dc9fef5ddc1952433d9ee408ec33755138e",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: libraryImport: the three messages that name the library (ambiguousNumberType, ambiguousNumberLiteralType, userDefinedInfoTag) take the configured `libraryImport` instead of `grats`"
+      "sha": "fc0cc1e763f6833c0ed569da337d7c431e883148",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: libraryImport: the three messages that name the library (ambiguousNumberType, ambiguousNumberLiteralType, userDefinedInfoTag) take the configured `libraryImport` instead of `grats` + M3: subscriptionFieldNotAsyncIterable also names Effect's `Stream.Stream` (spec §4)"
     },
     "src/upstream/Extractor.ts": {
-      "sha": "0e6e3dfe944c00b4b8a53bd78ac9336df6ad5917",
-      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics, along with the closest-tag suggestion that only the removed fix used + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; JSDoc `comment` reads go through compat jsDocComment() (TypeScript 7 always returns a node array; one read is hoisted into a local for narrowing); the recorded JSDoc position uses compat jsDocCommentStart() (TypeScript 7's JSDoc pos includes leading trivia); property/signature questionToken reads use compat questionTokenOf() (TypeScript 7 calls it postfixToken); identifier `.escapedText` (absent on TypeScript 7 nodes) is read as `.text`, which is equal for the compared names (`const`, `undefined`, Grats tag names); libraryImport: LIBRARY_IMPORT_NAME is now only the default (`@dblechoc/gratos`); the extractor config carries `libraryImport` and passes it to those messages"
+      "sha": "e20eb7a77b09430524f411fc310cc794d74d3b44",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics, along with the closest-tag suggestion that only the removed fix used + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; JSDoc `comment` reads go through compat jsDocComment() (TypeScript 7 always returns a node array; one read is hoisted into a local for narrowing); the recorded JSDoc position uses compat jsDocCommentStart() (TypeScript 7's JSDoc pos includes leading trivia); property/signature questionToken reads use compat questionTokenOf() (TypeScript 7 calls it postfixToken); identifier `.escapedText` (absent on TypeScript 7 nodes) is read as `.text`, which is equal for the compared names (`const`, `undefined`, Grats tag names); libraryImport: LIBRARY_IMPORT_NAME is now only the default (`@dblechoc/gratos`); the extractor config carries `libraryImport` and passes it to those messages + M3: two Effect hook points into src/effect/extract.ts: typeReference calls effectTypeReference before expectNameIdentifier (`Effect.Effect`/`Stream.Stream` unwrapping, input-position and nesting errors), and recordDerivedContext calls rejectEffectDerivedContext (no Effect/Stream derived-context return)"
     },
     "src/upstream/fixFixable.ts": {
       "removed": true,
@@ -62,8 +62,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/GraphQLConstructor.ts": {
-      "sha": "7095905fc7feb6ee98ef6d3abb652c4f295ec493",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
+      "sha": "eb2d87b2a07daabb08d97e25201fc08d71ad221d",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline + M3: fieldDefinition marks a field whose declaration returns `Effect.Effect` directly (`returnsEffect`, from src/effect/wrappers.ts), for codegen's semanticNonNull marker + M3 round 3 (S13): an optional method field (name?(): T) is marked optionalMethod (src/effect/extract.ts), and its explicit resolve calls the method with ?. (optionalMethodCall), so a source that omits it resolves to null as graphql-js' default resolver did"
     },
     "src/upstream/gratsConfig.ts": {
       "sha": "33898082d02ca31b14451e868972a853a40e52a8",
@@ -78,8 +78,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/lib.ts": {
-      "sha": "a07161beb3333714d77c6c6d70abe64c1d3389aa",
-      "reason": "M1b mechanical (see the other entries) + M1b cut: the initTsPlugin export (language-service plugin) is removed + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; libraryImport: passes config.libraryImport to validateDuplicateContextOrInfo"
+      "sha": "0a68f67a32f0d04808d21845737b72df073a7481",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: the initTsPlugin export (language-service plugin) is removed + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; libraryImport: passes config.libraryImport to validateDuplicateContextOrInfo + M3: the validation pipeline runs validateEffectStreams (src/effect) just before validateAsyncIterable, so `Stream.Stream` is rejected outside Subscription + M3 round 2 (S10): the validation pipeline runs validateEffectResolverMap (src/effect) just after validateEffectStreams, so Effect.Effect fields and Stream.Stream subscriptions are rejected when EXPERIMENTAL__emitResolverMap is on"
     },
     "src/upstream/Locate.ts": {
       "removed": true,
@@ -154,8 +154,8 @@
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
     "src/upstream/TypeContext.ts": {
-      "sha": "268a9167d24cc48b5e701b00ef13f28e53705d5d",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
+      "sha": "6ead343ed1c16de8f9ef33e4540da570c8af2592",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline + M3: tsDeclarationForTsName returns the bare-`Effect` hint (src/effect/bareEffect.ts) for a bare `Effect` imported from `effect` or `effect/*`"
     },
     "src/upstream/utils/DiagnosticError.ts": {
       "sha": "138416e9931bcd68a486dde45d958b81f6a55e60",
@@ -221,13 +221,37 @@
       "sha": "9704438b3d41965a2d36e32ffb7c3ea6a97798ad",
       "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"@dblechoc/gratos\"`"
     },
+    "test/fixtures/arguments/ArgumentWithDescription.ts.expected.md": {
+      "sha": "b36eec9c7459842b50826a3b40e9e13815e84cd6",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/arguments/CustomScalarArgument.ts.expected.md": {
+      "sha": "b03e9a7d993ef7d149d14717affbbf4608c09bd1",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/arguments/DeprecatedArgument.ts.expected.md": {
+      "sha": "1f2e8a92d12b8dac31d8d0bf090d6ec123823f46",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
     "test/fixtures/arguments/NullableArgumentErrors.invalid.ts.expected.md": {
       "sha": "26216dbb32268e9216d4515a365970b46153e746",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
+    "test/fixtures/arguments/NullableArguments.ts.expected.md": {
+      "sha": "8df5bb2b00ba3eb663adf05fb7d63d937d63a931",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/arguments/OptionalArgument.ts.expected.md": {
+      "sha": "5fc8a028463f46074c315549b9aa29c944c9e002",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
     "test/fixtures/arguments/OptionalNonNullableArgument.invalid.ts.expected.md": {
       "sha": "92f9d92fce225bc4d1d88097e788c736cec4870e",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/arguments/OptionalNonNullableArgumentWithDefault.ts.expected.md": {
+      "sha": "0251410d0bffb2692b6724cc8b675a7758597ba6",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
     },
     "test/fixtures/arguments/PositionalArgDeprecatedWithDefault.ts.expected.md": {
       "sha": "d6f432f4fc13f59e68484841f08a3279166c3b3c",
@@ -236,6 +260,26 @@
     "test/fixtures/arguments/PositionalArgOptionalNotNullable.invalid.ts.expected.md": {
       "sha": "79bf4065b59aba152f857bb9c264af86a16aeb3c",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/arguments/StringArgument.ts.expected.md": {
+      "sha": "56fcc9dac41285469e21f7d08b48f3d1099d9d5f",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/built_in_scalars/FloatField.ts.expected.md": {
+      "sha": "6486e8aeb4e973bb3aab83d5ac3a42ddbc5373cb",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/built_in_scalars/FloatFieldAliasedImport.ts.expected.md": {
+      "sha": "1665efed1c20b82b071426a6f271a639ed93a33c",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/built_in_scalars/IdField.ts.expected.md": {
+      "sha": "f1853be2c5d5344408c9ca9316e540cc76acc075",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/built_in_scalars/IntField.ts.expected.md": {
+      "sha": "5e74bf2a2d148915f596ec143a4bed1b3860585d",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
     },
     "test/fixtures/comments/detachedBlockCommentNotJSDocWithoutStar.invalid.ts.expected.md": {
       "sha": "50eb2662a1811048711d98bde28d50191ac1447e",
@@ -265,9 +309,37 @@
       "sha": "c2833db2e730e92a4209b73c8e6df4bf6fefbce6",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
+    "test/fixtures/default_values/DefaultArgumentArray.ts.expected.md": {
+      "sha": "4fdf86b846c7e634ae81854c2522b3da4f781f55",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/default_values/DefaultArgumentBooleanLiteral.ts.expected.md": {
+      "sha": "35e6b670491d439bf6a7e5cafd733f95b91cd6fc",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/default_values/DefaultArgumentNullLiteral.ts.expected.md": {
+      "sha": "98172a8d9484e3350b8eb71f2c638e81ecad85eb",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/default_values/DefaultArgumentNumberLiteral.ts.expected.md": {
+      "sha": "ba6a5543ffc2c281825adc051355281b5b694c3e",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
     "test/fixtures/default_values/DefaultArgumentObjectLiteral.ts.expected.md": {
-      "sha": "1ca1d03a2228fc1b6c4262bb2a985510bce62236",
-      "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
+      "sha": "5ab09c4a91796f374a2fd81d5a7722f9591b21ae",
+      "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type) + M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/default_values/DefaultArgumentPropertyName.ts.expected.md": {
+      "sha": "ade7bac34499bc7d862cb1495b08eac9b65e67b8",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/default_values/DefaultArgumentStringLiteral.ts.expected.md": {
+      "sha": "b32a44a93ff5167518619874f2efaf9a3467cdb5",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/default_values/DefaultArgumentStringLiteralBackticks.ts.expected.md": {
+      "sha": "253fd19b30e9025757c8403d7a856d4297ba0a23",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
     },
     "test/fixtures/directives/directiveArgFieldInvalid.invalid.ts.expected.md": {
       "sha": "be425b57edd8f1b160401688e7c06c3e6a723b89",
@@ -285,6 +357,14 @@
       "sha": "05de79b489266c5b73c0c9a60ab5abba19f5e1ff",
       "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
     },
+    "test/fixtures/examples/playground.ts.expected.md": {
+      "sha": "7f4f0a8a704a9f34538dacaa749e95a88d52dfc9",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/examples/readme.ts.expected.md": {
+      "sha": "d8abd3301e22d55843a2a6dfbc48cbab561adcdd",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
     "test/fixtures/extend_type/fieldAsArrowFunctionNotExported.invalid.ts.expected.md": {
       "sha": "424b5ae4a5e559b1dfec339e908893c57cbdb262",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
@@ -297,9 +377,21 @@
       "sha": "6c83d19fe396a4f691379117bc2ce208c1beacbe",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
+    "test/fixtures/field_definitions/DeprecatedMethodField.ts.expected.md": {
+      "sha": "e48c85a74fc96f5f334b15709ec84a548149df23",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
     "test/fixtures/field_definitions/FieldAsStaticClassMethodNotExported.invalid.ts.expected.md": {
       "sha": "43a4823e98586fd5ee35345e2690873ebe6c33b5",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/field_definitions/LiteralBooleanField.ts.expected.md": {
+      "sha": "ae7d308ccc34d2c88bf872011df0301be9e835cc",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_definitions/LiteralStringField.ts.expected.md": {
+      "sha": "d15f2ee2881487805ace08a62b47af8b1a08f85d",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
     },
     "test/fixtures/field_definitions/ParameterPropertyFieldNoModifier.invalid.ts.expected.md": {
       "sha": "9d311b9bbb9a4bdccc7e8db655db8dfe150eaa30",
@@ -309,6 +401,86 @@
       "sha": "df50f0c6c3125080a6ae87ef0a83627d7865e2da",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
+    "test/fixtures/field_definitions/PublicFieldMethod.ts.expected.md": {
+      "sha": "94d2cea83569148391689f0ae55de2e879179e88",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_definitions/StringFieldWithDescription.ts.expected.md": {
+      "sha": "7d397040a6a5d1388b5b78be74fa1de523578ebb",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/ArrayField.ts.expected.md": {
+      "sha": "e193eebf53ef9d58544eee8c538df6ff42979df0",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/ArrayShorthandField.ts.expected.md": {
+      "sha": "bb157e614895d11a8f0e45b9522be0271356a85a",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/ArrayWithNullableItems.ts.expected.md": {
+      "sha": "885e2f5890981a3a66882ae3d2991890d38370ad",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/AsyncPromiseField.ts.expected.md": {
+      "sha": "e8ef3bd0099aea94b1126727d1e85d68534d372a",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/BooleanField.ts.expected.md": {
+      "sha": "0a2e77c973d610c02c114741a5053b4e9b112f1b",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/CustomScalar.ts.expected.md": {
+      "sha": "8d6037cb8acd3d05cb3a35e373d1ff70f1d2d679",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/KitchenSink.ts.expected.md": {
+      "sha": "5415179e3de5b1a41bc830b2aff967a27ea724e0",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/LinkedField.ts.expected.md": {
+      "sha": "b16e69432f3473096a2f7d64a2acc8c62a209913",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/LinkedFieldWithTypeArg.ts.expected.md": {
+      "sha": "67ba500c8490c2fc757c933e1aeec5a653d47a08",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/non_default_nullable/NonNullablePromise.ts.expected.md": {
+      "sha": "df79ad139d6bafc2becdb28f71af274098973a63",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/non_default_nullable/NullablePromise.ts.expected.md": {
+      "sha": "e53a341ba6a18668b1246770533b9256edc6c978",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/OptionalFields.ts.expected.md": {
+      "sha": "83026c494d7f8abef97a0d83e16106f4330a89c5",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/ParenthesizedType.ts.expected.md": {
+      "sha": "6e757eb9ef02356d226a7f822c260dc149457bbc",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/ReadonlyArrayField.ts.expected.md": {
+      "sha": "342f7089116eacb9b9079c1be66956afb01a35f4",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/StringField.ts.expected.md": {
+      "sha": "03c4fb2b8b061eb19a78e824069a059ce8b64a33",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/field_values/StringFieldKillsParentOnException.ts.expected.md": {
+      "sha": "7be0f07cb1fc0c7608795d29f0a3f5098f81827d",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/generics/genericInputType.ts.expected.md": {
+      "sha": "c6ad959282051a1f63efef1bf9e0a8b22e69d4df",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/generics/genericOverArg.ts.expected.md": {
+      "sha": "47b482c3781f09a23a43f633c72d2e8c40f59d94",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
     "test/fixtures/input_type_one_of/simpleOneOfDeprecatedTag.invalid.ts.expected.md": {
       "sha": "c7af13c29250e80a49b7fdb66f3d0176fe07624e",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
@@ -316,6 +488,50 @@
     "test/fixtures/input_types/inputFieldWithGqlField.invalid.ts.expected.md": {
       "sha": "6fc627d6a36aa8a93c4e9af9772ede8983a3ef5c",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/input_types/InputTypeInterface.ts.expected.md": {
+      "sha": "5da80253271ec867be29d2afa12b3c62b6ef0dfa",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/FieldReturnsInterface.ts.expected.md": {
+      "sha": "9e3a62820c53dfcf0a9e28adf2d5af1493dfed8e",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/IgnoresExtendsClause.ts.expected.md": {
+      "sha": "f8c19e4b25db414225b6d05e0f972b47424e276b",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/ImplementsInterface.ts.expected.md": {
+      "sha": "15eeeaeba7bdfe5471cc80a82154fef72d6d0cbd",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/ImplementsInterfaceWithTypeParam.ts.expected.md": {
+      "sha": "3697c4d9d1435078afdd06443cf6eebd6c260f01",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/ImplementsMultipleInterfaces.ts.expected.md": {
+      "sha": "b622f99b8633443d340de216c7cd8bbc12553115",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/InterfaceFieldWithDescription.ts.expected.md": {
+      "sha": "9d2a562ed3ea88661170694a1d7deed5fbd6b337",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/InterfaceFieldWithDescriptionThatDiffersFromType.ts.expected.md": {
+      "sha": "862b60939cdccfbe1fe2d2f4a3cf38c8691c20f9",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/InterfaceWithCustomName.ts.expected.md": {
+      "sha": "36f923493094a51d68c1a81bd713ea64181e470b",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/InterfaceWithDeprecatedField.ts.expected.md": {
+      "sha": "7a62dbcb663af15394adfa801cb155c4749502fd",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/interfaces/InterfaceWithDescription.ts.expected.md": {
+      "sha": "06960929ec7b93e6f8edd32f903efaf3ddaafa22",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
     },
     "test/fixtures/locate/fieldOnScalar.invalid.ts": {
       "removed": true,
@@ -405,6 +621,42 @@
       "removed": true,
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
+    "test/fixtures/resolver_info/ClassMethodWithInfoValue.ts.expected.md": {
+      "sha": "2ffa4c8c07d3ba47290604d189732eba98943083",
+      "reason": "M3 jit marker: the field's resolver takes a GqlInfo parameter, so its generated config gets `extensions: { gratos: { jit: false } }`"
+    },
+    "test/fixtures/resolver_info/FunctionWithInfoValue.ts.expected.md": {
+      "sha": "3cec84abed4b5fa72e7b981818c2ea103003a457",
+      "reason": "M3 jit marker: the field's resolver takes a GqlInfo parameter, so its generated config gets `extensions: { gratos: { jit: false } }`"
+    },
+    "test/fixtures/resolver_info/StaticMethodWithInfoValue.ts.expected.md": {
+      "sha": "001a2b9449cfc1e57bbe9aeec7f798c5a054652f",
+      "reason": "M3 jit marker: the field's resolver takes a GqlInfo parameter, so its generated config gets `extensions: { gratos: { jit: false } }`"
+    },
+    "test/fixtures/semantic_nullability/semanticNonNull.ts.expected.md": {
+      "sha": "e9cc4704996b5f53452a2c5c3763e438883a1da8",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/semantic_nullability/semanticNonNullMatchesInterface.ts.expected.md": {
+      "sha": "a064a269b4638d23ee4a03bb2add43f6365fb98f",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/semantic_nullability/semanticNull.ts.expected.md": {
+      "sha": "5cf24015543839c1315d029737ae73d30f6719cd",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/subscriptions/NonSubscriptionClassWithAsyncIterable.ts.expected.md": {
+      "sha": "25f159ea4338485850d4d41f3259ea842f68a451",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
+    "test/fixtures/top_level_fields/rootSubscriptionFieldNotAsyncIterable.invalid.ts.expected.md": {
+      "sha": "01a91f5dd4a93cf9201d61e7ae86f731065aeeba",
+      "reason": "M3: the reworded subscriptionFieldNotAsyncIterable message (names `Stream.Stream`)"
+    },
+    "test/fixtures/type_definitions/RenamedType.ts.expected.md": {
+      "sha": "a4fe8974a9a0bfaef2aa6d50d28dc934e979914b",
+      "reason": "M3 §8: every method field gets an explicit `resolve` in the generated schema.ts (graphql-jit does not call function-valued properties)"
+    },
     "test/fixtures/typename/PropertySignatureTypenameIncorrectName.invalid.ts.expected.md": {
       "sha": "dbbe7dd60ab3075c780046054a1c71a9cb2389e2",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
@@ -456,6 +708,14 @@
     "test/fixtures/user_error/WrongCaseGqlTag.invalid.ts.expected.md": {
       "sha": "6bdb01f224f8b73d86cbca17c3616c0025f723a2",
       "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/integrationFixtures/killsParentOnException/schema.ts": {
+      "sha": "899fbe48bbc510885ce8ff35910344815ac375b0",
+      "reason": "M3 §8: generated by the integration test; the method field now has an explicit resolve (its Query Result snapshot is unchanged)"
+    },
+    "test/integrationFixtures/killsParentOnExceptionReturnsNull/schema.ts": {
+      "sha": "899fbe48bbc510885ce8ff35910344815ac375b0",
+      "reason": "M3 §8: generated by the integration test; the method field now has an explicit resolve (its Query Result snapshot is unchanged)"
     }
   }
 }

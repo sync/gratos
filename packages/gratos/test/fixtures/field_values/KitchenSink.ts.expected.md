@@ -97,11 +97,17 @@ export function getSchema(): GraphQLSchema {
             return {
                 groups: {
                     name: "groups",
-                    type: new GraphQLList(new GraphQLNonNull(GroupType))
+                    type: new GraphQLList(new GraphQLNonNull(GroupType)),
+                    resolve(source) {
+                        return source.groups();
+                    }
                 },
                 name: {
                     name: "name",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.name();
+                    }
                 }
             };
         }
@@ -116,11 +122,17 @@ export function getSchema(): GraphQLSchema {
                 },
                 members: {
                     name: "members",
-                    type: new GraphQLList(new GraphQLNonNull(UserType))
+                    type: new GraphQLList(new GraphQLNonNull(UserType)),
+                    resolve(source) {
+                        return source.members();
+                    }
                 },
                 name: {
                     name: "name",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.name();
+                    }
                 }
             };
         }
@@ -136,6 +148,9 @@ export function getSchema(): GraphQLSchema {
                         greeting: {
                             type: new GraphQLNonNull(GraphQLString)
                         }
+                    },
+                    resolve(source, args) {
+                        return source.greetings(args);
                     }
                 },
                 greetings1: {
@@ -145,6 +160,9 @@ export function getSchema(): GraphQLSchema {
                         greeting: {
                             type: new GraphQLNonNull(GraphQLString)
                         }
+                    },
+                    resolve(source, args) {
+                        return source.greetings1(args);
                     }
                 },
                 greetings2: {
@@ -154,6 +172,9 @@ export function getSchema(): GraphQLSchema {
                         greeting: {
                             type: new GraphQLNonNull(GraphQLString)
                         }
+                    },
+                    resolve(source, args) {
+                        return source.greetings2(args);
                     }
                 },
                 hello: {
@@ -163,11 +184,17 @@ export function getSchema(): GraphQLSchema {
                         greeting: {
                             type: new GraphQLNonNull(GraphQLString)
                         }
+                    },
+                    resolve(source, args) {
+                        return source.hello(args);
                     }
                 },
                 me: {
                     name: "me",
-                    type: UserType
+                    type: UserType,
+                    resolve(source) {
+                        return source.me();
+                    }
                 }
             };
         }

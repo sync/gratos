@@ -1,0 +1,9 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "codegen": {
+      "outputs": ["test/smoke/schema.ts", "test/smoke/schema.graphql"]
+    }
+  }
+}

@@ -38,6 +38,9 @@ export function getSchema(): GraphQLSchema {
                         greeting: {
                             type: new GraphQLNonNull(GraphQLString)
                         }
+                    },
+                    resolve(source, args) {
+                        return source.hello(args);
                     }
                 }
             };

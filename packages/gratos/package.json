@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
+  "bin": {
+    "gratos": "./src/cli.ts"
+  },
   "type": "module",
   "imports": {
     "#typescript": "./src/ts/index.ts"
@@ -13,19 +16,19 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run && vitest run --config vitest.parity.config.ts",
-    "codegen": "node -e \"console.log('codegen: nothing to generate yet (M2)')\"",
-    "codegen:check": "node -e \"console.log('codegen:check: nothing to check yet (M2)')\"",
+    "codegen": "node src/cli.ts --tsconfig test/smoke/tsconfig.json",
+    "codegen:check": "node src/cli.ts --check --tsconfig test/smoke/tsconfig.json",
     "vendor:verify": "node scripts/verify-vendor.ts",
     "bench": "node bench/run.ts"
   },
   "dependencies": {
+    "@effect/platform-node": "catalog:",
     "effect": "catalog:",
     "graphql": "catalog:",
     "jsonc-parser": "catalog:",
     "typescript": "catalog:"
   },
   "devDependencies": {
-    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "grats-upstream": "npm:grats@0.0.36",

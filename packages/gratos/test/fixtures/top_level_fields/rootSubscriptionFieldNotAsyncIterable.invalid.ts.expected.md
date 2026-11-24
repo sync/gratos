@@ -14,7 +14,7 @@ export function foo(): string {
 ### Error Report
 
 ```text
-src/tests/fixtures/top_level_fields/rootSubscriptionFieldNotAsyncIterable.invalid.ts:2:24 - error: Expected fields on `Subscription` to return an `AsyncIterable`. Fields on `Subscription` model a subscription, which is a stream of events. Grats expects fields on `Subscription` to return an `AsyncIterable` which can be used to model this stream.
+src/tests/fixtures/top_level_fields/rootSubscriptionFieldNotAsyncIterable.invalid.ts:2:24 - error: Expected fields on `Subscription` to return an `AsyncIterable` or an Effect `Stream.Stream`. Fields on `Subscription` model a subscription, which is a stream of events. Grats expects fields on `Subscription` to return an `AsyncIterable` or a `Stream.Stream` which can be used to model this stream.
 
 2 export function foo(): string {
                          ~~~~~~

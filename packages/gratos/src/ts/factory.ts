@@ -190,6 +190,22 @@ export const factory = {
       argumentsArray ?? [],
       NodeFlags.None,
     ),
+  /** The `?.` of an optional call (the only token the engine creates directly). */
+  createToken: (kind: SyntaxKind.QuestionDotToken): QuestionDotToken => createToken(kind),
+  /** An optional call, `f?.(…)`: TypeScript 5 marks it as part of an optional chain. */
+  createCallChain: (
+    expression: Expression,
+    questionDotToken: QuestionDotToken | undefined,
+    typeArguments: ReadonlyArray<TypeNode> | undefined,
+    argumentsArray: ReadonlyArray<Expression> | undefined,
+  ): CallExpression =>
+    createCallExpression7(
+      expression,
+      questionDotToken,
+      typeArguments,
+      argumentsArray ?? [],
+      NodeFlags.OptionalChain,
+    ),
   createBlock: (statements: ReadonlyArray<Statement>, multiLine?: boolean): Block =>
     createBlock(statements, multiLine),
   createVariableStatement: (

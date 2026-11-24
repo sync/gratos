@@ -35,7 +35,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 id: {
                     name: "id",
-                    type: GraphQLID
+                    type: GraphQLID,
+                    resolve(source) {
+                        return source.id();
+                    }
                 }
             };
         }

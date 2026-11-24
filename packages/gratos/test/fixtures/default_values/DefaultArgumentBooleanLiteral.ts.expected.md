@@ -47,6 +47,9 @@ export function getSchema(): GraphQLSchema {
                             type: GraphQLBoolean,
                             defaultValue: false
                         }
+                    },
+                    resolve(source, args) {
+                        return source.someField1(args);
                     }
                 },
                 someField2: {
@@ -57,6 +60,9 @@ export function getSchema(): GraphQLSchema {
                             type: GraphQLBoolean,
                             defaultValue: true
                         }
+                    },
+                    resolve(source, args) {
+                        return source.someField2(args);
                     }
                 }
             };

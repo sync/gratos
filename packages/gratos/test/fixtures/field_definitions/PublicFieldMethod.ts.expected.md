@@ -33,7 +33,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 greet: {
                     name: "greet",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.greet();
+                    }
                 }
             };
         }

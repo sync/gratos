@@ -46,6 +46,8 @@ const configFixturesDir = join(import.meta.dirname, "configParserFixtures");
 const integrationFixturesDir = join(import.meta.dirname, "integrationFixtures");
 /** Gratos's own schema fixtures (not vendored): TypeScript 7 port regressions and per-version variants. */
 const ts7FixturesDir = join(import.meta.dirname, "ts7Fixtures");
+/** Gratos's Effect-aware compiler fixtures (not vendored): Effect.Effect, Stream.Stream, codegen markers. */
+const effectFixturesDir = join(import.meta.dirname, "effectFixtures");
 
 /**
  * The compiler options every fixture program gets, set explicitly instead of each TypeScript's
@@ -280,6 +282,15 @@ defineFixtureSuite({
   ignoreFilePattern: /^README\.md$/,
   skipReason: (code, fileName) => tsVersionSkipReason(code) ?? variantSkipReason(fileName),
   transformer: schemaFixtureTransformer(ts7FixturesDir),
+});
+
+defineFixtureSuite({
+  name: "effectFixtures",
+  fixturesDir: effectFixturesDir,
+  testFilePattern: /\.ts$/,
+  ignoreFilePattern: /^README\.md$/,
+  skipReason: tsVersionSkipReason,
+  transformer: schemaFixtureTransformer(effectFixturesDir),
 });
 
 defineFixtureSuite({

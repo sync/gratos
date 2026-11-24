@@ -14,7 +14,7 @@ import type { Node } from "typescript/unstable/ast";
 import type { Project } from "typescript/unstable/sync";
 
 import { anyOpenProject } from "./program.ts";
-import { defaultSession, defaultSessionList, openProject } from "./session.ts";
+import { defaultSession, openProject, openSessionList } from "./session.ts";
 
 /** TypeScript 7's printer failed on a node the codegen built: a bug, not a user error. */
 export class PrintNodeDefect extends Data.TaggedError("PrintNodeDefect")<{
@@ -22,9 +22,12 @@ export class PrintNodeDefect extends Data.TaggedError("PrintNodeDefect")<{
   readonly cause: unknown;
 }> {}
 
-/** printNode is an RPC on an open project; reuse the most recent one, or open an empty one. */
+/**
+ * printNode is an RPC on an open project; reuse one on any open session (a default one, or one
+ * the Effect shell scoped to a generate() call), or open an empty one.
+ */
 const printingProject = (): Project => {
-  const open = anyOpenProject(defaultSessionList());
+  const open = anyOpenProject(openSessionList());
   if (open !== undefined) {
     return open;
   }

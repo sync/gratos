@@ -10,6 +10,12 @@ import { nullThrows } from "../utils/helpers.ts";
 import { type ResolverArgument, type ResolverDefinition, type Metadata } from "../metadata.ts";
 import TSAstBuilder from "./TSAstBuilder.ts";
 import { type ExportDefinition } from "../GraphQLAstExtensions.ts";
+import {
+  alwaysResolveEffect,
+  optionalMethodCall,
+  alwaysResolveMethods,
+  isEffectSemanticNonNull,
+} from "../../effect/codegen.ts";
 
 const RESOLVER_ARGS = ["source", "args", "context", "info"] as const;
 
@@ -35,9 +41,13 @@ export default class ResolverCodegen {
     methodName: string,
     parentTypeName: string,
     sourceExport: ExportDefinition | null,
+    field?: GraphQLField<unknown, unknown>,
   ): ts.MethodDeclaration | null {
     const { resolver } = this._resolvers.types[parentTypeName][fieldName];
-    if (this.isDefaultResolverSignature(fieldName, resolver)) {
+    if (
+      this.isDefaultResolverSignature(fieldName, resolver) &&
+      !alwaysResolveEffect(field)
+    ) {
       return null;
     }
 
@@ -82,12 +92,20 @@ export default class ResolverCodegen {
           }),
           [
             F.createReturnStatement(
-              F.createCallExpression(
+              (optionalMethodCall(field)
+                ? (callee: ts.Expression, args: ts.Expression[]) =>
+                    F.createCallChain(
+                      callee,
+                      F.createToken(ts.SyntaxKind.QuestionDotToken),
+                      [],
+                      args,
+                    )
+                : (callee: ts.Expression, args: ts.Expression[]) =>
+                    F.createCallExpression(callee, [], args))(
                 F.createPropertyAccessExpression(
                   F.createIdentifier("source"),
                   F.createIdentifier(resolver.name ?? fieldName),
                 ),
-                [],
                 args.map((arg) => {
                   return this.resolverParam(arg);
                 }),
@@ -185,6 +203,9 @@ export default class ResolverCodegen {
       case "property":
         return signature.name == null || fieldName === signature.name;
       case "method":
+        if (alwaysResolveMethods()) {
+          return false;
+        }
         if (signature.name != null && fieldName !== signature.name) {
           return false;
         }
@@ -264,9 +285,10 @@ export default class ResolverCodegen {
     field: GraphQLField<unknown, unknown>,
     method_: ts.MethodDeclaration | null,
     methodName: string,
+    subscriptionEvent: boolean = false,
   ): ts.MethodDeclaration | null {
     const semanticNonNull = fieldDirective(field, SEMANTIC_NON_NULL_DIRECTIVE);
-    if (semanticNonNull == null) {
+    if (semanticNonNull == null || isEffectSemanticNonNull(field, subscriptionEvent)) {
       return method_;
     }
 

@@ -49,7 +49,10 @@ export function getSchema(config: SchemaConfig): GraphQLSchema {
             return {
                 hello: {
                     name: "hello",
-                    type: MyStringType
+                    type: MyStringType,
+                    resolve(source) {
+                        return source.hello();
+                    }
                 }
             };
         }

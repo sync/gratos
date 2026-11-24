@@ -1,0 +1,18 @@
+"""An instant, serialized as an ISO 8601 string."""
+scalar DateTime
+
+type Order {
+  customer: User
+  id: String
+  quantity: Int
+}
+
+type Query {
+  orders: [Order!]
+}
+
+type User {
+  id: ID
+  joinedAt: DateTime
+  name: String
+}

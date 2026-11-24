@@ -74,7 +74,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 name: {
                     name: "name",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.name();
+                    }
                 }
             };
         }

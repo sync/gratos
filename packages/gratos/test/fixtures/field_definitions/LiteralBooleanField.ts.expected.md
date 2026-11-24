@@ -33,7 +33,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 hello: {
                     name: "hello",
-                    type: GraphQLBoolean
+                    type: GraphQLBoolean,
+                    resolve(source) {
+                        return source.hello();
+                    }
                 }
             };
         }

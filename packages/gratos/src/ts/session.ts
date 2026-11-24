@@ -5,11 +5,12 @@
 // files whose realpath is under `node_modules` are served as `export {};`, except TypeScript's
 // own bundled lib files. `package.json` and other non-code files are always read in full, and so
 // are workspace packages, whose realpath is outside `node_modules`.
+import type { ChildProcess } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, sep } from "node:path";
 
-import { Effect, Exit, Scope } from "effect";
+import { Effect, Exit, Predicate, Scope } from "effect";
 import { API } from "typescript/unstable/sync";
 import type { Project, Snapshot } from "typescript/unstable/sync";
 
@@ -86,6 +87,12 @@ export const readFileOverride = (
   return BLANK_SOURCE;
 };
 
+/** Every session not yet closed, in the order they were opened: default and scoped ones. */
+const liveSessions = new Set<Session>();
+
+/** Every session not yet closed, oldest first, for the printer, which needs any open project. */
+export const openSessionList = (): ReadonlyArray<Session> => [...liveSessions];
+
 const openSession = (options: SessionOptions): Session => {
   const state = {
     blankThirdParty: options.blankThirdParty,
@@ -97,12 +104,40 @@ const openSession = (options: SessionOptions): Session => {
     cwd: process.cwd(),
     fs: { readFile: (fileName) => readFileOverride(state, fileName) },
   });
-  return { ...state, api, current: null };
+  const session: Session = { ...state, api, current: null };
+  liveSessions.add(session);
+  return session;
+};
+
+/** A Node child process, recognized by the methods this module and its tests call on it. */
+const isChildProcess = (value: unknown): value is ChildProcess =>
+  Predicate.hasProperty(value, "kill") &&
+  Predicate.isFunction(value.kill) &&
+  Predicate.hasProperty(value, "once") &&
+  Predicate.isFunction(value.once);
+
+/**
+ * The tsgo child process behind an API (`api.client.channel.child` in TypeScript 7.0.2). Exported
+ * for the test that proves closing a session reaches it.
+ * @internal
+ */
+export const tsgoProcess = (api: unknown): ChildProcess | undefined => {
+  const client: unknown = Predicate.hasProperty(api, "client") ? api.client : undefined;
+  const channel = Predicate.hasProperty(client, "channel") ? client.channel : undefined;
+  const child = Predicate.hasProperty(channel, "child") ? channel.child : undefined;
+  return isChildProcess(child) ? child : undefined;
 };
 
 const closeSession = (session: Session): void => {
+  liveSessions.delete(session);
+  // Older snapshots are disposed when replaced (openProject), so after this one the API has
+  // nothing left to release and close() sends no request.
   session.current?.snapshot.dispose();
   session.current = null;
+  // API.close() closes tsgo's stdin and then sends SIGTERM. tsgo shuts down on either, and can
+  // log "context canceled" to the stderr it shares with this process while it does, racing the
+  // CLI's own output (seen on Linux). Nothing is left to say to it, so stop it outright first.
+  tsgoProcess(session.api)?.kill("SIGKILL");
   session.api.close();
 };
 

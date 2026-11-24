@@ -49,6 +49,9 @@ export function getSchema(): GraphQLSchema {
                                 "there"
                             ]
                         }
+                    },
+                    resolve(source, args) {
+                        return source.someField1(args);
                     }
                 }
             };

@@ -71,6 +71,9 @@ export function getSchema(): GraphQLSchema {
                         someArg: {
                             type: SomeInputType
                         }
+                    },
+                    resolve(source, args) {
+                        return source.someField(args);
                     }
                 }
             };

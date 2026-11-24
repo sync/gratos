@@ -445,7 +445,7 @@ export function graphQLTagNameHasWhitespace(tagName: string): string {
 }
 
 export function subscriptionFieldNotAsyncIterable() {
-  return "Expected fields on `Subscription` to return an `AsyncIterable`. Fields on `Subscription` model a subscription, which is a stream of events. Grats expects fields on `Subscription` to return an `AsyncIterable` which can be used to model this stream.";
+  return "Expected fields on `Subscription` to return an `AsyncIterable` or an Effect `Stream.Stream`. Fields on `Subscription` model a subscription, which is a stream of events. Grats expects fields on `Subscription` to return an `AsyncIterable` or a `Stream.Stream` which can be used to model this stream.";
 }
 
 export function operationTypeNotUnknown() {

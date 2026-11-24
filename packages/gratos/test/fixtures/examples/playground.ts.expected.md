@@ -74,6 +74,9 @@ export function getSchema(): GraphQLSchema {
                         salutation: {
                             type: new GraphQLNonNull(GraphQLString)
                         }
+                    },
+                    resolve(source, args) {
+                        return source.greeting(args);
                     }
                 },
                 name: {
@@ -96,12 +99,18 @@ export function getSchema(): GraphQLSchema {
                 },
                 me: {
                     name: "me",
-                    type: UserType
+                    type: UserType,
+                    resolve(source) {
+                        return source.me();
+                    }
                 },
                 viewer: {
                     deprecationReason: "Please use `me` instead.",
                     name: "viewer",
-                    type: UserType
+                    type: UserType,
+                    resolve(source) {
+                        return source.viewer();
+                    }
                 }
             };
         }

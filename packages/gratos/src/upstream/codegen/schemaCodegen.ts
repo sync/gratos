@@ -36,6 +36,7 @@ import ResolverCodegen from "./resolverCodegen.ts";
 import { type Metadata } from "../metadata.ts";
 import { type ConstDirectiveNode } from "graphql/language/index.js";
 import { type ExportDefinition } from "../GraphQLAstExtensions.ts";
+import { gratosFieldMarkers, type GratosMarkers } from "../../effect/codegen.ts";
 
 // These directives will be added to the schema by default, so we don't need to
 // include them in the generated schema.
@@ -582,11 +583,9 @@ class Codegen {
   // attached to schema constructs.
   extensions(
     directiveNodes: readonly ConstDirectiveNode[] | undefined,
+    gratos: GratosMarkers | null = null,
   ): ts.PropertyAssignment | null {
-    if (directiveNodes == null) {
-      return null;
-    }
-    const directivesSansBuiltin = directiveNodes.filter((directive) => {
+    const directivesSansBuiltin = (directiveNodes ?? []).filter((directive) => {
       // These directives have first-class ways of being represented in the
       // `GraphQLSchema` so we omit them from the extensions data.
       return (
@@ -594,7 +593,7 @@ class Codegen {
         directive.name.value !== "semanticNonNull"
       );
     });
-    if (directivesSansBuiltin.length === 0) {
+    if (directivesSansBuiltin.length === 0 && gratos == null) {
       return null;
     }
 
@@ -616,7 +615,10 @@ class Codegen {
 
     return F.createPropertyAssignment(
       "extensions",
-      this.ts.json({ grats: { directives } }),
+      this.ts.json({
+        ...(directives.length > 0 ? { grats: { directives } } : {}),
+        ...(gratos == null ? {} : { gratos: { ...gratos } }),
+      }),
     );
   }
 
@@ -634,7 +636,17 @@ class Codegen {
       field.args.length
         ? F.createPropertyAssignment("args", this.argMap(field.args))
         : null,
-      this.extensions(nullThrows(field.astNode).directives),
+      this.extensions(
+        nullThrows(field.astNode).directives,
+        isInterface
+          ? null
+          : gratosFieldMarkers(
+              field,
+              this.resolvers._resolvers.types[parentTypeName]?.[field.name]
+                ?.resolver,
+              parentTypeName === "Subscription",
+            ),
+      ),
     ];
 
     if (!isInterface) {
@@ -657,6 +669,7 @@ class Codegen {
         "resolve",
         parentTypeName,
         sourceExport,
+        field,
       );
       return [
         this.resolvers.maybeApplySemanticNullRuntimeCheck(
@@ -683,6 +696,7 @@ class Codegen {
           [F.createReturnStatement(F.createIdentifier("payload"))],
         ),
         "resolve",
+        true,
       ),
     ];
   }

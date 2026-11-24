@@ -35,7 +35,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 ratio: {
                     name: "ratio",
-                    type: GraphQLFloat
+                    type: GraphQLFloat,
+                    resolve(source) {
+                        return source.ratio();
+                    }
                 }
             };
         }
