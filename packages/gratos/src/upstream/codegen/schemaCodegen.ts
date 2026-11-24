@@ -27,7 +27,7 @@ import {
   valueFromASTUntyped,
   coerceInputLiteral,
 } from "graphql";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { extend, nullThrows } from "../utils/helpers.ts";
 import { type GratsConfig } from "../gratsConfig.ts";
 import { naturalCompare } from "../utils/naturalCompare.ts";

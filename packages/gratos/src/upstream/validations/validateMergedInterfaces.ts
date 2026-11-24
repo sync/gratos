@@ -1,4 +1,4 @@
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import * as E from "../Errors.ts";
 import {
   type DiagnosticsWithoutLocationResult,

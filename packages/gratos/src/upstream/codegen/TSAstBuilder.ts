@@ -1,4 +1,4 @@
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { isNonNull } from "../utils/helpers.ts";
 import * as path from "path";
 import { resolveRelativePath } from "../gratsRoot.ts";

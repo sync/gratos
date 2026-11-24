@@ -1,4 +1,5 @@
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
+import { getChildren } from "../ts/compat.ts";
 import { rangeErr } from "./utils/DiagnosticError.ts";
 import * as E from "./Errors.ts";
 import {
@@ -146,7 +147,7 @@ function forEachToken(
     } else if (node.kind === ts.SyntaxKind.JSDocComment) {
       // Ignore for support of TS < 4.7
     } else {
-      const children = node.getChildren(sourceFile);
+      const children = getChildren(node, sourceFile);
       if (children.length === 1) {
         node = children[0];
         continue;

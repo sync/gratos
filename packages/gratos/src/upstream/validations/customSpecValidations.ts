@@ -1,7 +1,7 @@
 import { type DocumentNode, Kind } from "graphql";
 import { type DiagnosticsResult, gqlErr } from "../utils/DiagnosticError.ts";
 import { ok } from "../utils/Result.ts";
-import { type DiagnosticWithLocation } from "typescript-baseline";
+import { type DiagnosticWithLocation } from "#typescript";
 import * as E from "../Errors.ts";
 
 /**

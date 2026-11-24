@@ -14,7 +14,7 @@ import {
   printSchema,
   specifiedScalarTypes,
 } from "graphql";
-import { createCompilerHost, version as tsVersion } from "typescript-baseline";
+import { createCompilerHost, version as tsVersion } from "#typescript";
 import { vi } from "vitest";
 
 import { codegen } from "../src/upstream/codegen/schemaCodegen.ts";

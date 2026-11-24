@@ -1,7 +1,7 @@
 import { type DocumentNode, Kind, visit } from "graphql";
 import { type DiagnosticsResult, gqlErr } from "../utils/DiagnosticError.ts";
 import { err, ok } from "../utils/Result.ts";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import * as E from "../Errors.ts";
 import {
   addSemanticNonNullDirective,

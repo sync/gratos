@@ -1,5 +1,5 @@
 import * as E from "../Errors.ts";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { type DefinitionNode, Kind, type ObjectTypeExtensionNode } from "graphql";
 import { TypeContext } from "../TypeContext.ts";
 import {

@@ -15,7 +15,7 @@ import {
   printExecutableSchema,
   printEnumsModule,
 } from "./printSchema.ts";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import {
   locationlessErr,
   ReportableDiagnostics,

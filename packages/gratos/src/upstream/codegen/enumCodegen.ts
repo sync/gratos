@@ -1,5 +1,5 @@
 import { GraphQLEnumType, GraphQLSchema, isEnumType } from "graphql";
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { type GratsConfig } from "../gratsConfig.ts";
 import { nullThrows } from "../utils/helpers.ts";
 import TSAstBuilder from "./TSAstBuilder.ts";

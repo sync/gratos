@@ -1,4 +1,4 @@
-import * as ts from "typescript-baseline";
+import * as ts from "#typescript";
 import { type ParsedCommandLineGrats } from "../gratsConfig.ts";
 import { type ExtractionSnapshot, extract } from "../Extractor.ts";
 import { type DiagnosticsWithoutLocationResult } from "../utils/DiagnosticError.ts";
