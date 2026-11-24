@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CLIENT_CLOSED_REQUEST,
+  gqlError,
   createServer,
   mutationOf,
   readOnly,
@@ -342,6 +343,36 @@ describe("a started mutation that fails after the client left", () => {
   });
 });
 
+describe("a mutation that fails before dispatch after the client left", () => {
+  it("never started, so it is a cancellation: 499 and nothing reported", async () => {
+    const context = gate();
+    const log = vi.fn();
+    const server = createServer({
+      schema: basicSchema(),
+      logger: silent,
+      context: () => context.promise.then(() => ({})),
+      plugins: [
+        reportErrors(log),
+        {
+          onExecute: () => {
+            throw new Error("hook failed");
+          },
+        },
+      ],
+    });
+    const client = new AbortController();
+    const request = post({ query: "mutation { bump }" }, { signal: client.signal });
+    const pending = server.handle(request);
+    await flush();
+    client.abort();
+    context.resolve();
+    const response = await pending;
+    expect(response.status).toBe(CLIENT_CLOSED_REQUEST);
+    expect(log).not.toHaveBeenCalled();
+    expect(await mutationOf(request)?.started).toBe(false);
+  });
+});
+
 describe("completion of a disconnected mutation", () => {
   it("settled and the drain wait until onResult has seen the result", async () => {
     const hold = gate();
@@ -549,6 +580,45 @@ describe("control.drain", () => {
       expect(sent.status).toBe(503);
       expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
       expect(await mutationOf(request)?.started).toBe(false);
+    });
+
+    it("a drain started by an onExecute hook wins over a later hook's refusal", async () => {
+      const server = createServer({
+        schema: basicSchema(),
+        plugins: [
+          {
+            onExecute: () => {
+              void server.control.drain();
+              return undefined;
+            },
+          },
+          readOnly(),
+        ],
+      });
+      const request = post({ query: "mutation { bump }" });
+      const sent = await send(server, request);
+      expect(sent.status).toBe(503);
+      expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
+      expect(await mutationOf(request)?.started).toBe(false);
+    });
+
+    it("a context refusal that completes during the drain is a 503", async () => {
+      const context = gate();
+      const server = createServer({
+        schema: basicSchema(),
+        context: () =>
+          context.promise.then(() => {
+            throw gqlError("Not allowed", 403);
+          }),
+      });
+      const request = post({ query: "mutation { bump }" });
+      const pending = send(server, request);
+      await flush();
+      await server.control.drain();
+      context.resolve();
+      const sent = await pending;
+      expect(sent.status).toBe(503);
+      expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
     });
 
     it("drain after the gate: both fields commit before the drain resolves", async () => {

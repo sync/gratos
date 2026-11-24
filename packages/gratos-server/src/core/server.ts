@@ -121,6 +121,8 @@ type Outcome =
 interface Dispatched {
   readonly _tag: "dispatched";
   readonly outcome: Outcome;
+  /** Whether a mutation's executor was called (false when it failed before dispatch). */
+  readonly mutationStarted: boolean;
   /** Publishes a mutation's completion; a no-op for other operations. */
   readonly finish: () => void;
 }
@@ -250,6 +252,13 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
       run.controller.abort();
     });
 
+  /**
+   * A refusal from a hook (context or onExecute). A mutation that has not started is refused with
+   * 503 SERVER_DRAINING instead once the drain has begun, whichever refusal came first.
+   */
+  const refuse = (run: Run, error: GraphQLError): Response =>
+    respond(run, errorResult([run.mutation !== undefined && draining ? serverDraining() : error]));
+
   const requestError = (run: Run, message: string, status: number): Response =>
     respond(run, errorResult([new GraphQLError(message)]), status);
 
@@ -342,7 +351,7 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
       return { _tag: "context", ctx };
     } catch (error) {
       if (error instanceof GraphQLError) {
-        return answer(respond(run, errorResult([error])));
+        return answer(refuse(run, error));
       }
       logger.error("gratos-server: the context phase failed.", error);
       return answer(respond(run, errorResult([unexpected(error)])));
@@ -372,10 +381,15 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
       }
     } catch (error) {
       if (error instanceof GraphQLError) {
-        return answer(respond(run, errorResult([error])));
+        return answer(refuse(run, error));
       }
       // Any other throw is a failure of the request, before anything started.
-      return { _tag: "dispatched", outcome: { ok: false, error }, finish: noop };
+      return {
+        _tag: "dispatched",
+        outcome: { ok: false, error },
+        mutationStarted: false,
+        finish: noop,
+      };
     }
     // The first claim runs; its `next` is the executor that would have run without it (the next
     // claim in list order, else the default).
@@ -407,10 +421,16 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
         resolve(undefined);
       };
     }
+    const mutationStarted = mutation !== undefined;
     try {
-      return { _tag: "dispatched", outcome: { ok: true, result: execute() }, finish };
+      return {
+        _tag: "dispatched",
+        outcome: { ok: true, result: execute() },
+        mutationStarted,
+        finish,
+      };
     } catch (error) {
-      return { _tag: "dispatched", outcome: { ok: false, error }, finish };
+      return { _tag: "dispatched", outcome: { ok: false, error }, mutationStarted, finish };
     }
   };
 
@@ -419,7 +439,7 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
     run: Run,
     outcome: Outcome,
     ctx: Ctx,
-    isMutation: boolean,
+    mutationStarted: boolean,
   ): Promise<Response> => {
     let result: ExecutorResult | undefined;
     let failure: { readonly error: unknown } | undefined;
@@ -434,12 +454,13 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
     }
     if (failure !== undefined || result === undefined) {
       const error = failure?.error;
-      // Only an aborted execution takes the cancellation path. A mutation never gets the signal,
-      // so its failure is a real one (a write that failed), processed and reported as usual even
-      // when the client has left.
+      // Only an aborted execution takes the cancellation path. A started mutation never gets the
+      // signal, so its failure is a real one (a write that failed), processed and reported as
+      // usual even when the client has left. A mutation that failed before dispatch never
+      // started, so like a query it is a cancellation once the client has left.
       if (
         error instanceof AbortedGraphQLExecutionError ||
-        (!isMutation && run.controller.signal.aborted)
+        (!mutationStarted && run.controller.signal.aborted)
       ) {
         // The client left: nothing is reported, and the terminal path (onResponse) still runs.
         return new Response(null, { status: CLIENT_CLOSED_REQUEST });
@@ -538,7 +559,7 @@ export const createServer = <Ctx = undefined>(options: ServerOptions<Ctx>): Serv
       return dispatched.response;
     }
     try {
-      return await encode(run, dispatched.outcome, ctx, isMutation);
+      return await encode(run, dispatched.outcome, ctx, dispatched.mutationStarted);
     } finally {
       // A mutation's completion (mutationOf(req).settled, the drain) is published only once the
       // result hooks have seen its result, never on body consumption.
