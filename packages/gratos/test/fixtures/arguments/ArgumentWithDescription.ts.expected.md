@@ -45,6 +45,9 @@ export function getSchema(): GraphQLSchema {
                             description: "The greeting to use.",
                             type: new GraphQLNonNull(GraphQLString)
                         }
+                    },
+                    resolve(source, args) {
+                        return source.hello(args);
                     }
                 }
             };

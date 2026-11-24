@@ -36,7 +36,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 hello: {
                     name: "hello",
-                    type: new GraphQLNonNull(GraphQLString)
+                    type: new GraphQLNonNull(GraphQLString),
+                    resolve(source) {
+                        return source.hello();
+                    }
                 }
             };
         }

@@ -52,11 +52,17 @@ export function getSchema(): GraphQLSchema {
             return {
                 friends: {
                     name: "friends",
-                    type: new GraphQLList(new GraphQLNonNull(UserType))
+                    type: new GraphQLList(new GraphQLNonNull(UserType)),
+                    resolve(source) {
+                        return source.friends();
+                    }
                 },
                 name: {
                     name: "name",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.name();
+                    }
                 }
             };
         }
@@ -67,7 +73,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 me: {
                     name: "me",
-                    type: UserType
+                    type: UserType,
+                    resolve(source) {
+                        return source.me();
+                    }
                 }
             };
         }

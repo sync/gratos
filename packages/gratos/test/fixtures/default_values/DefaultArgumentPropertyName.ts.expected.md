@@ -39,6 +39,9 @@ export function getSchema(): GraphQLSchema {
                             type: new GraphQLNonNull(GraphQLBoolean),
                             defaultValue: false
                         }
+                    },
+                    resolve(source, args) {
+                        return source.hello(args);
                     }
                 }
             };

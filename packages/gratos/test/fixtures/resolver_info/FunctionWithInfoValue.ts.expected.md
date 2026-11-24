@@ -37,6 +37,11 @@ export function getSchema(): GraphQLSchema {
                 greetz: {
                     name: "greetz",
                     type: GraphQLString,
+                    extensions: {
+                        gratos: {
+                            jit: false
+                        }
+                    },
                     resolve(source, _args, _context, info) {
                         return queryGreetzResolver(source, info);
                     }

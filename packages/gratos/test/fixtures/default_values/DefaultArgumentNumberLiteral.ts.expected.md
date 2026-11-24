@@ -46,6 +46,9 @@ export function getSchema(): GraphQLSchema {
                             type: new GraphQLNonNull(GraphQLFloat),
                             defaultValue: 10
                         }
+                    },
+                    resolve(source, args) {
+                        return source.floatField(args);
                     }
                 },
                 intField: {
@@ -56,6 +59,9 @@ export function getSchema(): GraphQLSchema {
                             type: new GraphQLNonNull(GraphQLInt),
                             defaultValue: 10
                         }
+                    },
+                    resolve(source, args) {
+                        return source.intField(args);
                     }
                 }
             };

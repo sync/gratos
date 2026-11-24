@@ -37,7 +37,10 @@ export function getSchema(): GraphQLSchema {
                 hello: {
                     deprecationReason: "Use something else.",
                     name: "hello",
-                    type: GraphQLString
+                    type: GraphQLString,
+                    resolve(source) {
+                        return source.hello();
+                    }
                 }
             };
         }

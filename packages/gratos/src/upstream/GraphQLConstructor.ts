@@ -42,6 +42,7 @@ import {
   type ResolverSignature,
 } from "./resolverSignature.ts";
 import { type ExportDefinition } from "./GraphQLAstExtensions.ts";
+import { returnsEffect } from "../effect/wrappers.ts";
 
 export class GraphQLConstructor {
   /* Top Level Types */
@@ -182,6 +183,7 @@ export class GraphQLConstructor {
       directives: this._optionalList(directives),
       resolver,
       killsParentOnException: killsParentOnException ?? undefined,
+      ...(returnsEffect(node) ? { returnsEffect: true } : {}),
     };
   }
 

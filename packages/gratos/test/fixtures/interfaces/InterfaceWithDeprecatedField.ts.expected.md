@@ -82,7 +82,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 me: {
                     name: "me",
-                    type: UserType
+                    type: UserType,
+                    resolve(source) {
+                        return source.me();
+                    }
                 }
             };
         }

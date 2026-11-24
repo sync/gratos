@@ -10,6 +10,7 @@ import { nullThrows } from "../utils/helpers.ts";
 import { type ResolverArgument, type ResolverDefinition, type Metadata } from "../metadata.ts";
 import TSAstBuilder from "./TSAstBuilder.ts";
 import { type ExportDefinition } from "../GraphQLAstExtensions.ts";
+import { alwaysResolveMethods, isEffectSemanticNonNull } from "../../effect/codegen.ts";
 
 const RESOLVER_ARGS = ["source", "args", "context", "info"] as const;
 
@@ -185,6 +186,9 @@ export default class ResolverCodegen {
       case "property":
         return signature.name == null || fieldName === signature.name;
       case "method":
+        if (alwaysResolveMethods()) {
+          return false;
+        }
         if (signature.name != null && fieldName !== signature.name) {
           return false;
         }
@@ -266,7 +270,7 @@ export default class ResolverCodegen {
     methodName: string,
   ): ts.MethodDeclaration | null {
     const semanticNonNull = fieldDirective(field, SEMANTIC_NON_NULL_DIRECTIVE);
-    if (semanticNonNull == null) {
+    if (semanticNonNull == null || isEffectSemanticNonNull(field)) {
       return method_;
     }
 

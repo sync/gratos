@@ -44,6 +44,9 @@ export function getSchema(): GraphQLSchema {
                             deprecationReason: "Not used anymore",
                             type: GraphQLString
                         }
+                    },
+                    resolve(source, args) {
+                        return source.hello(args);
                     }
                 }
             };

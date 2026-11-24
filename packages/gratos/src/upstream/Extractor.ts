@@ -46,6 +46,7 @@ import {
 } from "./resolverSignature.ts";
 import { Parser } from "graphql/language/parser.js";
 import { type ExportDefinition } from "./GraphQLAstExtensions.ts";
+import { effectTypeReference, rejectEffectDerivedContext } from "../effect/extract.ts";
 
 export const LIBRARY_IMPORT_NAME = "@dblechoc/gratos";
 export const LIBRARY_NAME = "Grats";
@@ -392,6 +393,7 @@ class Extractor {
     if (returnType == null) {
       return this.report(node, E.missingReturnTypeForDerivedResolver());
     }
+    if (rejectEffectDerivedContext(this, returnType)) return null;
 
     // Check if the return type is Promise<T> and unwrap it
     const unwrapped = this.maybeUnwrapPromiseType(returnType);
@@ -2541,6 +2543,8 @@ class Extractor {
     node: ts.TypeReferenceNode,
     ctx: FieldTypeContext,
   ): TypeNode | null {
+    const effectType = effectTypeReference(this, node, ctx);
+    if (effectType !== undefined) return effectType;
     const identifier = this.expectNameIdentifier(node.typeName);
     if (identifier == null) return null;
 

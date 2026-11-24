@@ -47,6 +47,9 @@ export function getSchema(): GraphQLSchema {
                         greeting: {
                             type: GraphQLString
                         }
+                    },
+                    resolve(source, args) {
+                        return source.hello1(args);
                     }
                 },
                 hello2: {
@@ -56,6 +59,9 @@ export function getSchema(): GraphQLSchema {
                         greeting: {
                             type: GraphQLString
                         }
+                    },
+                    resolve(source, args) {
+                        return source.hello2(args);
                     }
                 }
             };

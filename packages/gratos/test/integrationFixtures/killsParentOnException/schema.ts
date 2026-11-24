@@ -7,7 +7,10 @@ export function getSchema(): GraphQLSchema {
             return {
                 alwaysThrowsKillsParentOnException: {
                     name: "alwaysThrowsKillsParentOnException",
-                    type: new GraphQLNonNull(GraphQLString)
+                    type: new GraphQLNonNull(GraphQLString),
+                    resolve(source) {
+                        return source.alwaysThrowsKillsParentOnException();
+                    }
                 }
             };
         }

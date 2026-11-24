@@ -58,6 +58,9 @@ export function getSchema(): GraphQLSchema {
                         input: {
                             type: new GraphQLNonNull(MyInputTypeType)
                         }
+                    },
+                    resolve(source, args) {
+                        return source.myField(args);
                     }
                 }
             };

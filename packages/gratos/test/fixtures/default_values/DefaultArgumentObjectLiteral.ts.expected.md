@@ -74,6 +74,9 @@ export function getSchema(): GraphQLSchema {
                                 offset: 100
                             }
                         }
+                    },
+                    resolve(source, args) {
+                        return source.someField1(args);
                     }
                 }
             };

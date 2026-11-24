@@ -52,19 +52,31 @@ export function getSchema(): GraphQLSchema {
             return {
                 greetings: {
                     name: "greetings",
-                    type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString)))
+                    type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))),
+                    resolve(source) {
+                        return source.greetings();
+                    }
                 },
                 greetingsMaybe: {
                     name: "greetingsMaybe",
-                    type: new GraphQLNonNull(new GraphQLList(GraphQLString))
+                    type: new GraphQLNonNull(new GraphQLList(GraphQLString)),
+                    resolve(source) {
+                        return source.greetingsMaybe();
+                    }
                 },
                 maybeGreetings: {
                     name: "maybeGreetings",
-                    type: new GraphQLList(new GraphQLNonNull(GraphQLString))
+                    type: new GraphQLList(new GraphQLNonNull(GraphQLString)),
+                    resolve(source) {
+                        return source.maybeGreetings();
+                    }
                 },
                 maybeGreetingsMaybe: {
                     name: "maybeGreetingsMaybe",
-                    type: new GraphQLList(GraphQLString)
+                    type: new GraphQLList(GraphQLString),
+                    resolve(source) {
+                        return source.maybeGreetingsMaybe();
+                    }
                 }
             };
         }

@@ -18,6 +18,7 @@ import { err, ok } from "./utils/Result.ts";
 import * as E from "./Errors.ts";
 import { type ExtractionSnapshot } from "./Extractor.ts";
 import { type ResolverArgument } from "./resolverSignature.ts";
+import { bareEffectHint } from "../effect/bareEffect.ts";
 
 export const UNRESOLVED_REFERENCE_NAME = `__UNRESOLVED_REFERENCE__`;
 
@@ -302,6 +303,10 @@ export class TypeContext implements ITypeContext, ITypeContextForResolveTypes {
   tsDeclarationForTsName(
     node: ts.EntityName,
   ): DiagnosticResult<ts.Declaration> {
+    const effectHint = bareEffectHint(this.checker, node);
+    if (effectHint != null) {
+      return err(tsErr(node, effectHint));
+    }
     const declaration = this.maybeTsDeclarationForTsName(node);
     if (!declaration) {
       return err(tsErr(node, E.unresolvedTypeReference()));

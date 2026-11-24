@@ -54,6 +54,9 @@ export function getSchema(config: SchemaConfig): GraphQLSchema {
                         greeting: {
                             type: new GraphQLNonNull(MyStringType)
                         }
+                    },
+                    resolve(source, args) {
+                        return source.hello(args);
                     }
                 }
             };

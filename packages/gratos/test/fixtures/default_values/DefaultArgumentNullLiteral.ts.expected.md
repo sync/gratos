@@ -46,6 +46,9 @@ export function getSchema(): GraphQLSchema {
                             type: GraphQLString,
                             defaultValue: null
                         }
+                    },
+                    resolve(source, args) {
+                        return source.someField1(args);
                     }
                 },
                 someField2: {
@@ -56,6 +59,9 @@ export function getSchema(): GraphQLSchema {
                             type: GraphQLString,
                             defaultValue: null
                         }
+                    },
+                    resolve(source, args) {
+                        return source.someField2(args);
                     }
                 }
             };

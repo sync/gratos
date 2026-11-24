@@ -74,7 +74,7 @@ type User implements IPerson {
 ### TypeScript
 
 ```ts
-import { GraphQLSchema, GraphQLDirective, DirectiveLocation, GraphQLList, GraphQLInt, specifiedDirectives, GraphQLInterfaceType, GraphQLString, GraphQLObjectType, defaultFieldResolver } from "graphql";
+import { GraphQLSchema, GraphQLDirective, DirectiveLocation, GraphQLList, GraphQLInt, specifiedDirectives, GraphQLInterfaceType, GraphQLString, GraphQLObjectType } from "graphql";
 async function assertNonNull<T>(value: T | Promise<T>): Promise<T> {
     const awaited = await value;
     if (awaited == null)
@@ -100,8 +100,8 @@ export function getSchema(): GraphQLSchema {
                 name: {
                     name: "name",
                     type: GraphQLString,
-                    resolve(source, args, context, info) {
-                        return assertNonNull(defaultFieldResolver(source, args, context, info));
+                    resolve(source) {
+                        return assertNonNull(source.name());
                     }
                 }
             };
