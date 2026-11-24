@@ -45,6 +45,9 @@ const tsconfig = (
 const sourceFileNames = (program: FacadeProgram): Array<string> =>
   program.getSourceFiles().map((sourceFile) => sourceFile.fileName);
 
+const optionsDiagnosticCodes = (program: FacadeProgram): Array<number> =>
+  program.getOptionsDiagnostics().map((diagnostic) => diagnostic.code);
+
 const format = (diagnostics: ReadonlyArray<Diagnostic>, directory: string): string =>
   stripVTControlCharacters(
     formatDiagnosticsWithColorAndContext(diagnostics, {
@@ -130,6 +133,51 @@ describe("createProgram with the options of a parsed config", () => {
       paths: { "@a/*": ["./src/a/*"], "@b/*": ["./src/b/*"] },
     });
     expect(program.getSemanticDiagnostics()).toEqual([]);
+  });
+  it("builds what the caller passed after the config was edited and parsed again", () => {
+    // TypeScript 5's createProgram honors its arguments; a later parse must not leak into them.
+    const directory = project({
+      "tsconfig.json": tsconfig(),
+      "a.ts": "export const f = (x) => x;\n",
+    });
+    const configPath = join(directory, "tsconfig.json");
+    const first = getParsedCommandLineOfConfigFile(configPath);
+    writeFileSync(configPath, tsconfig({ noImplicitAny: false }));
+    writeFileSync(join(directory, "b.ts"), "export const b = 1;\n");
+    getParsedCommandLineOfConfigFile(configPath);
+
+    const program = createProgram(first.fileNames, first.options);
+    expect(sourceFileNames(program).filter((name) => name.startsWith(directory))).toEqual([
+      join(directory, "a.ts"),
+    ]);
+    expect(program.getSemanticDiagnostics().map((diagnostic) => diagnostic.code)).toEqual([7006]);
+  });
+
+  it("keeps a wildcard alias substitution unnormalized until TypeScript expands it", () => {
+    const root = project({
+      // "@s/a/b" expands to ./lib/a/b/../x, which is ./lib/a/x. Normalizing first would turn
+      // the substitution into ./lib/x, a different file.
+      "nested/tsconfig.json": tsconfig({ paths: { "@s/*": ["./lib/*/../x"] } }),
+      "nested/lib/a/x.ts": "export const s = 1;\n",
+      "nested/src/main.ts": 'import { s } from "@s/a/b";\nexport const m = s;\n',
+    });
+    const parsed = getParsedCommandLineOfConfigFile(join(root, "nested", "tsconfig.json"));
+    expect(parsed.program.getSemanticDiagnostics()).toEqual([]);
+    // A clone is not the parsed object, so every option goes through the tsconfig conversion.
+    const program = createProgram(parsed.fileNames, { ...parsed.options });
+    expect(program.getSemanticDiagnostics()).toEqual([]);
+  });
+
+  it("still rejects a bare alias substitution without baseUrl when the options are changed", () => {
+    const root = project({
+      "nested/tsconfig.json": tsconfig({ paths: { "@s": ["src/shared"] } }),
+      "nested/src/shared.ts": "export const s = 1;\n",
+    });
+    const parsed = getParsedCommandLineOfConfigFile(join(root, "nested", "tsconfig.json"));
+    expect(optionsDiagnosticCodes(parsed.program)).toContain(5090);
+    expect(
+      optionsDiagnosticCodes(createProgram(parsed.fileNames, { ...parsed.options })),
+    ).toContain(5090);
   });
 });
 

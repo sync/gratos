@@ -7,7 +7,7 @@
 // explicit `files` and the given compiler options, served by the session's readFile callback,
 // and loads every file in full.
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { parse as parseJsonc } from "jsonc-parser";
 import type { ParseError } from "jsonc-parser";
@@ -327,17 +327,26 @@ const DROPPED_OPTIONS: ReadonlySet<string> = new Set([
  * there.
  */
 const absolutePaths = (paths: unknown, options: CompilerOptions): unknown => {
-  const base = options["baseUrl"] ?? options["pathsBasePath"];
+  const baseUrl = options["baseUrl"];
+  const base = baseUrl ?? options["pathsBasePath"];
   if (typeof base !== "string" || paths === null || typeof paths !== "object") {
     return paths;
   }
+  // Without baseUrl, TypeScript rejects a bare substitution (TS5090); keep it bare so it still does.
+  const isRebased = (substitution: string): boolean =>
+    !isAbsolute(substitution) &&
+    (baseUrl !== undefined || substitution.startsWith("./") || substitution.startsWith("../"));
+  // Prefix the base without normalizing: `*` must stay in place until TypeScript expands it,
+  // so `./src/*/../shared` cannot collapse to `./src/shared`.
+  const rebase = (substitution: string): string =>
+    base.endsWith("/") || base.endsWith(sep) ? `${base}${substitution}` : `${base}/${substitution}`;
   return Object.fromEntries(
     Object.entries(paths).map(([pattern, substitutions]: [string, unknown]) => [
       pattern,
       Array.isArray(substitutions)
         ? substitutions.map((substitution: unknown) =>
-            typeof substitution === "string" && !isAbsolute(substitution)
-              ? resolve(base, substitution)
+            typeof substitution === "string" && isRebased(substitution)
+              ? rebase(substitution)
               : substitution,
           )
         : substitutions,
@@ -403,7 +412,13 @@ const programForParsedConfig = (
   const sameOptions = JSON.stringify(options) === parsed.optionsJson;
   if (sameOptions && sameFileNames(rootNames, parsed.fileNames)) {
     if (session.current?.project !== parsed.program.project) {
-      parsed.program = makeProgram(session, openProject(session, configPath));
+      // The config may have changed on disk since it was parsed (a later parse restarts the
+      // session), so build exactly what the caller passed, as TypeScript 5 would.
+      parsed.program = openVirtualProgram(session, {
+        compilerOptions: toTsconfigOptions(options),
+        files: rootNames.map((fileName) => resolve(fileName)),
+        include: [],
+      });
     }
     return parsed.program;
   }
