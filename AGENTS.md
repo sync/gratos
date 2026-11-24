@@ -5,22 +5,30 @@ Gratos is an Effect-native reimplementation of [Grats](https://github.com/captba
 a plugin system and an Effect layer. The approved plan is `docs/plan.html`; it is the
 source of truth for scope, milestones and acceptance criteria.
 
+## Packages
+
+- `@dblechoc/gratos` (`packages/gratos`): the Effect-aware compiler, vendored from Grats. Its CLI binary is `gratos` (never `grats`).
+- `@dblechoc/gratos-server` (`packages/gratos-server`): the GraphQL server core and plugins, with the Effect layer at `@dblechoc/gratos-server/effect`.
+- `examples/orders`: the example app.
+
+All packages are `private: true` until publishing is decided.
+
 ## Toolchain
 
 - Node 26 (`.node-version`). Packages run from source through Node's type stripping; there is no build step.
 - pnpm 12 (`packageManager`). Node 26 has no corepack: install with `npm i -g pnpm@12.23.0`. In CI, `pnpm/action-setup`.
 - Turborepo: `pnpm check` runs everything (`turbo run check`). Read `node_modules/turbo/docs` before changing `turbo.json`.
-- TypeScript 7 (`tsc --noEmit` per package). Grats talks to TypeScript only through `packages/grats/src/ts/`.
+- TypeScript 7 (`tsc --noEmit` per package). The compiler talks to TypeScript only through `packages/gratos/src/ts/`.
 - oxfmt (`pnpm fmt`) and oxlint with `@cloudflare/oxlint-config` (`pnpm lint`).
 - vitest with `@effect/vitest` (`it.effect`).
 
 ## Rules
 
 - Never edit generated files (`**/src/generated/*`). Run `pnpm codegen` and commit the result.
-- All TypeScript compiler API access goes through `packages/grats/src/ts/`.
+- All TypeScript compiler API access goes through `packages/gratos/src/ts/`.
 - Never use `--preserve-symlinks`, injected dependencies or `pnpm deploy`: they break type stripping of workspace packages.
 - Only erasable TypeScript syntax (`erasableSyntaxOnly`): no enums, namespaces or parameter properties.
-- The installed grats skill refers to `node_modules/grats/llm-docs/…`. In this repo those docs live in `packages/grats/llm-docs/`.
+- The installed grats skill refers to `node_modules/grats/llm-docs/…`. In this repo those docs live in `packages/gratos/llm-docs/`.
 
 ## Delivery
 

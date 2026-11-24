@@ -7,7 +7,7 @@ describe("orders-example", () => {
   it.effect("resolves workspace packages from source", () =>
     Effect.gen(function* () {
       const names = yield* Effect.succeed(dependsOn);
-      expect(names).toEqual(["@gratos/grats", "@gratos/server"]);
+      expect(names).toEqual(["@dblechoc/gratos", "@dblechoc/gratos-server"]);
     }),
   );
 });

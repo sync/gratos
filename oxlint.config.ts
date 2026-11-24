@@ -7,10 +7,10 @@ export default defineConfig({
   ignorePatterns: [
     ...cloudflare.ignorePatterns,
     "**/src/generated/**",
-    "packages/grats/llm-docs/**",
-    "packages/grats/src/upstream/**",
-    "packages/grats/test/fixtures/**",
-    "packages/grats/test/integrationFixtures/**",
+    "packages/gratos/llm-docs/**",
+    "packages/gratos/src/upstream/**",
+    "packages/gratos/test/fixtures/**",
+    "packages/gratos/test/integrationFixtures/**",
     ".agents/**",
   ],
 });

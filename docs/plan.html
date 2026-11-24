@@ -135,7 +135,7 @@ ol.q li{margin:0 0 10px}
 <h3>Where we depart from the spec</h3>
 <div class="tw"><table>
 <tr><th>Spec says</th><th>We do</th><th>Why</th></tr>
-<tr><td>"Pinned TypeScript 5.9" inside Grats</td><td>TypeScript 7.0.2 everywhere. All TS access goes through one adapter folder, <code>packages/grats/src/ts/</code></td><td>One compiler for the repo. Models are parsed by the same TS that typechecks them</td></tr>
+<tr><td>"Pinned TypeScript 5.9" inside Grats</td><td>TypeScript 7.0.2 everywhere. All TS access goes through one adapter folder, <code>packages/gratos/src/ts/</code></td><td>One compiler for the repo. Models are parsed by the same TS that typechecks them</td></tr>
 <tr><td>Custom compiler host (<code>createCompilerHost</code>)</td><td>The TS 7 API's virtual-FS <code>readFile</code> callback</td><td>The same trick through the API TS 7 provides</td></tr>
 <tr><td><code>parseArgs</code>, <code>Bun.file</code>, <code>Bun.write</code></td><td><code>effect/cli</code>, plus <code>FileSystem</code> / <code>Path</code> from <code>@effect/platform-node</code></td><td>The Node runtime. File IO becomes testable with a fake FileSystem layer</td></tr>
 <tr><td>"small server that we wrote for Bun"</td><td>A Web-standard <code>handle(Request): Promise&lt;Response&gt;</code> core, served by <code>effect/http</code> <code>HttpRouter</code> on <code>NodeHttpServer</code></td><td>Node 26 has global <code>Request</code>/<code>Response</code>, so the core needs neither a runtime nor Effect</td></tr>
@@ -147,7 +147,7 @@ ol.q li{margin:0 0 10px}
 <tr><td><code>guardStream({ stream: Stream.unwrap(Effect.gen(…)) })</code></td><td><code>guardStream({ stream: Effect.gen(…) })</code>; the guard unwraps it</td><td>Only an unwrapped setup effect can be timed out without also ending an idle subscription</td></tr>
 <tr><td>"@defer or @stream in the document" (any operation)</td><td><code>@defer</code>/<code>@stream</code> are rejected on mutations</td><td>Deferred mutation work would outlive the shutdown drain or could be skipped by <code>return()</code>. The spec does not need incremental mutations</td></tr>
 <tr><td>Client left → <code>request.signal</code></td><td>A core-owned per-request <code>AbortController</code>, linked to the incoming signal (route-fiber interrupt) and aborted on response-body cancel</td><td>Once the Response is returned, the route fiber is done. Streamed bodies need the second trigger</td></tr>
-<tr><td><code>bun run codegen</code></td><td><code>pnpm codegen</code> → <code>node packages/grats/src/cli.ts</code></td><td>Type stripping runs the CLI straight from its path</td></tr>
+<tr><td><code>bun run codegen</code></td><td><code>pnpm codegen</code> → <code>node packages/gratos/src/cli.ts</code></td><td>Type stripping runs the CLI straight from its path</td></tr>
 </table></div>
 
 <h2>Repository layout</h2>
@@ -167,26 +167,26 @@ ol.q li{margin:0 0 10px}
 ├─ .claude/skills/*        # symlinks -&gt; ../../.agents/skills/*
 ├─ bench/baseline.json     # committed perf baseline + runner class
 ├─ packages/
-│  ├─ grats/               # @gratos/grats: vendored compiler (MIT; NOTICE pins upstream 5ab6616); no "bin" field
+│  ├─ gratos/              # @dblechoc/gratos: vendored compiler (MIT; NOTICE pins upstream 5ab6616); bin "gratos" (from M3)
 │  │  ├─ src/ts/           # the ONLY importer of typescript/unstable/*
 │  │  ├─ src/upstream/     # extractor, transforms, codegen, validations
 │  │  ├─ src/effect/       # wrapper detection, input-position errors
 │  │  ├─ src/generate.ts   # generate(tsconfig): Effect&lt;GenerateResult, GratsError, FileSystem | Scope&gt;
-│  │  ├─ src/cli.ts        # grats · grats --check
-│  │  ├─ src/dev.ts        # dev boot step (lazy entry: @gratos/grats/dev)
+│  │  ├─ src/cli.ts        # gratos · gratos --check
+│  │  ├─ src/dev.ts        # dev boot step (lazy entry: @dblechoc/gratos/dev)
 │  │  ├─ llm-docs/         # vendored upstream docs + an Effect chapter
 │  │  └─ test/             # ported TestRunner → vitest; fixtures; parity harness (devDep grats-upstream)
-│  └─ server/              # @gratos/server: core with NO effect dependency
+│  └─ gratos-server/       # @dblechoc/gratos-server: core with NO effect dependency
 │     ├─ src/core/         # phases, plugin lists, encoders (JSON · SSE · multipart), document LRU
 │     ├─ src/plugins/      # apq · jit · incremental · maskErrors · reportErrors · serverTiming · maxDepth · readOnly
-│     └─ src/effect/       # separate entry @gratos/server/effect (effect is an optional peer)
+│     └─ src/effect/       # separate entry @dblechoc/gratos-server/effect (effect is an optional peer)
 │        ├─ schema.ts      # effectSchema(schema, { failure }): wrap · wrapSubscribe · run · fromCause
 │        ├─ plugin.ts      # effect(): onParams · onPhase · onContext · onResult · onResponse
 │        ├─ route.ts       # effectRoute(server), runInRequest()
 │        └─ guard.ts       # makeGuard(): ctx.guard / ctx.guardStream
 └─ examples/orders/        # Order · User · Query · Mutation · Subscription; src/generated/ committed
 </code></pre>
-<p><strong>Grats docs for agents:</strong> the installed grats skill points at <code>node_modules/grats/llm-docs/…</code>. AGENTS.md maps that path to <code>packages/grats/llm-docs/</code>. We do not add a root <code>grats</code> alias: it would put the compiler into turbo's global hash, and its <code>bin</code> would collide with the parity oracle's (<em>verified</em>).</p>
+<p><strong>Grats docs for agents:</strong> the installed grats skill points at <code>node_modules/grats/llm-docs/…</code>. AGENTS.md maps that path to <code>packages/gratos/llm-docs/</code>. We do not add a root <code>grats</code> alias: it would put the compiler into turbo's global hash, and its <code>bin</code> would collide with the parity oracle's (<em>verified</em>).</p>
 
 <h3>Task graph (turbo.json)</h3>
 <pre><code>{
@@ -206,8 +206,8 @@ ol.q li{margin:0 0 10px}
   }
 }</code></pre>
 <ul>
-  <li><strong>Generated files are committed</strong> (<code>src/generated/*</code>), as the grats skill and the spec ask. <code>codegen:check</code> runs <code>grats --check</code>: it writes nothing and exits 1 if the committed files are stale. <code>check</code> never runs <code>codegen</code>, so there is no write/check race. <code>pnpm codegen</code> is a developer task.</li>
-  <li><code>transit</code> has no script. It exists so that a change in <code>@gratos/grats</code> or <code>@gratos/server</code> source invalidates dependents' <code>codegen:check</code>, <code>typecheck</code> and <code>test</code> hashes. <code>$TURBO_DEFAULT$</code> keeps <code>vitest.config.ts</code> and tsconfig files in the hash.</li>
+  <li><strong>Generated files are committed</strong> (<code>src/generated/*</code>), as the grats skill and the spec ask. <code>codegen:check</code> runs <code>gratos --check</code>: it writes nothing and exits 1 if the committed files are stale. <code>check</code> never runs <code>codegen</code>, so there is no write/check race. <code>pnpm codegen</code> is a developer task.</li>
+  <li><code>transit</code> has no script. It exists so that a change in <code>@dblechoc/gratos</code> or <code>@dblechoc/gratos-server</code> source invalidates dependents' <code>codegen:check</code>, <code>typecheck</code> and <code>test</code> hashes. <code>$TURBO_DEFAULT$</code> keeps <code>vitest.config.ts</code> and tsconfig files in the hash.</li>
   <li><strong>The root scripts never recurse.</strong> The root <code>package.json</code> scripts are <code>"lint": "oxlint ."</code>, <code>"fmt:check": "oxfmt --check ."</code>, <code>"check": "turbo run check"</code> and <code>"codegen": "turbo run codegen"</code>. The <code>//#lint</code> and <code>//#fmt:check</code> root tasks run those direct commands. A root script that called <code>turbo run lint</code> would recurse: turbo reports <code>recursive_turbo_invocations</code> (<em>verified</em>). Root files that packages consume (<code>tsconfig.base.json</code>, <code>vitest.shared.ts</code>) are listed as <code>$TURBO_ROOT$/…</code> inputs on the package tasks. A package's default inputs stop at its own folder, so without these a root edit would leave package hashes unchanged (<em>verified</em>). <code>globalDependencies</code> also covers them, as a second layer.</li>
   <li>There is no <code>build</code> task and no project references. Each package's <code>typecheck</code> is <code>tsc --noEmit</code> (TS 7), and cross-package types resolve through <code>exports</code> that point at <code>.ts</code> files (<em>verified</em>). Keys are checked against the docs bundled with turbo 2.11.13.</li>
 </ul>
@@ -226,7 +226,7 @@ ol.q li{margin:0 0 10px}
 <tr><td>Tests</td><td>vitest + <code>vite</code> (a required peer) + <code>it.effect</code>. Each package declares its own test dependencies</td><td>vitest 5.1.1 · vite 8.3.8</td></tr>
 <tr><td>tsconfig reading</td><td><code>jsonc-parser</code> (for the <code>grats</code> key, which TS 7's <code>parseConfigFile</code> drops)</td><td>3.x (pinned in M2)</td></tr>
 <tr><td>GraphQL</td><td><code>graphql</code>, <code>graphql-jit</code></td><td>17.1.0 · 0.10.1</td></tr>
-<tr><td>Parity oracle (test-only)</td><td><code>"grats-upstream": "npm:grats@0.0.36"</code>, a devDependency of <code>packages/grats</code> only. It brings its own <code>typescript@5.9.2</code> and <code>graphql@16</code>. Scripts never call a <code>grats</code> bin</td><td>0.0.36</td></tr>
+<tr><td>Parity oracle (test-only)</td><td><code>"grats-upstream": "npm:grats@0.0.36"</code>, a devDependency of <code>packages/gratos</code> only. It brings its own <code>typescript@5.9.2</code> and <code>graphql@16</code>. Our CLI binary is <code>gratos</code>, so it never collides with the oracle's <code>grats</code> bin</td><td>0.0.36</td></tr>
 </table></div>
 
 <h2>Agent setup</h2>
@@ -238,7 +238,7 @@ ol.q li{margin:0 0 10px}
       <li>read <code>node_modules/turbo/docs</code> before changing turbo config</li>
       <li>the grats docs path mapping</li>
       <li>never edit <code>src/generated/*</code>; run <code>pnpm codegen</code> and commit</li>
-      <li>all TS API access goes through <code>packages/grats/src/ts</code></li>
+      <li>all TS API access goes through <code>packages/gratos/src/ts</code></li>
       <li>never use <code>--preserve-symlinks</code>, injected dependencies or <code>pnpm deploy</code> (they break type stripping)</li>
       <li>the delivery workflow below</li>
     </ul>
@@ -280,7 +280,7 @@ ol.q li{margin:0 0 10px}
   <li><code>tsconfig.base.json</code> plus per-package tsconfigs that cover <code>src</code>, <code>test</code>, <code>scripts</code> and config files.</li>
   <li>The oxfmt and oxlint configs, <code>.coderabbit.yaml</code>, <code>AGENTS.md</code>, and <code>CLAUDE.md</code> containing <code>@AGENTS.md</code>.</li>
   <li>Commit <code>.agents/skills</code>, the <code>.claude/skills</code> symlinks, <code>skills-lock.json</code> and <code>docs/plan.html</code>.</li>
-  <li>Empty <code>@gratos/grats</code>, <code>@gratos/server</code> and <code>examples/orders</code> packages, each with one <code>it.effect</code> smoke test.</li>
+  <li>Empty <code>@dblechoc/gratos</code>, <code>@dblechoc/gratos-server</code> and <code>examples/orders</code> packages, each with one <code>it.effect</code> smoke test.</li>
   <li>GitHub Actions on Node 26:
     <ul>
       <li><code>actions/checkout</code> with default depth;</li>
@@ -344,13 +344,13 @@ ol.q li{margin:0 0 10px}
   </li>
   <li><strong>Config:</strong> <code>parseConfigFile</code> drops unknown keys, so <code>generate()</code> reads the root tsconfig through <code>FileSystem</code>, parses it with <code>jsonc-parser</code> (comments and trailing commas), and takes the top-level <code>grats</code> key from the root file only, with no <code>extends</code> merging, as TS 5's <code>raw</code> did. It decodes that with <code>Schema</code>, and takes <code>fileNames</code>/<code>options</code> from the API.</li>
   <li><strong>Fixture harness:</strong> each fixture gets a virtual tsconfig with explicit <code>compilerOptions</code> (2.3 ms per fixture, measured). Supported options on TS 7: <code>target ≥ ES2015</code>, with the pair <code>module: "nodenext"</code> + <code>moduleResolution: "nodenext"</code> or <code>module: "preserve"</code> + <code>moduleResolution: "bundler"</code> (there is no <code>module: "bundler"</code>), and <code>strict</code> as each fixture sets it. TS 7 rejects <code>target: ES5</code> and <code>moduleResolution: node10</code>. Fixtures that depend on those, on TS 5's <code>{}</code> defaults, on <code>tsVersion</code> gates, or on the TS1005 message get one variant per TS version, and every such difference is listed in the PR.</li>
-  <li><strong>CLI during M2:</strong> upstream's <code>cli.ts</code>, minus the cut features, is kept and runs on the facade until M3 replaces it with the Effect CLI. Its <code>commander</code> import becomes <code>node:util</code> <code>parseArgs</code>, so no new dependency is added. <code>readPackageVersion()</code> checks <code>"@gratos/grats"</code>. The <code>libraryImport</code> option (see M3) lands in M2, so the smoke schema imports <code>@gratos/grats</code>, and the generated schema is <em>typechecked</em> with <code>tsc --noEmit</code>. Node strips the type-only <code>GqlScalar</code> import, so running the schema alone can't verify its specifier. A committed smoke fixture, <code>packages/grats/test/smoke/</code> (two models, one Query field, one Promise, one custom <code>@gqlScalar</code>, so the generated <code>GqlScalar</code> import is exercised), gives M2 its generate-and-import test before the example app exists.</li>
+  <li><strong>CLI during M2:</strong> upstream's <code>cli.ts</code>, minus the cut features, is kept and runs on the facade until M3 replaces it with the Effect CLI. Its <code>commander</code> import becomes <code>node:util</code> <code>parseArgs</code>, so no new dependency is added. <code>readPackageVersion()</code> checks <code>"@dblechoc/gratos"</code>. The <code>libraryImport</code> option (see M3) lands in M2, so the smoke schema imports <code>@dblechoc/gratos</code>, and the generated schema is <em>typechecked</em> with <code>tsc --noEmit</code>. Node strips the type-only <code>GqlScalar</code> import, so running the schema alone can't verify its specifier. A committed smoke fixture, <code>packages/gratos/test/smoke/</code> (two models, one Query field, one Promise, one custom <code>@gqlScalar</code>, so the generated <code>GqlScalar</code> import is exercised), gives M2 its generate-and-import test before the example app exists.</li>
   <li><strong>Fast loading</strong> (spec §5), through the API's <code>fs.readFile</code> callback:
     <ul>
       <li>it blanks to <code>export {};</code> only files that match <code>/\.(d\.)?[cm]?[tj]sx?$/</code> and whose realpath is under <code>node_modules</code>;</li>
       <li>it never blanks <code>package.json</code>;</li>
       <li>it finds lib files by the resolved bundled lib directory, not by a substring;</li>
-      <li>it serves workspace packages, including <code>@gratos/grats</code>'s <code>Types.ts</code> built-in scalars, in full.</li>
+      <li>it serves workspace packages, including <code>@dblechoc/gratos</code>'s <code>Types.ts</code> built-in scalars, in full.</li>
     </ul>
     Source files are filtered by <code>getSourceFileNames()</code> and <code>getSourceFileMetadata()</code> before any AST is fetched. When <code>reportTypeScriptTypeErrors</code> is on, nothing is blanked and the full program is loaded, so its diagnostics are complete and never filtered. A tag inside a published package is invisible; this trade-off is documented.</li>
 </ul>
@@ -358,7 +358,7 @@ ol.q li{margin:0 0 10px}
   <ul>
     <li>the parity bar (b) below holds: the same suite is green on both facade implementations;</li>
     <li>tests show that lib files load in full, <code>package.json</code> is never blanked, the built-in scalars resolve, and <code>printNode</code> works on a synthetic node;</li>
-    <li><code>typescript@5.9.2</code> appears only under <code>devDependencies</code>. A test asserts from the loaded modules that <code>node packages/grats/src/cli.ts</code> never loads <code>typescript-baseline</code>. The CLI, run under plain Node 26 with TS 7, generates the <code>test/smoke</code> schema with <code>importModuleSpecifierEnding: ".ts"</code>, and Node imports and executes it. Upstream integration fixtures that generate <code>.js</code> specifiers keep them and run under vitest, which resolves <code>.js</code> to <code>.ts</code>;</li>
+    <li><code>typescript@5.9.2</code> appears only under <code>devDependencies</code>. A test asserts from the loaded modules that <code>node packages/gratos/src/cli.ts</code> never loads <code>typescript-baseline</code>. The CLI, run under plain Node 26 with TS 7, generates the <code>test/smoke</code> schema with <code>importModuleSpecifierEnding: ".ts"</code>, and Node imports and executes it. Upstream integration fixtures that generate <code>.js</code> specifiers keep them and run under vitest, which resolves <code>.js</code> to <code>.ts</code>;</li>
     <li>M2 adds the <code>bench</code> script and a <strong>synthetic 300-model fixture</strong>. Its models use Promise return types and import <code>effect</code>, <code>@effect/platform-node</code> and <code>graphql</code>, so the blanked third-party files really are exercised. On that fixture the cold build is ≤ 1.5 s, measured and in the PR. Above that, <a href="#defaults">default 3</a> applies.</li>
   </ul>
 </div>
@@ -391,8 +391,8 @@ ol.q li{margin:0 0 10px}
   </li>
   <li><strong>Semantic non-null for Effect fields:</strong> upstream's generated <code>assertNonNull</code> awaits the resolver's return value and checks it. For an Effect-backed field that value is the Effect object, which is never null, so a null <em>success</em> value would slip through as <code>data.field: null</code> with no error (<em>verified</em>). For <em>Effect</em>-returning <code>resolve</code> methods only, codegen does not emit <code>assertNonNull</code>. It emits <code>extensions: { gratos: { semanticNonNull: true } }</code> instead, and M5's wrapper checks the unwrapped value. <strong>Subscriptions keep upstream's placement:</strong> <code>assertNonNull</code> stays on the subscription field's identity <code>resolve(payload)</code>, which receives each unwrapped Stream item. A check inside the source stream would end the whole subscription on the first null (<em>verified</em>). The M3 fixture is a codegen snapshot showing three things: no <code>assertNonNull</code> around an Effect <code>resolve</code>; the marker is present; and a Promise field and a Stream subscription in the same fixture still get <code>assertNonNull</code>. The runtime behaviour is tested in M5.</li>
   <li><strong>jit marker:</strong> a field whose resolver takes a <code>GqlInfo</code> parameter gets <code>gratos: { jit: false }</code> in its <code>extensions</code> in the generated <code>schema.ts</code>, for M4a's <code>jit()</code>. All <code>gratos</code> markers (<code>jit</code>, <code>semanticNonNull</code>) merge into the single <code>extensions</code> object that upstream already emits for directives (<code>{ grats: { directives } }</code>, schemaCodegen.ts:578-615). Upstream returns <code>null</code> when a field has no directives, so the merge creates the object when only <code>gratos</code> markers exist. No field ever gets a duplicate <code>extensions</code> property. There are fixtures for a field with markers plus a user directive, and for a field with markers alone.</li>
-  <li><strong>Library import specifier</strong> (implemented in M2, documented here): upstream hard-codes <code>"grats"</code> in generated code (<code>import type { GqlScalar } from "grats"</code>, emitted at <code>codegen/schemaCodegen.ts:102</code>), in the extractor (<code>LIBRARY_IMPORT_NAME</code>), and in error messages (<code>Errors.ts:280</code> and <code>:284</code> use the constant; <code>:561</code> is a literal). All of them are changed to take the configured name. It becomes a config option, <code>libraryImport</code>, defaulting to <code>"@gratos/grats"</code>. Upstream fixtures run with <code>"grats"</code>, so their snapshots don't change.</li>
-  <li><strong>CLI</strong> (<code>effect/cli</code>): <code>grats</code> writes both files. <code>grats --check</code> writes nothing and exits 1 with <code>Grats: `schema.graphql` is out of date. Run `grats`.</code></li>
+  <li><strong>Library import specifier</strong> (implemented in M2, documented here): upstream hard-codes <code>"grats"</code> in generated code (<code>import type { GqlScalar } from "grats"</code>, emitted at <code>codegen/schemaCodegen.ts:102</code>), in the extractor (<code>LIBRARY_IMPORT_NAME</code>), and in error messages (<code>Errors.ts:280</code> and <code>:284</code> use the constant; <code>:561</code> is a literal). All of them are changed to take the configured name. It becomes a config option, <code>libraryImport</code>, defaulting to <code>"@dblechoc/gratos"</code>. Upstream fixtures run with <code>"grats"</code>, so their snapshots don't change.</li>
+  <li><strong>CLI</strong> (<code>effect/cli</code>): <code>gratos</code> (the CLI binary) writes both files. <code>gratos --check</code> writes nothing and exits 1 with <code>Gratos: `schema.graphql` is out of date. Run `gratos`.</code></li>
   <li>The <code>bench</code> script from M2 records files loaded, cold build ms and peak RSS on the synthetic fixture, compared against <code>bench/baseline.json</code>. Peak RSS is sampled over the whole process tree (Node plus <code>tsgo</code>), because the Go child is not counted in Node's <code>maxRSS</code>. M7 re-measures on <code>examples/orders</code>.</li>
 </ul>
 <div class="done"><span class="pill ok">Done when</span>
@@ -580,7 +580,7 @@ ol.q li{margin:0 0 10px}
 <details class="ms"><summary><span class="id">M6</span><span class="nm">Dev loop (live rebuild)</span><span class="br">PR 9 · feat/grats-dev</span></summary><div class="body">
 <ul>
   <li><code>pnpm dev</code> runs <code>GRATS_DEV=1 node --watch-path=src/models --watch-path=src/services --watch-preserve-output src/server.ts</code>. The flag has to be explicit, because Node removes <code>--watch</code> and <code>--watch-path</code> from the child's <code>process.execArgv</code> (<em>verified</em>).</li>
-  <li><code>@gratos/grats/dev</code> is imported lazily, and only when <code>GRATS_DEV=1</code>. On boot it runs <code>generate()</code>, writes only the changed files into <code>src/generated/</code> (which is not watched), and then imports <code>schema.ts</code>.</li>
+  <li><code>@dblechoc/gratos/dev</code> is imported lazily, and only when <code>GRATS_DEV=1</code>. On boot it runs <code>generate()</code>, writes only the changed files into <code>src/generated/</code> (which is not watched), and then imports <code>schema.ts</code>.</li>
   <li>When the models do not build, the server still starts and every request answers 500 with code <code>GRATS_ERROR</code> and the diagnostics. <code>--watch-path</code> watches folders, not the import graph, so the next good save still restarts it.</li>
   <li>Each save resets the APQ and JIT caches, and open SSE subscriptions drop and reconnect.</li>
 </ul>
@@ -637,7 +637,7 @@ ol.q li{margin:0 0 10px}
   <li><strong>Dev reload:</strong> <code>node --watch-path</code> restarts. Losing the APQ and JIT caches and open subscriptions on each save is accepted for development.</li>
   <li><strong>TS 7 escape hatch:</strong> if M2 hits a missing API or a cold build above 1.5 s, M2 stops before merging, asks you, and suggests a council. Moving Grats back to 5.9.2 is your decision, and the facade makes it a one-line change. Nothing ships on 5.9.2 silently.</li>
   <li><strong><code>ctx.guard</code> boundary:</strong> the library ships a generic <code>makeGuard</code>, and the app supplies the policy (scopes, flags, session headers).</li>
-  <li><strong>Packaging:</strong> private workspace packages under <code>@gratos/*</code>, not published.</li>
+  <li><strong>Packaging:</strong> workspace packages <code>@dblechoc/gratos</code> (compiler, CLI binary <code>gratos</code>) and <code>@dblechoc/gratos-server</code> (server core, plus <code>/effect</code>), both <code>private: true</code>. Publishing is decided after M7: it needs a build step, because Node does not type-strip <code>.ts</code> inside <code>node_modules</code>.</li>
   <li><strong>Turborepo cache:</strong> local, plus <code>actions/cache</code> in CI. No remote-cache token.</li>
   <li><strong>Merging:</strong> each milestone is merged by full send once its merge gate passes, and the next milestone starts from the updated <code>main</code>. No stacked PRs. An uncertain change stops for a suggested council.</li>
   <li><strong>Incremental wire format:</strong> <code>deferSpec=20220824</code> through <code>legacyExecuteIncrementally</code>, for client compatibility. The newer pending/completed format can be added later.</li>

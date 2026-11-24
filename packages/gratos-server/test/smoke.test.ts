@@ -3,11 +3,11 @@ import { Effect } from "effect";
 
 import { packageName } from "../src/index.ts";
 
-describe("@gratos/grats", () => {
+describe("@dblechoc/gratos-server", () => {
   it.effect("runs an Effect test", () =>
     Effect.gen(function* () {
       const name = yield* Effect.succeed(packageName);
-      expect(name).toBe("@gratos/grats");
+      expect(name).toBe("@dblechoc/gratos-server");
     }),
   );
 });

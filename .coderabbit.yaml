@@ -6,10 +6,10 @@ reviews:
     drafts: false
   path_filters:
     - "!**/src/generated/**"
-    - "!packages/grats/llm-docs/**"
-    - "!packages/grats/src/upstream/**"
-    - "!packages/grats/test/fixtures/**"
-    - "!packages/grats/test/integrationFixtures/**"
+    - "!packages/gratos/llm-docs/**"
+    - "!packages/gratos/src/upstream/**"
+    - "!packages/gratos/test/fixtures/**"
+    - "!packages/gratos/test/integrationFixtures/**"
     - "!.agents/**"
     - "!pnpm-lock.yaml"
     - "!docs/plan.html"

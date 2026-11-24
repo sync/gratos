@@ -13,8 +13,8 @@
     "codegen:check": "node -e \"console.log('codegen:check: nothing to check yet (M2)')\""
   },
   "dependencies": {
-    "@gratos/grats": "workspace:*",
-    "@gratos/server": "workspace:*"
+    "@dblechoc/gratos": "workspace:*",
+    "@dblechoc/gratos-server": "workspace:*"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
