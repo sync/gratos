@@ -22,6 +22,8 @@
     "llm-docs/**",
     "test/fixtures/**",
     "test/integrationFixtures/**",
-    "test/configParserFixtures/**"
+    "test/configParserFixtures/**",
+    // CLI input with its own tsconfig; test/cli.test.ts generates schema.ts and typechecks it.
+    "test/smoke/**"
   ]
 }
