@@ -1,34 +1,34 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 import {
-  DefinitionNode,
-  FieldDefinitionNode,
-  InputValueDefinitionNode,
+  type DefinitionNode,
+  type FieldDefinitionNode,
+  type InputValueDefinitionNode,
   Kind,
   visit,
 } from "graphql";
 import {
-  DerivedResolverDefinition,
-  ITypeContext,
+  type DerivedResolverDefinition,
+  type ITypeContext,
   UNRESOLVED_REFERENCE_NAME,
-} from "../TypeContext.js";
-import { err, ok } from "../utils/Result.js";
+} from "../TypeContext.ts";
+import { err, ok } from "../utils/Result.ts";
 import {
-  DiagnosticsResult,
-  FixableDiagnosticWithLocation,
+  type DiagnosticsResult,
+  type FixableDiagnosticWithLocation,
   gqlErr,
   tsErr,
   tsRelated,
-} from "../utils/DiagnosticError.js";
-import { invariant, nullThrows } from "../utils/helpers.js";
+} from "../utils/DiagnosticError.ts";
+import { invariant, nullThrows } from "../utils/helpers.ts";
 import {
-  ContextResolverArgument,
-  DerivedContextResolverArgument,
-  NamedResolverArgument,
-  ResolverArgument,
-  UnresolvedResolverArgument,
-} from "../resolverSignature.js";
-import * as E from "../Errors.js";
-import { GraphQLConstructor } from "../GraphQLConstructor.js";
+  type ContextResolverArgument,
+  type DerivedContextResolverArgument,
+  type NamedResolverArgument,
+  type ResolverArgument,
+  type UnresolvedResolverArgument,
+} from "../resolverSignature.ts";
+import * as E from "../Errors.ts";
+import { GraphQLConstructor } from "../GraphQLConstructor.ts";
 
 export function resolveResolverParams(
   ctx: ITypeContext,

@@ -1,8 +1,8 @@
-import { version as gratsTsVersion } from "typescript";
-import type * as TS from "typescript";
-import { extract } from "../Extractor.js";
-import { FAKE_ERROR_CODE } from "../utils/DiagnosticError.js";
-import { nullThrows } from "../utils/helpers.js";
+import { version as gratsTsVersion } from "typescript-baseline";
+import type * as TS from "typescript-baseline";
+import { extract } from "../Extractor.ts";
+import { FAKE_ERROR_CODE } from "../utils/DiagnosticError.ts";
+import { nullThrows } from "../utils/helpers.ts";
 
 // An experimental plugin for TypeScript that adds a new language service
 // which reports diagnostics for the current file. Currently it only reports

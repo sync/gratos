@@ -1,15 +1,15 @@
-import { DocumentNode, Kind, visit } from "graphql";
-import { DiagnosticsResult, gqlErr } from "../utils/DiagnosticError.js";
-import { err, ok } from "../utils/Result.js";
-import * as ts from "typescript";
-import * as E from "../Errors.js";
+import { type DocumentNode, Kind, visit } from "graphql";
+import { type DiagnosticsResult, gqlErr } from "../utils/DiagnosticError.ts";
+import { err, ok } from "../utils/Result.ts";
+import * as ts from "typescript-baseline";
+import * as E from "../Errors.ts";
 import {
   addSemanticNonNullDirective,
   makeSemanticNonNullDirective,
-} from "../publicDirectives.js";
-import { GraphQLConstructor } from "../GraphQLConstructor.js";
-import { GratsConfig } from "../gratsConfig.js";
-import { nullThrows } from "../utils/helpers.js";
+} from "../publicDirectives.ts";
+import { GraphQLConstructor } from "../GraphQLConstructor.ts";
+import { type GratsConfig } from "../gratsConfig.ts";
+import { nullThrows } from "../utils/helpers.ts";
 
 /**
  * Grats has options to make all fields nullable by default to conform to

@@ -1,23 +1,23 @@
 import {
-  InputObjectTypeDefinitionNode,
-  InterfaceTypeDefinitionNode,
-  NameNode,
-  ObjectTypeDefinitionNode,
-  UnionTypeDefinitionNode,
+  type InputObjectTypeDefinitionNode,
+  type InterfaceTypeDefinitionNode,
+  type NameNode,
+  type ObjectTypeDefinitionNode,
+  type UnionTypeDefinitionNode,
 } from "graphql";
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 import {
   gqlErr,
-  DiagnosticResult,
+  type DiagnosticResult,
   tsErr,
   gqlRelated,
-  DiagnosticsResult,
-  FixableDiagnosticWithLocation,
-} from "./utils/DiagnosticError.js";
-import { err, ok } from "./utils/Result.js";
-import * as E from "./Errors.js";
-import { ExtractionSnapshot } from "./Extractor.js";
-import { ResolverArgument } from "./resolverSignature.js";
+  type DiagnosticsResult,
+  type FixableDiagnosticWithLocation,
+} from "./utils/DiagnosticError.ts";
+import { err, ok } from "./utils/Result.ts";
+import * as E from "./Errors.ts";
+import { type ExtractionSnapshot } from "./Extractor.ts";
+import { type ResolverArgument } from "./resolverSignature.ts";
 
 export const UNRESOLVED_REFERENCE_NAME = `__UNRESOLVED_REFERENCE__`;
 
@@ -45,7 +45,7 @@ export type NameDefinition = {
 
 export type DeclarationDefinition = NameDefinition | DerivedResolverDefinition;
 
-import type { TsIdentifier } from "./utils/helpers.js";
+import type { TsIdentifier } from "./utils/helpers.ts";
 
 /**
  * Public interface for TypeContext.

@@ -1,14 +1,14 @@
 import {
-  ConstObjectFieldNode,
-  ConstValueNode,
-  DefinitionNode,
-  EnumTypeDefinitionNode,
-  InputObjectTypeDefinitionNode,
+  type ConstObjectFieldNode,
+  type ConstValueNode,
+  type DefinitionNode,
+  type EnumTypeDefinitionNode,
+  type InputObjectTypeDefinitionNode,
   isTypeDefinitionNode,
   Kind,
-  ListTypeNode,
-  NamedTypeNode,
-  TypeNode,
+  type ListTypeNode,
+  type NamedTypeNode,
+  type TypeNode,
   visit,
 } from "graphql";
 

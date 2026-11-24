@@ -1,59 +1,57 @@
 import {
-  FieldDefinitionNode,
-  InputValueDefinitionNode,
+  type FieldDefinitionNode,
+  type InputValueDefinitionNode,
   Kind,
-  NamedTypeNode,
-  NameNode,
-  TypeNode,
-  StringValueNode,
-  ConstValueNode,
-  ConstDirectiveNode,
-  ConstArgumentNode,
-  EnumValueDefinitionNode,
-  ConstObjectFieldNode,
-  ConstObjectValueNode,
-  ConstListValueNode,
+  type NamedTypeNode,
+  type NameNode,
+  type TypeNode,
+  type StringValueNode,
+  type ConstValueNode,
+  type ConstDirectiveNode,
+  type ConstArgumentNode,
+  type EnumValueDefinitionNode,
+  type ConstObjectFieldNode,
+  type ConstObjectValueNode,
+  type ConstListValueNode,
   assertName,
-  DefinitionNode,
-  version as graphqlJSVersion,
+  type DefinitionNode,
   TokenKind,
   GraphQLError,
 } from "graphql";
-import { gte as semverGte } from "semver";
 import {
   tsErr,
   tsRelated,
-  DiagnosticsResult,
+  type DiagnosticsResult,
   gqlErr,
-  DiagnosticResult,
-} from "./utils/DiagnosticError.js";
-import { err, ok } from "./utils/Result.js";
-import * as ts from "typescript";
+  type DiagnosticResult,
+} from "./utils/DiagnosticError.ts";
+import { err, ok } from "./utils/Result.ts";
+import * as ts from "typescript-baseline";
 import {
-  DeclarationDefinition,
-  NameDefinition,
+  type DeclarationDefinition,
+  type NameDefinition,
   UNRESOLVED_REFERENCE_NAME,
-} from "./TypeContext.js";
-import * as E from "./Errors.js";
-import { traverseJSDocTags } from "./utils/JSDoc.js";
-import { GraphQLConstructor, loc } from "./GraphQLConstructor.js";
-import { relativePath } from "./gratsRoot.js";
-import { ISSUE_URL } from "./Errors.js";
-import { detectInvalidComments } from "./comments.js";
+} from "./TypeContext.ts";
+import * as E from "./Errors.ts";
+import { traverseJSDocTags } from "./utils/JSDoc.ts";
+import { GraphQLConstructor, loc } from "./GraphQLConstructor.ts";
+import { relativePath } from "./gratsRoot.ts";
+import { ISSUE_URL } from "./Errors.ts";
+import { detectInvalidComments } from "./comments.ts";
 import {
   bestMatch,
   extend,
   invariant,
   levenshteinDistance,
-  TsIdentifier,
-} from "./utils/helpers.js";
-import * as Act from "./CodeActions.js";
+  type TsIdentifier,
+} from "./utils/helpers.ts";
+import * as Act from "./CodeActions.ts";
 import {
-  InputValueDefinitionNodeOrResolverArg,
-  ResolverArgument,
-} from "./resolverSignature.js";
+  type InputValueDefinitionNodeOrResolverArg,
+  type ResolverArgument,
+} from "./resolverSignature.ts";
 import { Parser } from "graphql/language/parser.js";
-import { ExportDefinition } from "./GraphQLAstExtensions.js";
+import { type ExportDefinition } from "./GraphQLAstExtensions.ts";
 
 export const LIBRARY_IMPORT_NAME = "grats";
 export const LIBRARY_NAME = "Grats";
@@ -105,8 +103,6 @@ export const TAGS = [
 
 export type TagName = (typeof TAGS)[number];
 
-// https://github.com/graphql/graphql-js/releases/tag/v16.9.0
-const ONE_OF_MIN_GRAPHQL_JS_VERSION = "16.9.0";
 export const OPERATION_TYPES = new Set(["Query", "Mutation", "Subscription"]);
 
 type ArgDefaults = Map<string, ts.Expression>;
@@ -1215,15 +1211,6 @@ class Extractor {
   extractOneOfInputFields(
     node: ts.UnionTypeNode,
   ): Array<InputValueDefinitionNode> | null {
-    if (!semverGte(graphqlJSVersion, ONE_OF_MIN_GRAPHQL_JS_VERSION)) {
-      return this.report(
-        node,
-        E.oneOfNotSupportedGraphql(
-          ONE_OF_MIN_GRAPHQL_JS_VERSION,
-          graphqlJSVersion,
-        ),
-      );
-    }
     const fields: InputValueDefinitionNode[] = [];
     for (const member of node.types) {
       const field = this.collectOneOfInputField(member);

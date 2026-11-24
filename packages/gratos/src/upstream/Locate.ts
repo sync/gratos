@@ -5,8 +5,8 @@ import {
   GraphQLSchema,
   Location,
 } from "graphql";
-import { Result, err, ok } from "./utils/Result.js";
-import { nullThrows } from "./utils/helpers.js";
+import { type Result, err, ok } from "./utils/Result.ts";
+import { nullThrows } from "./utils/helpers.ts";
 
 type EntityName = {
   parent: string;

@@ -1,14 +1,14 @@
-import { ConstDirectiveNode, GraphQLField } from "graphql";
-import * as ts from "typescript";
-import { SEMANTIC_NON_NULL_DIRECTIVE } from "../publicDirectives.js";
+import { type ConstDirectiveNode, type GraphQLField } from "graphql";
+import * as ts from "typescript-baseline";
+import { SEMANTIC_NON_NULL_DIRECTIVE } from "../publicDirectives.ts";
 import {
   ASSERT_NON_NULL_HELPER,
   createAssertNonNullHelper,
-} from "../codegenHelpers.js";
-import { nullThrows } from "../utils/helpers.js";
-import { ResolverArgument, ResolverDefinition, Metadata } from "../metadata.js";
-import TSAstBuilder from "./TSAstBuilder.js";
-import { ExportDefinition } from "../GraphQLAstExtensions.js";
+} from "../codegenHelpers.ts";
+import { nullThrows } from "../utils/helpers.ts";
+import { type ResolverArgument, type ResolverDefinition, type Metadata } from "../metadata.ts";
+import TSAstBuilder from "./TSAstBuilder.ts";
+import { type ExportDefinition } from "../GraphQLAstExtensions.ts";
 
 const RESOLVER_ARGS = ["source", "args", "context", "info"] as const;
 
@@ -23,10 +23,12 @@ const TYPE_RESOLVER_ARGS = false;
 export default class ResolverCodegen {
   _helpers: Set<string> = new Set();
   _derivedContextNames: Map<string, string> = new Map();
-  constructor(
-    public ts: TSAstBuilder,
-    public _resolvers: Metadata,
-  ) {}
+  public ts: TSAstBuilder;
+  public _resolvers: Metadata;
+  constructor(ts: TSAstBuilder, _resolvers: Metadata) {
+    this.ts = ts;
+    this._resolvers = _resolvers;
+  }
   resolveMethod(
     fieldName: string,
     methodName: string,

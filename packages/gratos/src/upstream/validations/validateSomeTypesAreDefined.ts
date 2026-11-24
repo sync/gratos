@@ -1,10 +1,10 @@
-import { GraphQLNamedType, GraphQLSchema } from "graphql";
+import { type GraphQLNamedType, GraphQLSchema } from "graphql";
 import {
-  DiagnosticsWithoutLocationResult,
+  type DiagnosticsWithoutLocationResult,
   locationlessErr,
-} from "../utils/DiagnosticError.js";
-import { err, ok } from "../utils/Result.js";
-import * as E from "../Errors.js";
+} from "../utils/DiagnosticError.ts";
+import { err, ok } from "../utils/Result.ts";
+import * as E from "../Errors.ts";
 
 /**
  * We want to support a "getting started" experience where users can run `npx

@@ -1,18 +1,18 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 import {
-  DocumentNode,
-  FieldDefinitionNode,
-  InterfaceTypeDefinitionNode,
-  InterfaceTypeExtensionNode,
+  type DocumentNode,
+  type FieldDefinitionNode,
+  type InterfaceTypeDefinitionNode,
+  type InterfaceTypeExtensionNode,
   Kind,
-  ObjectTypeDefinitionNode,
-  ObjectTypeExtensionNode,
-  TypeNode,
+  type ObjectTypeDefinitionNode,
+  type ObjectTypeExtensionNode,
+  type TypeNode,
   visit,
 } from "graphql";
-import { DiagnosticsResult, gqlErr } from "../utils/DiagnosticError.js";
-import { err, ok } from "../utils/Result.js";
-import * as E from "../Errors.js";
+import { type DiagnosticsResult, gqlErr } from "../utils/DiagnosticError.ts";
+import { err, ok } from "../utils/Result.ts";
+import * as E from "../Errors.ts";
 
 /**
  * Ensure that all fields on `Subscription` return an AsyncIterable and transform

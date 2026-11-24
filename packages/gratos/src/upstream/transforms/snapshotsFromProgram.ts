@@ -1,10 +1,10 @@
-import * as ts from "typescript";
-import { ParsedCommandLineGrats } from "../gratsConfig.js";
-import { ExtractionSnapshot, extract } from "../Extractor.js";
-import { DiagnosticsWithoutLocationResult } from "../utils/DiagnosticError.js";
-import { collectResults } from "../utils/Result.js";
-import { err } from "../utils/Result.js";
-import { extend } from "../utils/helpers.js";
+import * as ts from "typescript-baseline";
+import { type ParsedCommandLineGrats } from "../gratsConfig.ts";
+import { type ExtractionSnapshot, extract } from "../Extractor.ts";
+import { type DiagnosticsWithoutLocationResult } from "../utils/DiagnosticError.ts";
+import { collectResults } from "../utils/Result.ts";
+import { err } from "../utils/Result.ts";
+import { extend } from "../utils/helpers.ts";
 
 const TAG_REGEX = /@(gql)|(killsParentOnException)/i;
 

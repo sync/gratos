@@ -3,35 +3,35 @@
 // LLM agent docs: See the llm-docs/ directory in the package root for
 // Markdown documentation covering all Grats features and configuration.
 
-import * as E from "./Errors.js";
+import * as E from "./Errors.ts";
 import { Location } from "graphql";
-import { getParsedTsConfig } from "./index.js";
+import { getParsedTsConfig } from "./index.ts";
 import {
-  SchemaAndDoc,
+  type SchemaAndDoc,
   buildSchemaAndDocResult,
   extractSchemaAndDoc,
-} from "./lib.js";
+} from "./lib.ts";
 import { Command } from "commander";
 import { writeFileSync, readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { locate } from "./Locate.js";
+import { locate } from "./Locate.ts";
 import {
   printGratsSDL,
   printExecutableSchema,
   printEnumsModule,
-} from "./printSchema.js";
-import * as ts from "typescript";
+} from "./printSchema.ts";
+import * as ts from "typescript-baseline";
 import {
   diagnosticsMessage,
   locationlessErr,
   ReportableDiagnostics,
-  DiagnosticsWithoutLocationResult,
-} from "./utils/DiagnosticError.js";
-import { GratsConfig, ParsedCommandLineGrats } from "./gratsConfig.js";
-import { err, ok } from "./utils/Result.js";
-import { cacheFromProgram, cachesAreEqual, RunCache } from "./runCache.js";
-import { withFixesFixed, FixOptions, applyFixes } from "./fixFixable.js";
+  type DiagnosticsWithoutLocationResult,
+} from "./utils/DiagnosticError.ts";
+import { type GratsConfig, type ParsedCommandLineGrats } from "./gratsConfig.ts";
+import { err, ok } from "./utils/Result.ts";
+import { cacheFromProgram, cachesAreEqual, type RunCache } from "./runCache.ts";
+import { withFixesFixed, type FixOptions, applyFixes } from "./fixFixable.ts";
 
 type BuildOptions = FixOptions;
 

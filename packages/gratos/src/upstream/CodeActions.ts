@@ -1,4 +1,4 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 
 export function prefixNode(node: ts.Node, prefix: string): ts.FileTextChanges {
   const start = node.getStart();

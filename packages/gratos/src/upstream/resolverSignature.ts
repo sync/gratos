@@ -1,15 +1,15 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 import {
-  ConstDirectiveNode,
-  ConstValueNode,
-  InputValueDefinitionNode,
+  type ConstDirectiveNode,
+  type ConstValueNode,
+  type InputValueDefinitionNode,
   Kind,
   Location,
-  NameNode,
-  StringValueNode,
-  TypeNode,
+  type NameNode,
+  type StringValueNode,
+  type TypeNode,
 } from "graphql";
-import { DiagnosticResult } from "./utils/DiagnosticError.js";
+import { type DiagnosticResult } from "./utils/DiagnosticError.ts";
 
 /**
  * Describes the backing resolver for a field. This broadly matches the metadata

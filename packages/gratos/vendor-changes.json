@@ -1,0 +1,205 @@
+{
+  "upstream": "captbaritone/grats@5ab66166446b4f80263cda1a13de7d3a69a1c2f8",
+  "changes": {
+    "src/upstream/cli.ts": {
+      "sha": "83e218554990501d9cf43da2712c50a8f1eb0e15",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/CodeActions.ts": {
+      "sha": "8425b353eb1b47f4c6137f54458c0ceddb19d464",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/codegen/enumCodegen.ts": {
+      "sha": "a5feb54583763ed15e7c6fd7d1782af0c821e1ba",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/codegen/resolverCodegen.ts": {
+      "sha": "49e17e6ed6090e11a0b342e12facda6b5e615060",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/codegen/resolverMapCodegen.ts": {
+      "sha": "8b7a408bc515a5929dcb3ae88ae3be155188107c",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/codegen/schemaCodegen.ts": {
+      "sha": "3e379a7c0ebe901ca132d9d6ecfdcc78ec6315cf",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/codegen/TSAstBuilder.ts": {
+      "sha": "52da8b98de3b63d0cbef20ca0245e4409256cff0",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/codegenHelpers.ts": {
+      "sha": "e4cacf5a2825770b104e131fef7b312c06938a98",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/comments.ts": {
+      "sha": "78b5142de7b04913cfad672c320196bf64180665",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/configSpec.ts": {
+      "sha": "5aa4ddffebd52528219ef883f9d19c598183ecc4",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/Errors.ts": {
+      "sha": "7dacad601632b71aea2556e6d857e3a0a73d6e94",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/Extractor.ts": {
+      "sha": "6c2d870ba6680612adbc382c6171c61465f986cb",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/fixFixable.ts": {
+      "sha": "4180a63ae7a08b02f05e37b440d859216a3588ee",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/GraphQLAstExtensions.ts": {
+      "sha": "986ffcde558db1331cbb55e79f1059c1abe6dc67",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/GraphQLConstructor.ts": {
+      "sha": "5355fd6862126e5b49046490af05c7f4fdac856d",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/gratsConfig.ts": {
+      "sha": "298df94f213095df1a277c6cd4a4a897cd743002",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/index.ts": {
+      "sha": "e208e28e7afda9b4023d3aa9533b0cbf6c956e51",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/InterfaceGraph.ts": {
+      "sha": "215039c36cfc002b1b9ffe7812bf59634f88fac6",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/lib.ts": {
+      "sha": "322eafed239ea68d92858238adaf7c89441480c2",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/Locate.ts": {
+      "sha": "be30f9f9f103cd1cbf7315c22d0c459031bafceb",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/printSchema.ts": {
+      "sha": "b6bdbd23b9fc18233730d01837958b3c2848fee3",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/publicDirectives.ts": {
+      "sha": "59fa03a7d19908230834390ca9e390c581169ce4",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/resolverSignature.ts": {
+      "sha": "6058b0280345e3775b1e43fbb9e3bc87b1580c6e",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/runCache.ts": {
+      "sha": "763c2e7f0fdf50411c781cdbdaff3d894b88ca7b",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/addImplicitRootTypes.ts": {
+      "sha": "032cd69e0b4fb47bf6fcaa64a1c5444c1e4fdaba",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/addInterfaceFields.ts": {
+      "sha": "5943acfc6bddc06ebbb922b8dfa5f1dd4d3ee166",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/applyDefaultNullability.ts": {
+      "sha": "f12dd8c1d611d72122522e88e215b03e4d9aba57",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/coerceDefaultEnumValues.ts": {
+      "sha": "f2cd8502da58f1aa07c15ede49925a8f8ecf1e87",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/filterNonGqlInterfaces.ts": {
+      "sha": "b82ce5a8b6b3d5d4c9187684b76d8a439f8beb01",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/makeResolverSignature.ts": {
+      "sha": "80c4f4e66a42658e1cfe18fa94fe2b0fdf4dc741",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/mergeExtensions.ts": {
+      "sha": "31a27159206e8e2f535ed82b465023e8be162668",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/resolveResolverParams.ts": {
+      "sha": "b322f7af2ac5c3c92bcfcf79ec0e104f40af5c28",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/resolveTypes.ts": {
+      "sha": "fc05254946d99710de6f5cc7a1cbe3c7c8534092",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/snapshotsFromProgram.ts": {
+      "sha": "ed9793ec95cccb972cd924b614b1aad442814743",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/transforms/sortSchemaAst.ts": {
+      "sha": "df07f3d2025671d49a476a2c4de0c1f1ef0691c1",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/tsPlugin/initTsPlugin.ts": {
+      "sha": "17b4cfdd22d48c07dcf5d2883907b3c0dadac624",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/TypeContext.ts": {
+      "sha": "7bc49f7162347e460b6b7d1fddd2d819f9ef229f",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/utils/DiagnosticError.ts": {
+      "sha": "391f04db2969e39240a8bfd33192f9e976583bcb",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/utils/helpers.ts": {
+      "sha": "8f4e9130b932e491ed6fd058f434a4206ea999db",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/utils/JSDoc.ts": {
+      "sha": "9cb1c32953c393173a3a34cb803df5bf07df756e",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/utils/Result.ts": {
+      "sha": "88f25213e174ed37e3775bed4f734a7f6459de89",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/utils/visitor.ts": {
+      "sha": "cd7ec00baeb6b91954c2678e8d58be7ec5ed9dfc",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/validations/customSpecValidations.ts": {
+      "sha": "1a11239156d9e1e392eef8487f8e72cf845159ed",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/validations/validateAsyncIterable.ts": {
+      "sha": "01f9ca2ed71223e6e0b36e6c32f4170d563e13b0",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/validations/validateDirectiveArguments.ts": {
+      "sha": "786d705e2d35862958004027d8831081f4457ef9",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/validations/validateDuplicateContextOrInfo.ts": {
+      "sha": "44d64e64f5727f803674c82c9bcc8c0fb74a55fd",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/validations/validateMergedInterfaces.ts": {
+      "sha": "6453676198973e01d036c08d6b465e3ccb51c17a",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/validations/validateSemanticNullability.ts": {
+      "sha": "5157e6381d096a2be1c7a3de07d8ad46b156e846",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/validations/validateSomeTypesAreDefined.ts": {
+      "sha": "37954dccb4fedc2b9294dd1c99638b19498f551f",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    },
+    "src/upstream/validations/validateTypenames.ts": {
+      "sha": "2f603544ba258ce0e0578fe99468837f0368fa60",
+      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+    }
+  }
+}

@@ -1,10 +1,10 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 import {
-  DiagnosticsWithoutLocationResult,
-  FixableDiagnostic,
-} from "./utils/DiagnosticError.js";
+  type DiagnosticsWithoutLocationResult,
+  type FixableDiagnostic,
+} from "./utils/DiagnosticError.ts";
 import { writeFileSync, readFileSync } from "fs";
-import { relativePath } from "./gratsRoot.js";
+import { relativePath } from "./gratsRoot.ts";
 
 export type FixOptions = {
   fix: boolean;

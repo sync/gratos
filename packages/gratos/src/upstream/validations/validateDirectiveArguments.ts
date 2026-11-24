@@ -1,6 +1,6 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 import {
-  DocumentNode,
+  type DocumentNode,
   GraphQLSchema,
   visit,
   ValuesOfCorrectTypeRule,
@@ -12,12 +12,12 @@ import {
   isScalarType,
 } from "graphql";
 import {
-  DiagnosticsWithoutLocationResult,
+  type DiagnosticsWithoutLocationResult,
   gqlErr,
   gqlRelated,
-} from "../utils/DiagnosticError.js";
-import { err, ok } from "../utils/Result.js";
-import { nullThrows } from "../utils/helpers.js";
+} from "../utils/DiagnosticError.ts";
+import { err, ok } from "../utils/Result.ts";
+import { nullThrows } from "../utils/helpers.ts";
 
 /**
  * Surprisingly, the GraphQL spec (and therefore graphql-js) does not enforce

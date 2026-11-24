@@ -1,16 +1,16 @@
 import {
-  GraphQLAbstractType,
-  GraphQLArgument,
+  type GraphQLAbstractType,
+  type GraphQLArgument,
   GraphQLDirective,
   GraphQLEnumType,
-  GraphQLEnumValue,
-  GraphQLField,
-  GraphQLInputField,
+  type GraphQLEnumValue,
+  type GraphQLField,
+  type GraphQLInputField,
   GraphQLInputObjectType,
-  GraphQLInputType,
+  type GraphQLInputType,
   GraphQLInterfaceType,
   GraphQLObjectType,
-  GraphQLOutputType,
+  type GraphQLOutputType,
   GraphQLScalarType,
   GraphQLSchema,
   GraphQLUnionType,
@@ -26,15 +26,15 @@ import {
   isUnionType,
   valueFromASTUntyped,
 } from "graphql";
-import * as ts from "typescript";
-import { extend, nullThrows } from "../utils/helpers.js";
-import { GratsConfig } from "../gratsConfig.js";
-import { naturalCompare } from "../utils/naturalCompare.js";
-import TSAstBuilder, { JsonValue } from "./TSAstBuilder.js";
-import ResolverCodegen from "./resolverCodegen.js";
-import { Metadata } from "../metadata.js";
-import { ConstDirectiveNode } from "graphql/language/index.js";
-import { ExportDefinition } from "../GraphQLAstExtensions.js";
+import * as ts from "typescript-baseline";
+import { extend, nullThrows } from "../utils/helpers.ts";
+import { type GratsConfig } from "../gratsConfig.ts";
+import { naturalCompare } from "../utils/naturalCompare.ts";
+import TSAstBuilder, { type JsonValue } from "./TSAstBuilder.ts";
+import ResolverCodegen from "./resolverCodegen.ts";
+import { type Metadata } from "../metadata.ts";
+import { type ConstDirectiveNode } from "graphql/language/index.js";
+import { type ExportDefinition } from "../GraphQLAstExtensions.ts";
 
 // These directives will be added to the schema by default, so we don't need to
 // include them in the generated schema.
@@ -72,12 +72,14 @@ class Codegen {
   _typeNameMappings: Map<string, string> = new Map();
   _typeDefinitions: Set<string> = new Set();
 
+  public _schema: GraphQLSchema;
   constructor(
-    public _schema: GraphQLSchema,
+    _schema: GraphQLSchema,
     _resolvers: Metadata,
     config: GratsConfig,
     destination: string,
   ) {
+    this._schema = _schema;
     this.ts = new TSAstBuilder(destination, config.importModuleSpecifierEnding);
     this.resolvers = new ResolverCodegen(this.ts, _resolvers);
   }

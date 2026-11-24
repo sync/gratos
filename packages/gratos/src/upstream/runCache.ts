@@ -1,4 +1,4 @@
-import * as ts from "typescript";
+import * as ts from "typescript-baseline";
 /** Data structure representing the cached results of running Grats */
 
 type Version = string;

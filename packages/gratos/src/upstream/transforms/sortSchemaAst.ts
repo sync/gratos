@@ -1,5 +1,5 @@
-import { DefinitionNode, DocumentNode, Kind, NameNode, visit } from "graphql";
-import { naturalCompare } from "../utils/naturalCompare.js";
+import { type DefinitionNode, type DocumentNode, Kind, type NameNode, visit } from "graphql";
+import { naturalCompare } from "../utils/naturalCompare.ts";
 
 /*
  * Similar to lexicographicSortSchema from graphql-js but applied against an AST

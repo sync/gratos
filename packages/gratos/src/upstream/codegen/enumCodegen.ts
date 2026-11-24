@@ -1,8 +1,8 @@
 import { GraphQLEnumType, GraphQLSchema, isEnumType } from "graphql";
-import * as ts from "typescript";
-import { GratsConfig } from "../gratsConfig.js";
-import { nullThrows } from "../utils/helpers.js";
-import TSAstBuilder from "./TSAstBuilder.js";
+import * as ts from "typescript-baseline";
+import { type GratsConfig } from "../gratsConfig.ts";
+import { nullThrows } from "../utils/helpers.ts";
+import TSAstBuilder from "./TSAstBuilder.ts";
 
 const F = ts.factory;
 
@@ -24,11 +24,13 @@ class EnumCodegen {
     { tsModulePath: string; exportName: string | null; localName: string }
   > = new Map();
 
+  public _schema: GraphQLSchema;
   constructor(
-    public _schema: GraphQLSchema,
+    _schema: GraphQLSchema,
     config: GratsConfig,
     destination: string,
   ) {
+    this._schema = _schema;
     this.ts = new TSAstBuilder(destination, config.importModuleSpecifierEnding);
   }
 
