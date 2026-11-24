@@ -13,8 +13,8 @@ export type MediaType = typeof GRAPHQL_RESPONSE_JSON | typeof APPLICATION_JSON;
 
 const SUPPORTED: ReadonlyArray<MediaType> = [GRAPHQL_RESPONSE_JSON, APPLICATION_JSON];
 
-/** 0 when the range does not match, else its specificity (3 exact, 2 type/*, 1 star/star). */
-const specificity = (range: string, mediaType: MediaType): number => {
+/** 0 when the range does not name the type, else its rank (3 exact, 2 type/*, 1 star/star). */
+const rangeRank = (range: string, mediaType: MediaType): number => {
   if (range === mediaType) {
     return 3;
   }
@@ -24,29 +24,82 @@ const specificity = (range: string, mediaType: MediaType): number => {
   return range === "*/*" ? 1 : 0;
 };
 
+/** The charset the core encodes in (`utf-8`, also spelt `utf8`). */
+const UTF8 = /^utf-?8$/;
+
+const unquote = (value: string): string =>
+  value.length >= 2 && value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
+
+/** One media range of an Accept header. */
+interface MediaRange {
+  readonly range: string;
+  /** The `charset` parameter, lowercased and unquoted, when the range names one. */
+  readonly charset: string | undefined;
+  readonly hasParameters: boolean;
+  readonly quality: number;
+}
+
+const parseRange = (part: string): MediaRange => {
+  const [range = "", ...pieces] = part.split(";").map((piece) => piece.trim().toLowerCase());
+  let charset: string | undefined;
+  let hasParameters = false;
+  let quality = 1;
+  for (const piece of pieces) {
+    const equals = piece.indexOf("=");
+    const name = (equals === -1 ? piece : piece.slice(0, equals)).trim();
+    const value = unquote(equals === -1 ? "" : piece.slice(equals + 1).trim());
+    if (name === "q") {
+      // `q` ends the media-range parameters; what follows are accept-extensions.
+      const parsed = Number(value);
+      quality = Number.isFinite(parsed) ? parsed : 0;
+      break;
+    }
+    if (name === "") {
+      continue;
+    }
+    hasParameters = true;
+    if (name === "charset") {
+      charset = value;
+    }
+  }
+  return { range, charset, hasParameters, quality };
+};
+
+/**
+ * 0 when the range does not match the type as the core sends it (`; charset=utf-8`), else its
+ * specificity: the rank, doubled, plus one when the range has parameters (RFC 9110 §12.5.1: a
+ * more specific range takes precedence). Only `charset` is compared: the core's representations
+ * carry no other parameter, and GraphQL over HTTP defines none.
+ */
+const specificity = (
+  { range, charset, hasParameters }: MediaRange,
+  mediaType: MediaType,
+): number => {
+  const rank = rangeRank(range, mediaType);
+  if (rank === 0 || (charset !== undefined && !UTF8.test(charset))) {
+    return 0;
+  }
+  return rank * 2 + (hasParameters ? 1 : 0);
+};
+
 /**
  * Picks the response media type from an Accept header: the supported type with the highest
  * quality (taken from its most specific matching range), preferring
- * application/graphql-response+json on ties. No Accept header means the default. `undefined`
- * means nothing acceptable (406).
+ * application/graphql-response+json on ties. A range asking for a charset other than utf-8 does
+ * not match. No Accept header means the default. `undefined` means nothing acceptable (406).
  */
 export const negotiate = (accept: string | null): MediaType | undefined => {
   if (accept === null || accept.trim() === "") {
     return GRAPHQL_RESPONSE_JSON;
   }
-  const ranges = accept.split(",").map((part) => {
-    const [range = "", ...parameters] = part.split(";").map((piece) => piece.trim().toLowerCase());
-    const q = parameters.find((parameter) => parameter.startsWith("q="));
-    const quality = q === undefined ? 1 : Number(q.slice(2));
-    return { range, quality: Number.isFinite(quality) ? quality : 0 };
-  });
+  const ranges = accept.split(",").map(parseRange);
   let best: { mediaType: MediaType; quality: number } | undefined;
   for (const mediaType of SUPPORTED) {
     let matched: { quality: number; specificity: number } | undefined;
-    for (const { range, quality } of ranges) {
+    for (const range of ranges) {
       const rank = specificity(range, mediaType);
       if (rank > 0 && (matched === undefined || rank > matched.specificity)) {
-        matched = { quality, specificity: rank };
+        matched = { quality: range.quality, specificity: rank };
       }
     }
     if (matched !== undefined && matched.quality > 0) {

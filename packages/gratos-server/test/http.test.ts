@@ -83,14 +83,17 @@ describe("415: unsupported Content-Type", () => {
 });
 
 describe("406: unsupported Accept", () => {
-  it.each([["text/html"], ["application/xml, text/*"], ["application/json;q=0"]])(
-    "%s",
-    async (accept) => {
-      const sent = await send(server, post({ query: "{count}" }, { accept }));
-      expect(sent.status).toBe(406);
-      expect(sent.headers.get("content-type")).toBe(JSON_);
-    },
-  );
+  it.each([
+    ["text/html"],
+    ["application/xml, text/*"],
+    ["application/json;q=0"],
+    ["application/json; charset=utf-16"],
+    ['application/graphql-response+json;charset="iso-8859-1", */*;charset=utf-16'],
+  ])("%s", async (accept) => {
+    const sent = await send(server, post({ query: "{count}" }, { accept }));
+    expect(sent.status).toBe(406);
+    expect(sent.headers.get("content-type")).toBe(JSON_);
+  });
 });
 
 describe("Accept negotiation", () => {
@@ -103,6 +106,11 @@ describe("Accept negotiation", () => {
     ["application/json, application/graphql-response+json", GRJ],
     ["application/graphql-response+json;q=0.5, application/json", JSON_],
     ["application/json, */*;q=0.1", JSON_],
+    ["application/json; charset=utf-8", JSON_],
+    ['application/json;charset="UTF-8"', JSON_],
+    ["application/graphql-response+json; charset=utf-16, application/json;q=0.5", JSON_],
+    ["application/json;charset=utf-16, application/*;q=0.2", GRJ],
+    ["application/json;charset=utf-8;q=0.4, application/json;q=0, */*;q=0.3", JSON_],
   ])("%s gives %s", async (accept, contentType) => {
     const sent = await send(server, post({ query: "{count}" }, { accept }));
     expect(sent.status).toBe(200);
