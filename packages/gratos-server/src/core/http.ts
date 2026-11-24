@@ -71,7 +71,7 @@ export type ReadParams =
 const isString = (value: JsonValue | undefined): value is string => typeof value === "string";
 
 /** A JSON object (the value comes from `JSON.parse`, so any plain object is one). */
-export const isJsonObject = (value: JsonValue | undefined): value is JsonObject =>
+export const isJsonObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** A member that may be absent or null, else must pass `is`. */
@@ -89,11 +89,9 @@ const optional = <T extends JsonValue>(
 
 /** Reads and checks the JSON body. */
 export const readParams = async (request: Request): Promise<ReadParams> => {
-  let body: JsonValue;
+  let body: unknown;
   try {
-    // JSON.parse returns JSON values only.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    body = JSON.parse(await request.text()) as JsonValue;
+    body = JSON.parse(await request.text());
   } catch {
     return { _tag: "bad", message: "The request body is not valid JSON." };
   }
