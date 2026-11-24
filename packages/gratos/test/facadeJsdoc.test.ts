@@ -54,11 +54,25 @@ o.c ||= o.c || function () {};
 const v = v0 || function () {};
 `;
 
-/** The tag names of every function expression, in source order. */
-const tagNamesOf = (root: Node): Array<Array<string>> => {
+// Object literals defaulted in an assignment, including a computed identifier element, which
+// TypeScript 5 classifies as a plain property assignment (it keeps the tag in TS files).
+const DEFAULTED_OBJECTS = `
+/** @example computedPrototype */
+o[prototype] = o[prototype] || {};
+/** @example literalPrototype */
+o["prototype"] = o["prototype"] || {};
+/** @example property */
+o.p = o.p || {};
+`;
+
+/** The tag names of every node of `kind` (function expressions by default), in source order. */
+const tagNamesOf = (
+  root: Node,
+  kind: SyntaxKind = SyntaxKind.FunctionExpression,
+): Array<Array<string>> => {
   const result: Array<Array<string>> = [];
   const visit = (node: Node): void => {
-    if (node.kind === SyntaxKind.FunctionExpression) {
+    if (node.kind === kind) {
       result.push(getJSDocTags(node).map((tag) => tag.tagName.text));
     }
     node.forEachChild(visit);
@@ -67,10 +81,13 @@ const tagNamesOf = (root: Node): Array<Array<string>> => {
   return result;
 };
 
-const tagNamesOf5 = (root: Node5): Array<Array<string>> => {
+const tagNamesOf5 = (
+  root: Node5,
+  kind: SyntaxKind5 = SyntaxKind5.FunctionExpression,
+): Array<Array<string>> => {
   const result: Array<Array<string>> = [];
   const visit = (node: Node5): void => {
-    if (node.kind === SyntaxKind5.FunctionExpression) {
+    if (node.kind === kind) {
       result.push(getJSDocTags5(node).map((tag) => tag.tagName.text));
     }
     forEachChild5(node, visit);
@@ -83,6 +100,7 @@ describe("getJSDocTags", () => {
   const files = {
     "defaulted.ts": `declare let x: any, o: any, k: string, v0: any, C: any, exports: any, module: any;\n${DEFAULTED_ASSIGNMENTS}`,
     "defaulted.js": DEFAULTED_ASSIGNMENTS,
+    "objects.ts": `declare let o: any, prototype: string;\n${DEFAULTED_OBJECTS}`,
   };
   for (const [name, text] of Object.entries(files)) {
     writeFileSync(join(directory, name), text);
@@ -92,7 +110,29 @@ describe("getJSDocTags", () => {
     { allowJs: true, noEmit: true },
   );
 
-  for (const [name, text] of Object.entries(files)) {
+  it("gives a defaulted object literal the statement's tags as TypeScript 5 does (objects.ts)", () => {
+    const sourceFile = program.getSourceFile(join(directory, "objects.ts"));
+    if (sourceFile === undefined) {
+      throw new Error("no source file for objects.ts");
+    }
+    const facade = tagNamesOf(sourceFile, SyntaxKind.ObjectLiteralExpression);
+    const typescript5 = tagNamesOf5(
+      createSourceFile5(
+        join(directory, "objects.ts"),
+        files["objects.ts"],
+        ScriptTarget5.Latest,
+        true,
+        ScriptKind5.TS,
+      ),
+      SyntaxKind5.ObjectLiteralExpression,
+    );
+    expect(facade).toEqual(typescript5);
+    expect(facade[0]).toEqual(["example"]);
+  });
+
+  for (const [name, text] of Object.entries(files).filter(([fileName]) =>
+    fileName.startsWith("defaulted"),
+  )) {
     it(`gives a defaulted function the statement's tags only for declarations (${name})`, () => {
       const sourceFile = program.getSourceFile(join(directory, name));
       if (sourceFile === undefined) {

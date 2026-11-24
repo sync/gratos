@@ -229,18 +229,15 @@ const isBindableStaticNameExpression = (node: Node, excludeThisKeyword: boolean)
   isEntityNameExpression(node) || isBindableStaticAccessExpression(node, excludeThisKeyword);
 
 const elementOrPropertyAccessName = (node: Node): string | undefined => {
-  let name: Node | undefined;
   if (isPropertyAccessExpression(node)) {
-    name = node.name;
-  } else if (isElementAccessExpression(node)) {
-    name = skipParentheses(node.argumentExpression);
+    return isIdentifier(node.name) ? node.name.text : undefined;
   }
-  if (name === undefined) {
+  if (!isElementAccessExpression(node)) {
     return undefined;
   }
-  if (isIdentifier(name)) {
-    return name.text;
-  }
+  // As in TypeScript 5, only a literal element (`o["x"]`, `o[0]`) has a static name; a computed
+  // identifier (`o[prototype]`) does not.
+  const name = skipParentheses(node.argumentExpression);
   if (isStringOrNumericLiteralLike(name)) {
     const text: unknown = Reflect.get(name, "text");
     return typeof text === "string" ? text : undefined;
