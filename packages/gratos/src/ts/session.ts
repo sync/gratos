@@ -143,12 +143,18 @@ export const defaultSessionList = (): ReadonlyArray<Session> => [...defaultSessi
 /**
  * Opens `configPath` (a real or virtual tsconfig) in a new snapshot, releasing the session's
  * previous project. The returned project stays usable until the next open on this session.
+ * Every open after the first invalidates tsgo's cached files, so files edited since the previous
+ * open (or created or deleted) are read again.
  */
 export const openProject = (session: Session, configPath: string): Project => {
   const previous = session.current;
   const closeProjects =
     previous !== null && previous.config !== configPath ? [previous.config] : [];
-  const snapshot = session.api.updateSnapshot({ openProjects: [configPath], closeProjects });
+  const snapshot = session.api.updateSnapshot({
+    openProjects: [configPath],
+    closeProjects,
+    fileChanges: previous === null ? undefined : { invalidateAll: true },
+  });
   previous?.snapshot.dispose();
   if (previous !== null && previous.config !== configPath) {
     session.virtualFiles.delete(previous.config);

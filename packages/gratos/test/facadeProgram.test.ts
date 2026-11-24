@@ -45,6 +45,20 @@ const format = (diagnostics: ReadonlyArray<Diagnostic>, directory: string): stri
   );
 
 describe("getParsedCommandLineOfConfigFile", () => {
+  it("sees a source file edited since the config was last parsed", () => {
+    const directory = project({ "tsconfig.json": tsconfig(), "a.ts": "export const a = 1;\n" });
+    const configPath = join(directory, "tsconfig.json");
+    const fileName = join(directory, "a.ts");
+    expect(getParsedCommandLineOfConfigFile(configPath).program.getSourceFile(fileName)?.text).toBe(
+      "export const a = 1;\n",
+    );
+
+    writeFileSync(fileName, "export const a = 2;\n");
+    expect(getParsedCommandLineOfConfigFile(configPath).program.getSourceFile(fileName)?.text).toBe(
+      "export const a = 2;\n",
+    );
+  });
+
   it("reports an invalid compiler option at its place in the tsconfig", () => {
     const text = tsconfig({ target: "es1" });
     const directory = project({ "tsconfig.json": text, "a.ts": "export const a = 1;\n" });
