@@ -15,7 +15,7 @@ import {
   readOnly,
   sha256Hex,
 } from "../src/index.ts";
-import type { Executor, JsonObject, Plugin, Server } from "../src/index.ts";
+import type { Executor, JitOptions, JsonObject, Plugin, Server } from "../src/index.ts";
 import { gql, post, send } from "./support/http.ts";
 import type { Sent } from "./support/http.ts";
 import { basicSchema, makeSchema } from "./support/schema.ts";
@@ -117,6 +117,31 @@ const jitPhases = () => {
     },
   };
   return { compiled, plugin };
+};
+
+const watchedJit = (options: JitOptions) => {
+  const ran: Array<"jit" | "next" | "declined"> = [];
+  const inner = jit(options);
+  const plugin: Plugin = {
+    ...inner,
+    onExecute: (input, args) => {
+      const executor = inner.onExecute?.(input, args);
+      if (executor === undefined) {
+        ran.push("declined");
+        return undefined;
+      }
+      return (next) => {
+        let delegated = false;
+        const result = executor(() => {
+          delegated = true;
+          return next();
+        });
+        ran.push(delegated ? "next" : "jit");
+        return result;
+      };
+    },
+  };
+  return { plugin, ran };
 };
 
 const repeat = async (times: number, run: () => Promise<Sent>): Promise<Array<Sent>> => {
@@ -290,6 +315,28 @@ describe("jit({ after })", () => {
     await gql(server, "{ count }");
     expect(phases.compiled).toHaveLength(1);
     expect(isSafe).toHaveBeenCalled();
+  });
+});
+
+describe("default resolvers under jit", () => {
+  // jit keeps graphql-jit's inlined property reads (src/plugins/jit.ts): a function-valued field
+  // without a resolver is read as a value. Grats schemas never rely on that (spec §8 gives every
+  // method field a resolve); a hand-written schema keeps such fields on graphql-js with isSafe.
+  it("keeps a function-valued root field correct when isSafe sends it to graphql-js", async () => {
+    const phases = jitPhases();
+    const server = createServer({
+      schema: makeSchema("type Query { greeting: String count: Int }"),
+      rootValue: { greeting: () => "hi", count: 2 },
+      plugins: [jit({ after: 1, isSafe: (field) => field.name !== "greeting" }), phases.plugin],
+    });
+    const sent = await repeat(3, () => gql(server, "{ greeting count }"));
+    expect(sent.map((one) => one.body)).toEqual(
+      Array.from({ length: 3 }, () => ({ data: { greeting: "hi", count: 2 } })),
+    );
+    expect(phases.compiled).toHaveLength(0);
+    // The plain field alone is compiled and read as a value.
+    await repeat(2, () => gql(server, "{ count }"));
+    expect(phases.compiled).toHaveLength(1);
   });
 });
 

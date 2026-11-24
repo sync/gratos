@@ -13,6 +13,13 @@
 // decline, and counts and compiles inside its executor, which the core calls only when no
 // onExecute hook refused and the gate passed; until it takes over it hands the operation on
 // (`next`: a later claim, else the default executor).
+//
+// Default resolvers: graphql-jit reads a field without a resolver as a plain property, where
+// graphql-js' default resolver calls a function-valued property with (args, context, info). jit
+// keeps graphql-jit's inlined reads, so it assumes every function-valued field has its own
+// resolver. Grats schemas always do: a method field gets an explicit `resolve` (spec §8). A
+// hand-written schema that relies on function properties, such as `rootValue: { hello: () => "hi" }`,
+// must keep those fields on graphql-js with `isSafe`, or not use jit.
 import {
   getNamedType,
   isAbstractType,
@@ -48,7 +55,11 @@ export type FieldPredicate = (
 export interface JitOptions {
   /** The use on which an operation switches to graphql-jit. Default 3. */
   readonly after?: number;
-  /** Extra check for hand-written schemas: return false for fields that must stay on graphql-js. */
+  /**
+   * Extra check for hand-written schemas: return false for fields that must stay on graphql-js,
+   * for example a field without a resolver whose value is a function (graphql-jit reads it as a
+   * value; graphql-js calls it).
+   */
   readonly isSafe?: FieldPredicate;
 }
 
