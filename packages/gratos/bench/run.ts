@@ -1,22 +1,37 @@
-// `pnpm --filter @dblechoc/gratos bench`: cold build of a synthetic 300-model project.
+// `pnpm --filter @dblechoc/gratos bench`: cold build of a synthetic 300-model project with the
+// `gratos` CLI, compared with the committed baseline (bench/baseline.json at the repo root).
 //
 // It writes the fixture to bench/.fixture/ (gitignored): 300 @gqlType classes with Promise
 // fields and @gqlQueryField functions, each importing effect, @effect/platform-node and graphql,
 // so fast loading really blanks third-party files. It then runs the CLI in fresh Node processes
-// (each spawns its own tsgo, so every run is a cold build) and reports the timings, plus the
-// files TypeScript loaded, read in full and blanked for the same build.
-import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+// (each spawns its own tsgo, so every run is a cold build) and records, per docs/plan.html M3:
+//
+// - files loaded: the program's source files, with third-party files read as empty;
+// - cold build ms: wall time of one `gratos` process, from spawn to exit;
+// - peak RSS: sampled over the whole process tree (Node plus the tsgo child), because the Go
+//   child is not counted in Node's maxRSS.
+//
+// `--record` writes the result as the new baseline, with the runner class it was measured on.
+import { spawn } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpus, totalmem } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+
+import { Schema } from "effect";
 
 import { getParsedCommandLineOfConfigFile } from "../src/ts/program.ts";
 import { closeDefaultSessions } from "../src/ts/session.ts";
 
 const MODEL_COUNT = 300;
 const RUNS = 5;
-const BUDGET_MS = 1500;
+/** Spec targets (local). CI allows +20%, because shared runners are noisy. */
+const TARGETS = { filesLoaded: 530, coldBuildMs: 900, peakRssMb: 380 } as const;
+const CI_TOLERANCE = 1.2;
+const SAMPLE_INTERVAL_MS = 5;
 
 const packageDir = join(import.meta.dirname, "..");
+const baselinePath = join(packageDir, "..", "..", "bench", "baseline.json");
 const fixtureDir = join(import.meta.dirname, ".fixture");
 const modelsDir = join(fixtureDir, "models");
 
@@ -99,22 +114,79 @@ const writeFixture = (): void => {
   }
 };
 
-const coldBuild = (): number => {
-  const start = performance.now();
-  const run = spawnSync(
-    process.execPath,
-    [
-      join(packageDir, "src", "upstream", "cli.ts"),
-      "--tsconfig",
-      join(fixtureDir, "tsconfig.json"),
-    ],
-    { cwd: packageDir, encoding: "utf8" },
-  );
-  const elapsed = performance.now() - start;
-  if (run.status !== 0) {
-    throw new Error(`gratos failed on the bench fixture:\n${run.stderr}`);
+/** RSS (kB) of every process, with its parent, from one `ps` call (macOS and Linux). */
+const processTable = (): Promise<Array<{ pid: number; ppid: number; rssKb: number }>> =>
+  new Promise((resolvePromise) => {
+    const ps = spawn("ps", ["-A", "-o", "pid=,ppid=,rss="], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let output = "";
+    ps.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+    });
+    ps.on("close", () => {
+      resolvePromise(
+        output
+          .split("\n")
+          .map((line) => line.trim().split(/\s+/).map(Number))
+          .filter((fields) => fields.length === 3 && fields.every(Number.isFinite))
+          .map(([pid = 0, ppid = 0, rssKb = 0]) => ({ pid, ppid, rssKb })),
+      );
+    });
+  });
+
+/** Total RSS (kB) of `root` and all its descendants. */
+const treeRssKb = async (root: number): Promise<number> => {
+  const table = await processTable();
+  const tree = new Set([root]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const row of table) {
+      if (!tree.has(row.pid) && tree.has(row.ppid)) {
+        tree.add(row.pid);
+        grew = true;
+      }
+    }
   }
-  return elapsed;
+  return table.filter((row) => tree.has(row.pid)).reduce((sum, row) => sum + row.rssKb, 0);
+};
+
+/** One cold build: wall time, and the peak RSS of the process tree sampled while it runs. */
+const coldBuild = async (): Promise<{ ms: number; peakRssKb: number; samples: number }> => {
+  const start = performance.now();
+  const child = spawn(
+    process.execPath,
+    [join(packageDir, "src", "cli.ts"), "--tsconfig", join(fixtureDir, "tsconfig.json")],
+    { cwd: packageDir, stdio: ["ignore", "ignore", "pipe"] },
+  );
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString("utf8");
+  });
+  const exited = new Promise<{ code: number | null; ms: number }>((resolvePromise) => {
+    child.on("exit", (code) => resolvePromise({ code, ms: performance.now() - start }));
+  });
+  let running = true;
+  let peakRssKb = 0;
+  let samples = 0;
+  const sampler = (async () => {
+    while (running && child.pid !== undefined) {
+      const rss = await treeRssKb(child.pid);
+      if (running) {
+        peakRssKb = Math.max(peakRssKb, rss);
+        samples += 1;
+      }
+      await sleep(SAMPLE_INTERVAL_MS);
+    }
+  })();
+  const { code, ms } = await exited;
+  running = false;
+  await sampler;
+  if (code !== 0) {
+    throw new Error(`gratos failed on the bench fixture:\n${stderr}`);
+  }
+  return { ms, peakRssKb, samples };
 };
 
 const fileStats = () => {
@@ -122,7 +194,8 @@ const fileStats = () => {
   const { session, project } = parsed.program;
   const programFiles = project.program.getSourceFileNames();
   const stats = {
-    programFiles: programFiles.length,
+    /** The spec's "files loaded": every source file in the program. */
+    filesLoaded: programFiles.length,
     libFiles: programFiles.filter(
       (fileName) => project.program.getSourceFileMetadata(fileName)?.isDefaultLibrary,
     ).length,
@@ -134,26 +207,91 @@ const fileStats = () => {
   return stats;
 };
 
+const median = (values: ReadonlyArray<number>): number =>
+  values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
+
+const Baseline = Schema.Struct({
+  runner: Schema.Struct({
+    platform: Schema.String,
+    cpu: Schema.String,
+    cores: Schema.Number,
+    memoryGb: Schema.Number,
+    node: Schema.String,
+  }),
+  filesLoaded: Schema.Number,
+  coldBuildMs: Schema.Number,
+  peakRssMb: Schema.Number,
+});
+
+const runner = {
+  platform: `${process.platform}-${process.arch}`,
+  cpu: cpus()[0]?.model ?? "unknown",
+  cores: cpus().length,
+  memoryGb: Math.round(totalmem() / 2 ** 30),
+  node: process.version,
+};
+
 writeFixture();
-const timings = Array.from({ length: RUNS }, coldBuild);
-const sorted = timings.toSorted((a, b) => a - b);
-const median = sorted[Math.floor(RUNS / 2)] ?? 0;
+// One warm-up run (OS file cache, Node compile cache), not counted.
+await coldBuild();
+const builds: Array<Awaited<ReturnType<typeof coldBuild>>> = [];
+for (let run = 0; run < RUNS; run++) {
+  builds.push(await coldBuild());
+}
+const files = fileStats();
+const measured = {
+  filesLoaded: files.filesLoaded,
+  coldBuildMs: Math.round(median(builds.map((build) => build.ms))),
+  peakRssMb: Math.round(median(builds.map((build) => build.peakRssKb)) / 1024),
+};
+
+const isCi = process.env["CI"] !== undefined && process.env["CI"] !== "";
+const bounds = Object.fromEntries(
+  Object.entries(TARGETS).map(([key, target]) => [key, isCi ? target * CI_TOLERANCE : target]),
+);
+const baseline = existsSync(baselinePath)
+  ? Schema.decodeUnknownSync(Baseline)(JSON.parse(readFileSync(baselinePath, "utf8")))
+  : null;
+const versus = (key: keyof typeof measured) =>
+  baseline === null ? null : `${Math.round((measured[key] / baseline[key] - 1) * 100)}%`;
+
 const result = {
   models: MODEL_COUNT,
-  coldBuildMs: {
-    median: Math.round(median),
-    min: Math.round(sorted[0] ?? 0),
-    runs: timings.map(Math.round),
+  measured,
+  targets: TARGETS,
+  bounds,
+  withinBounds: {
+    filesLoaded: measured.filesLoaded <= (bounds["filesLoaded"] ?? 0),
+    coldBuildMs: measured.coldBuildMs <= (bounds["coldBuildMs"] ?? 0),
+    peakRssMb: measured.peakRssMb <= (bounds["peakRssMb"] ?? 0),
   },
-  budgetMs: BUDGET_MS,
-  files: fileStats(),
-  node: process.version,
-  platform: `${process.platform}-${process.arch}`,
+  versusBaseline:
+    baseline === null
+      ? null
+      : {
+          sameRunnerClass: JSON.stringify(baseline.runner) === JSON.stringify(runner),
+          filesLoaded: versus("filesLoaded"),
+          coldBuildMs: versus("coldBuildMs"),
+          peakRssMb: versus("peakRssMb"),
+        },
+  runs: builds.map((build) => ({
+    ms: Math.round(build.ms),
+    peakRssMb: Math.round(build.peakRssKb / 1024),
+    samples: build.samples,
+  })),
+  files,
+  runner,
 };
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-if (median > BUDGET_MS) {
+
+if (process.argv.includes("--record")) {
+  writeFileSync(baselinePath, `${JSON.stringify({ runner, ...measured }, null, 2)}\n`);
+  process.stderr.write(`bench: recorded ${baselinePath}\n`);
+}
+const misses = Object.entries(result.withinBounds).filter(([, within]) => !within);
+if (misses.length > 0) {
   process.stderr.write(
-    `bench: median cold build ${Math.round(median)} ms exceeds ${BUDGET_MS} ms\n`,
+    `bench: outside the spec bounds: ${misses.map(([key]) => key).join(", ")}\n`,
   );
   process.exitCode = 1;
 }

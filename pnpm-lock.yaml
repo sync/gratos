@@ -294,6 +294,9 @@ importers:
 
   packages/gratos:
     dependencies:
+      '@effect/platform-node':
+        specifier: 'catalog:'
+        version: 4.1.5(effect@4.1.5)(redis@6.3.1)
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -307,9 +310,6 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
     devDependencies:
-      '@effect/platform-node':
-        specifier: 'catalog:'
-        version: 4.1.5(effect@4.1.5)(redis@6.3.1)
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.1.5(effect@4.1.5)(vitest@5.1.1(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)))
