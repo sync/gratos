@@ -2,9 +2,10 @@
 // TypeScript itself (tsgo) reads the project's sources from disk; every file the shell reads or
 // writes (the tsconfig and the generated files) goes through the FileSystem service, so a fake
 // one shows exactly which files it writes.
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
 import { Effect, Exit, FileSystem, PlatformError, Scope } from "effect";
 
@@ -228,6 +229,37 @@ describe("generate", () => {
       assert.instanceOf(checked, ConfigError);
     }).pipe(Effect.provide(fs.layer));
   });
+
+  // Real projects on disk: the outputs alias one file only through the file system.
+  for (const [alias, tsClientEnums, prepare] of [
+    [
+      "a symlinked directory",
+      "./link/schema.ts",
+      (dir: string) => {
+        mkdirSync(join(dir, "real"));
+        symlinkSync(join(dir, "real"), join(dir, "link"));
+      },
+    ],
+    ["letter case", "./real/SCHEMA.ts", (dir: string) => mkdirSync(join(dir, "real"))],
+  ] as const) {
+    it.effect(`rejects two outputs that are one file through ${alias}`, () => {
+      const project = smokeCopy("output-alias");
+      prepare(project.dir);
+      const tsconfig = project.path("tsconfig.json");
+      const config = readFileSync(tsconfig, "utf8").replace(
+        '"tsSchema": "./schema.ts",',
+        `"tsSchema": "./real/schema.ts", "tsClientEnums": "${tsClientEnums}",`,
+      );
+      expect(config).toContain("tsClientEnums");
+      writeFileSync(tsconfig, config);
+      return Effect.gen(function* () {
+        const error = yield* Effect.flip(Effect.scoped(generate(tsconfig)));
+        assert.instanceOf(error, ConfigError);
+        expect(error.message).toContain("Two generated files would both be written to");
+        yield* Effect.flip(Effect.scoped(check(tsconfig)));
+      }).pipe(Effect.provide(NodeFileSystem.layer), Effect.ensuring(Effect.sync(project.remove)));
+    });
+  }
 
   it.effect("reports a tsconfig that is not JSON with comments as a ConfigError", () => {
     const fs = memoryFileSystem({ [smokeTsconfig]: '{ "grats": { ' });

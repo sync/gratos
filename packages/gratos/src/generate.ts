@@ -6,7 +6,7 @@
 // caller's Scope), builds the schema and writes each output file only when its content differs.
 // check(tsconfig) does the same without writing, and fails with StaleFilesError when a file is
 // missing or out of date.
-import { dirname, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { Data, Effect, FileSystem, Option, Result } from "effect";
 import type { PlatformError } from "effect";
@@ -203,6 +203,30 @@ const readOutput = (fs: FileSystem.FileSystem, path: string) =>
     Effect.mapError(outputError("read", path)),
   );
 
+/**
+ * Where a generated file lands, for comparing outputs: the real path of its nearest existing
+ * ancestor (symlinks resolved) joined with the rest, lowercased. Two outputs that alias one file
+ * through a symlinked directory, or through letter case on a case-insensitive file system
+ * (macOS, Windows), then compare equal. Lowercasing also rejects outputs that differ only by
+ * case on a case-sensitive one, which no project needs.
+ */
+const destinationOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, path: string) {
+  const rest: Array<string> = [];
+  let current = path;
+  for (;;) {
+    const real = yield* Effect.option(fs.realPath(current));
+    if (Option.isSome(real)) {
+      return join(real.value, ...rest).toLowerCase();
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return path.toLowerCase();
+    }
+    rest.unshift(basename(current));
+    current = parent;
+  }
+});
+
 const utf8 = new TextEncoder();
 
 /** Whether `bytes` are exactly `content` as Gratos writes it (UTF-8, no byte order mark). */
@@ -232,9 +256,9 @@ const build = Effect.fnUntraced(function* (tsconfig: string) {
     return yield* diagnosticsError(result.err);
   }
   const planned = outputs(configPath, config, result.value);
-  const collision = planned.find(
-    (output, i) => planned.findIndex((other) => other.path === output.path) !== i,
-  );
+  const destinations = yield* Effect.forEach(planned, (output) => destinationOf(fs, output.path));
+  const collision =
+    planned[destinations.findIndex((destination, i) => destinations.indexOf(destination) !== i)];
   if (collision !== undefined) {
     // Writing both would leave whichever came last, so every run would rewrite the file and
     // --check would never pass (for example `graphqlSchema: "schema.gql"` with metadata on,
