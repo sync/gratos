@@ -13,6 +13,7 @@
     "packages/gratos/test/fixtures/**",
     "packages/gratos/test/integrationFixtures/**",
     "packages/gratos/test/configParserFixtures/**",
-    "packages/gratos/test/smoke/schema.ts"
+    "packages/gratos/test/smoke/schema.ts",
+    "packages/gratos/bench/.fixture/**"
   ]
 }
