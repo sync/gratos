@@ -326,6 +326,9 @@ const DROPPED_OPTIONS: ReadonlySet<string> = new Set([
  * lives in the current directory, so a relative substitution written into it as is would move
  * there.
  */
+/** TypeScript's own test for a relative path: ".", "..", or either followed by / or \. */
+const isRelative = (substitution: string): boolean => /^\.\.?(?:$|[\\/])/.test(substitution);
+
 const absolutePaths = (paths: unknown, options: CompilerOptions): unknown => {
   const baseUrl = options["baseUrl"];
   const base = baseUrl ?? options["pathsBasePath"];
@@ -334,8 +337,7 @@ const absolutePaths = (paths: unknown, options: CompilerOptions): unknown => {
   }
   // Without baseUrl, TypeScript rejects a bare substitution (TS5090); keep it bare so it still does.
   const isRebased = (substitution: string): boolean =>
-    !isAbsolute(substitution) &&
-    (baseUrl !== undefined || substitution.startsWith("./") || substitution.startsWith("../"));
+    !isAbsolute(substitution) && (baseUrl !== undefined || isRelative(substitution));
   // Prefix the base without normalizing: `*` must stay in place until TypeScript expands it,
   // so `./src/*/../shared` cannot collapse to `./src/shared`.
   const rebase = (substitution: string): string =>
@@ -382,10 +384,19 @@ const toTsconfigOptions = (
 let virtualConfigCount = 0;
 
 /** Opens a virtual tsconfig with these contents on `session`. */
-const openVirtualProgram = (session: Session, tsconfig: unknown): FacadeProgram => {
+/**
+ * Opens a program from a virtual tsconfig placed in `directory`. TypeScript derives defaults such
+ * as the `node_modules/@types` lookup from the config's directory, so a config built from a parsed
+ * tsconfig must sit beside it.
+ */
+const openVirtualProgram = (
+  session: Session,
+  tsconfig: unknown,
+  directory: string = process.cwd(),
+): FacadeProgram => {
   virtualConfigCount += 1;
   const configPath = join(
-    process.cwd(),
+    directory,
     `__gratos_virtual_${process.pid}_${virtualConfigCount}__.tsconfig.json`,
   );
   session.virtualFiles.set(configPath, JSON.stringify(tsconfig));
@@ -414,11 +425,15 @@ const programForParsedConfig = (
     if (session.current?.project !== parsed.program.project) {
       // The config may have changed on disk since it was parsed (a later parse restarts the
       // session), so build exactly what the caller passed, as TypeScript 5 would.
-      parsed.program = openVirtualProgram(session, {
-        compilerOptions: toTsconfigOptions(options),
-        files: rootNames.map((fileName) => resolve(fileName)),
-        include: [],
-      });
+      parsed.program = openVirtualProgram(
+        session,
+        {
+          compilerOptions: toTsconfigOptions(options),
+          files: rootNames.map((fileName) => resolve(fileName)),
+          include: [],
+        },
+        dirname(configPath),
+      );
     }
     return parsed.program;
   }
@@ -432,12 +447,16 @@ const programForParsedConfig = (
       return [[key, options[key] ?? null]];
     }),
   );
-  return openVirtualProgram(session, {
-    extends: configPath,
-    compilerOptions: toTsconfigOptions(changed, options),
-    files: rootNames.map((fileName) => resolve(fileName)),
-    include: [],
-  });
+  return openVirtualProgram(
+    session,
+    {
+      extends: configPath,
+      compilerOptions: toTsconfigOptions(changed, options),
+      files: rootNames.map((fileName) => resolve(fileName)),
+      include: [],
+    },
+    dirname(configPath),
+  );
 };
 
 /** TypeScript 5's createProgram(rootNames, options, host). */

@@ -48,6 +48,13 @@ const sourceFileNames = (program: FacadeProgram): Array<string> =>
 const optionsDiagnosticCodes = (program: FacadeProgram): Array<number> =>
   program.getOptionsDiagnostics().map((diagnostic) => diagnostic.code);
 
+const allDiagnosticCodes = (program: FacadeProgram): Array<number> =>
+  [
+    ...program.getOptionsDiagnostics(),
+    ...program.getGlobalDiagnostics(),
+    ...program.getSemanticDiagnostics(),
+  ].map((diagnostic) => diagnostic.code);
+
 const format = (diagnostics: ReadonlyArray<Diagnostic>, directory: string): string =>
   stripVTControlCharacters(
     formatDiagnosticsWithColorAndContext(diagnostics, {
@@ -178,6 +185,41 @@ describe("createProgram with the options of a parsed config", () => {
     expect(
       optionsDiagnosticCodes(createProgram(parsed.fileNames, { ...parsed.options })),
     ).toContain(5090);
+  });
+  it("finds the config's own node_modules/@types when it builds from saved options", () => {
+    // TypeScript looks up `types` in node_modules/@types beside the tsconfig, so a program
+    // rebuilt from the options of a nested config must keep that directory.
+    const root = project({
+      "nested/tsconfig.json": JSON.stringify({ compilerOptions: { strict: true, types: ["foo"] } }),
+      "nested/node_modules/@types/foo/index.d.ts": "declare const fooGlobal: number;\n",
+      "nested/a.ts": "export const a = fooGlobal;\n",
+    });
+    const configPath = join(root, "nested", "tsconfig.json");
+    const first = getParsedCommandLineOfConfigFile(configPath);
+    // Whatever the original parse reports (the CLI's fast loading blanks third-party
+    // declarations), the rebuilt program must report the same, and never TS2688 for `foo`.
+    const expected = allDiagnosticCodes(first.program);
+    getParsedCommandLineOfConfigFile(configPath);
+    const program = createProgram(first.fileNames, first.options);
+    expect(allDiagnosticCodes(program)).toEqual(expected);
+    expect(allDiagnosticCodes(program)).not.toContain(2688);
+  });
+
+  it("rebases '.', '..' and backslash alias substitutions as TypeScript does without baseUrl", () => {
+    const root = project({
+      "nested/tsconfig.json": tsconfig({
+        paths: { "@root": ["."], "@up/*": ["../shared/*"], "@win/*": [String.raw`.\win\*`] },
+      }),
+      "nested/index.ts": "export const r = 1;\n",
+      "shared/s.ts": "export const s = 2;\n",
+      "nested/win/w.ts": "export const w = 3;\n",
+      "nested/main.ts":
+        'import { r } from "@root";\nimport { s } from "@up/s";\nimport { w } from "@win/w";\nexport const m = r + s + w;\n',
+    });
+    const parsed = getParsedCommandLineOfConfigFile(join(root, "nested", "tsconfig.json"));
+    expect(allDiagnosticCodes(parsed.program)).toEqual([]);
+    // A clone is not the parsed object, so every option goes through the tsconfig conversion.
+    expect(allDiagnosticCodes(createProgram(parsed.fileNames, { ...parsed.options }))).toEqual([]);
   });
 });
 
