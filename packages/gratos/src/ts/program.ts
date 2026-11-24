@@ -7,7 +7,7 @@
 // explicit `files` and the given compiler options, served by the session's readFile callback,
 // and loads every file in full.
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { parse as parseJsonc } from "jsonc-parser";
 import type { ParseError } from "jsonc-parser";
@@ -313,13 +313,53 @@ const ENUM_OPTIONS: ReadonlyMap<string, ReadonlyMap<number, string>> = new Map([
   ],
 ]);
 /** Options that only describe where a config came from, or only matter for emit. */
-const DROPPED_OPTIONS: ReadonlySet<string> = new Set(["configFilePath", "outDir", "rootDir"]);
+const DROPPED_OPTIONS: ReadonlySet<string> = new Set([
+  "configFilePath",
+  "outDir",
+  "pathsBasePath",
+  "rootDir",
+]);
 
-const toTsconfigOptions = (options: CompilerOptions): CompilerOptions =>
+/**
+ * `paths` with relative substitutions made absolute. TypeScript resolves them against `baseUrl`,
+ * or else `pathsBasePath`, the directory of the tsconfig that set `paths`. A virtual tsconfig
+ * lives in the current directory, so a relative substitution written into it as is would move
+ * there.
+ */
+const absolutePaths = (paths: unknown, options: CompilerOptions): unknown => {
+  const base = options["baseUrl"] ?? options["pathsBasePath"];
+  if (typeof base !== "string" || paths === null || typeof paths !== "object") {
+    return paths;
+  }
+  return Object.fromEntries(
+    Object.entries(paths).map(([pattern, substitutions]: [string, unknown]) => [
+      pattern,
+      Array.isArray(substitutions)
+        ? substitutions.map((substitution: unknown) =>
+            typeof substitution === "string" && !isAbsolute(substitution)
+              ? resolve(base, substitution)
+              : substitution,
+          )
+        : substitutions,
+    ]),
+  );
+};
+
+/**
+ * `options` as a tsconfig's compilerOptions. `context` is the full set of options they belong
+ * to, which gives relative `paths` their base.
+ */
+const toTsconfigOptions = (
+  options: CompilerOptions,
+  context: CompilerOptions = options,
+): CompilerOptions =>
   Object.fromEntries(
     Object.entries(options).flatMap(([key, value]): Array<[string, unknown]> => {
       if (DROPPED_OPTIONS.has(key) || value === undefined) {
         return [];
+      }
+      if (key === "paths") {
+        return [[key, absolutePaths(value, context)]];
       }
       const names = ENUM_OPTIONS.get(key);
       if (names !== undefined && typeof value === "number") {
@@ -379,7 +419,7 @@ const programForParsedConfig = (
   );
   return openVirtualProgram(session, {
     extends: configPath,
-    compilerOptions: toTsconfigOptions(changed),
+    compilerOptions: toTsconfigOptions(changed, options),
     files: rootNames.map((fileName) => resolve(fileName)),
     include: [],
   });

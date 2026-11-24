@@ -112,6 +112,25 @@ describe("createProgram with the options of a parsed config", () => {
     const program = createProgram(parsed.fileNames, parsed.options);
     expect(sourceFileNames(program)).toEqual([join(directory, "a.ts")]);
   });
+
+  it("keeps relative path aliases of a nested tsconfig when the caller adds one", () => {
+    // TypeScript resolves the aliases against the nested tsconfig's directory, not the current
+    // directory, where the facade's virtual tsconfig lives.
+    const root = project({
+      "nested/tsconfig.json": tsconfig({ paths: { "@a/*": ["./src/a/*"] } }),
+      "nested/src/a/x.ts": "export const a = 1;\n",
+      "nested/src/b/y.ts": "export const b = 2;\n",
+      "nested/src/main.ts":
+        'import { a } from "@a/x";\nimport { b } from "@b/y";\nexport const m = a + b;\n',
+    });
+    const parsed = getParsedCommandLineOfConfigFile(join(root, "nested", "tsconfig.json"));
+    expect(parsed.options["paths"]).toEqual({ "@a/*": ["./src/a/*"] });
+    const program = createProgram(parsed.fileNames, {
+      ...parsed.options,
+      paths: { "@a/*": ["./src/a/*"], "@b/*": ["./src/b/*"] },
+    });
+    expect(program.getSemanticDiagnostics()).toEqual([]);
+  });
 });
 
 describe("getParsedCommandLineOfConfigFile", () => {
