@@ -5,10 +5,14 @@
 // through graphql 17's parse/print, and must equal ours byte for byte. graphql 17's
 // findBreakingChanges / findDangerousChanges must also report nothing in either direction.
 //
-// Generated TypeScript and query results are compared with upstream's own recordings: the
-// `.expected.md` snapshots that upstream's engine wrote. The fixture suites assert equality with
-// them, and the check below proves from vendor-changes.json that no snapshot holding upstream's
-// TypeScript or Query Result output was changed (only the listed SDL/message/cut snapshots were).
+// The generated schema.ts is compared live too, byte for byte, with Gratos' codegen deltas
+// (src/effect/codegen.ts: explicit method resolvers, the jit and semanticNonNull markers) turned
+// off through the internal withUpstreamCodegen switch. Each delta is then attributed: turned on
+// alone, it changes exactly the fixtures it applies to, and nothing else.
+//
+// Query results are compared with upstream's own recordings: the integration fixtures'
+// `.expected.md` snapshots. The check below proves from vendor-changes.json that none of them
+// changed, and that every changed TypeScript snapshot is one the deltas account for.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, relative, sep } from "node:path";
@@ -20,9 +24,12 @@ import { buildSchemaAndDocResult as oracleBuildSchemaAndDocResult } from "grats-
 import { validateGratsOptions as oracleValidateGratsOptions } from "grats-upstream/dist/src/gratsConfig.js";
 import { describe, expect, it } from "vitest";
 
+import { withCodegenDeltas, withUpstreamCodegen } from "../src/effect/codegen.ts";
+import type { CodegenDelta } from "../src/effect/codegen.ts";
 import { printExecutableSchema } from "../src/upstream/printSchema.ts";
 import { validateGratsOptions } from "../src/upstream/gratsConfig.ts";
 import { buildSchemaAndDocResult } from "../src/upstream/lib.ts";
+import type { Metadata, ResolverDefinition } from "../src/upstream/metadata.ts";
 
 const fixturesDir = join(import.meta.dirname, "fixtures");
 const typesFile = join(import.meta.dirname, "..", "src", "upstream", "Types.ts");
@@ -85,7 +92,7 @@ const optionsFor = (fileName: string, code: string, extra: { libraryImport?: str
   fileNames: [join(fixturesDir, fileName), typesFile],
 });
 
-/** Our SDL document and generated schema.ts for a fixture. */
+/** Our SDL document, resolver metadata and generated schema.ts (with the given deltas) for a fixture. */
 const ours = (fileName: string, code: string) => {
   const options = validateGratsOptions(optionsFor(fileName, code, { libraryImport: "grats" }));
   if (options.kind === "ERROR") {
@@ -96,14 +103,18 @@ const ours = (fileName: string, code: string) => {
     throw new Error("vendored engine reported diagnostics");
   }
   const { schema, doc, resolvers } = result.value;
+  const print = () =>
+    printExecutableSchema(schema, resolvers, options.value.raw.grats, join(fixturesDir, fileName));
   return {
     doc,
-    ts: printExecutableSchema(
-      schema,
-      resolvers,
-      options.value.raw.grats,
-      join(fixturesDir, fileName),
-    ),
+    resolvers,
+    emitsResolverMap: options.value.raw.grats.EXPERIMENTAL__emitResolverMap,
+    /** schema.ts as upstream generates it: every Gratos codegen delta off. */
+    upstreamTs: withUpstreamCodegen(print),
+    /** schema.ts as Gratos ships it (every delta on). */
+    shippedTs: print(),
+    /** schema.ts with only `delta` on. */
+    tsWith: (delta: CodegenDelta) => withCodegenDeltas(new Set([delta]), print),
   };
 };
 
@@ -131,11 +142,63 @@ const oracle = (fileName: string, code: string) => {
 
 /** Snapshots recorded in vendor-changes.json, which lists every intentionally changed vendored file. */
 const LedgerChanges = Schema.Struct({ changes: Schema.Record(Schema.String, Schema.Unknown) });
+/** Fixtures whose schema.ts each codegen delta changes (counted from the run, set deliberately). */
+const METHOD_RESOLVER_FIXTURES = 60;
+const JIT_MARKER_FIXTURES = 3;
+const CHANGED_FIXTURES = 63;
+
 const changedVendoredFiles = Object.keys(
   Schema.decodeUnknownSync(LedgerChanges)(
     JSON.parse(readFileSync(join(import.meta.dirname, "..", "vendor-changes.json"), "utf8")),
   ).changes,
 );
+
+/** The resolver definitions of every object type field, as codegen sees them. */
+const resolverDefinitions = (resolvers: Metadata): Array<ResolverDefinition> =>
+  Object.values(resolvers.types).flatMap((fields) =>
+    Object.values(fields).map((field) => field.resolver),
+  );
+
+/** Upstream's isDefaultResolverSignature for a method: upstream emits no resolve for it. */
+const isUpstreamDefaultMethod = (fieldName: string, resolver: ResolverDefinition): boolean =>
+  resolver.kind === "method" &&
+  (resolver.name === null || resolver.name === fieldName) &&
+  (resolver.arguments ?? []).every((argument, i) => i === 0 && argument.kind === "argumentsObject");
+
+/** Fixtures each codegen delta applies to, from the engine's resolver metadata. */
+const appliesTo: Record<CodegenDelta, (mine: ReturnType<typeof ours>) => boolean> = {
+  // §8: a method field that upstream resolves with graphql-js' default resolver.
+  methodResolvers: (mine) =>
+    Object.values(mine.resolvers.types).some((fields) =>
+      Object.entries(fields).some(([fieldName, field]) =>
+        isUpstreamDefaultMethod(fieldName, field.resolver),
+      ),
+    ),
+  // A resolver with a GqlInfo parameter, in a schema.ts with field configs (not a resolver map).
+  jitMarker: (mine) =>
+    !mine.emitsResolverMap &&
+    resolverDefinitions(mine.resolvers).some(
+      (resolver) =>
+        resolver.kind !== "property" &&
+        (resolver.arguments ?? []).some((argument) => argument.kind === "information"),
+    ),
+  // An Effect.Effect resolver: upstream fixtures have none.
+  effectSemanticNonNull: () => false,
+};
+
+const DELTAS: ReadonlyArray<CodegenDelta> = [
+  "methodResolvers",
+  "jitMarker",
+  "effectSemanticNonNull",
+];
+
+/** Per delta, the fixtures whose schema.ts it changes; filled by the per-fixture tests. */
+const changedBy: Record<CodegenDelta | "any", Set<string>> = {
+  methodResolvers: new Set(),
+  jitMarker: new Set(),
+  effectSemanticNonNull: new Set(),
+  any: new Set(),
+};
 
 describe("parity with grats@0.0.36", () => {
   it("compares every eligible fixture", () => {
@@ -144,26 +207,6 @@ describe("parity with grats@0.0.36", () => {
     expect(fixtures.filter(isTsVersionGated)).toEqual([
       "descriptions/DescriptionWithGitHubHandle.ts",
       "user_error/TypeErrorWithTypeCheckingEnabled.ts",
-    ]);
-  });
-
-  it("keeps upstream's recorded query results and generated TypeScript", () => {
-    expect(
-      changedVendoredFiles.filter((file) => file.startsWith("test/integrationFixtures/")),
-    ).toEqual([]);
-    const changedSnapshotsWithTypeScript = changedVendoredFiles
-      .filter((file) => file.startsWith("test/fixtures/") && file.endsWith(".expected.md"))
-      .filter((file) => {
-        const path = join(import.meta.dirname, "..", file);
-        // Removed files (the cut locate fixtures) are in the ledger too.
-        return existsSync(path) && readFileSync(path, "utf8").includes("### TypeScript");
-      });
-    // These 3 changed only their SDL (graphql 17 prints object literals with spaces); their
-    // TypeScript sections are untouched, which the git history of each file shows.
-    expect(changedSnapshotsWithTypeScript.toSorted()).toEqual([
-      "test/fixtures/arguments/PositionalArgDeprecatedWithDefault.ts.expected.md",
-      "test/fixtures/default_values/DefaultArgumentObjectLiteral.ts.expected.md",
-      "test/fixtures/enums/NonNullEnumDefaultInInputObject.ts.expected.md",
     ]);
   });
 
@@ -176,9 +219,22 @@ describe("parity with grats@0.0.36", () => {
     it.skipIf(isTsVersionGated(fixture))(fixture, () => {
       const mine = ours(fixture, code);
       const reference = oracle(fixture, code);
-      // The complete generated schema.ts (with tsSchemaHeader, or the resolver map when configured):
-      // our TypeScript 7 printer against the oracle's TypeScript 5.9.2 printer, byte for byte.
-      expect(mine.ts).toBe(reference.ts);
+      // The complete generated schema.ts (with tsSchemaHeader, or the resolver map when configured),
+      // with Gratos' codegen deltas off: our TypeScript 7 printer against the oracle's TypeScript
+      // 5.9.2 printer, byte for byte.
+      expect(mine.upstreamTs).toBe(reference.ts);
+
+      // Each delta, alone, changes schema.ts exactly when the fixture has a field it applies to.
+      for (const delta of DELTAS) {
+        const changed = mine.tsWith(delta) !== reference.ts;
+        expect({ delta, changed }).toEqual({ delta, changed: appliesTo[delta](mine) });
+        if (changed) {
+          changedBy[delta].add(fixture);
+        }
+      }
+      if (mine.shippedTs !== reference.ts) {
+        changedBy.any.add(fixture);
+      }
 
       const theirs = parse(reference.sdl);
       expect(print(mine.doc)).toBe(print(theirs));
@@ -191,4 +247,54 @@ describe("parity with grats@0.0.36", () => {
       expect(findDangerousChanges(oursSchema, theirsSchema)).toEqual([]);
     });
   }
+
+  // Runs after the per-fixture tests (vitest runs a file's tests in order).
+  it("attributes every schema.ts difference to a codegen delta", () => {
+    // The shipped output differs from upstream's exactly on the union of the deltas' fixtures.
+    expect([...changedBy.any].toSorted()).toEqual(
+      [...new Set([...changedBy.methodResolvers, ...changedBy.jitMarker])].toSorted(),
+    );
+    expect({
+      methodResolvers: changedBy.methodResolvers.size,
+      jitMarker: changedBy.jitMarker.size,
+      effectSemanticNonNull: changedBy.effectSemanticNonNull.size,
+      any: changedBy.any.size,
+    }).toEqual({
+      methodResolvers: METHOD_RESOLVER_FIXTURES,
+      jitMarker: JIT_MARKER_FIXTURES,
+      effectSemanticNonNull: 0,
+      any: CHANGED_FIXTURES,
+    });
+  });
+
+  it("keeps upstream's recorded query results, and changes only delta-attributed TypeScript", () => {
+    // No integration snapshot (Query Result) changed. Only the generated schema.ts of the two
+    // fixtures with a method field changed (§8), and their Query Results are still upstream's.
+    expect(
+      changedVendoredFiles.filter((file) => file.startsWith("test/integrationFixtures/")),
+    ).toEqual([
+      "test/integrationFixtures/killsParentOnException/schema.ts",
+      "test/integrationFixtures/killsParentOnExceptionReturnsNull/schema.ts",
+    ]);
+    const changedSnapshotsWithTypeScript = changedVendoredFiles
+      .filter((file) => file.startsWith("test/fixtures/") && file.endsWith(".expected.md"))
+      .filter((file) => {
+        const path = join(import.meta.dirname, "..", file);
+        // Removed files (the cut locate fixtures) are in the ledger too.
+        return existsSync(path) && readFileSync(path, "utf8").includes("### TypeScript");
+      });
+    // These 3 changed their SDL in M1b (graphql 17 prints object literals with spaces); every other
+    // changed snapshot with a TypeScript section is one whose schema.ts a codegen delta changes.
+    const sdlOnly = [
+      "test/fixtures/arguments/PositionalArgDeprecatedWithDefault.ts.expected.md",
+      "test/fixtures/default_values/DefaultArgumentObjectLiteral.ts.expected.md",
+      "test/fixtures/enums/NonNullEnumDefaultInInputObject.ts.expected.md",
+    ];
+    const deltaSnapshots = [...changedBy.any].map(
+      (fixture) => `test/fixtures/${fixture}.expected.md`,
+    );
+    expect(changedSnapshotsWithTypeScript.toSorted()).toEqual(
+      [...new Set([...sdlOnly, ...deltaSnapshots])].toSorted(),
+    );
+  });
 });
