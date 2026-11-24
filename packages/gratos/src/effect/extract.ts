@@ -4,6 +4,8 @@
 import {
   isIdentifier,
   isLiteralTypeNode,
+  isMethodDeclaration,
+  isMethodSignature,
   isTypeReferenceNode,
   isUnionTypeNode,
   SyntaxKind,
@@ -11,7 +13,9 @@ import {
 import type { Node, TypeNode, TypeReferenceNode } from "#typescript";
 import type { TypeNode as GraphQLTypeNode } from "graphql";
 
+import { questionTokenOf } from "../ts/compat.ts";
 import type { GraphQLConstructor } from "../upstream/GraphQLConstructor.ts";
+import type { ResolverSignature } from "../upstream/resolverSignature.ts";
 import "./astExtensions.ts";
 import {
   effectDerivedContext,
@@ -128,3 +132,12 @@ export const rejectEffectDerivedContext = (
   extractor.report(awaited, effectDerivedContext(wrapper));
   return true;
 };
+
+/**
+ * Whether a field is backed by an optional method (`name?(): T`), which a valid source may omit.
+ * The vendored GraphQLConstructor records it on the field as `optionalMethod`.
+ */
+export const isOptionalMethod = (node: Node, resolver: ResolverSignature): boolean =>
+  resolver.kind === "method" &&
+  (isMethodDeclaration(node) || isMethodSignature(node)) &&
+  questionTokenOf(node) !== undefined;

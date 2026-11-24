@@ -67,6 +67,14 @@ export const withUpstreamCodegen = <A>(f: () => A): A => withCodegenDeltas(new S
 export const alwaysResolveMethods = (): boolean => isCodegenDeltaEnabled("methodResolvers");
 
 /**
+ * Whether a method field's explicit resolve calls the method with `?.`: the method is optional,
+ * so a valid source may omit it. graphql-js' default resolver, which upstream uses for such a
+ * field, then resolves to `null`; a plain call would throw instead.
+ */
+export const optionalMethodCall = (field: GraphQLField<unknown, unknown> | undefined): boolean =>
+  alwaysResolveMethods() && field?.astNode?.optionalMethod === true;
+
+/**
  * Whether codegen must give a field an explicit resolve although its resolver signature is
  * graphql-js' default (a same-name property or getter): it returns `Effect.Effect`.
  */

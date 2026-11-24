@@ -17,5 +17,10 @@ declare module "graphql" {
      * generated resolve method gets the `semanticNonNull` marker instead of `assertNonNull`.
      */
     returnsEffect?: boolean;
+    /**
+     * Gratos metadata: the field is an optional method (`name?(): T`). A source may omit it, so
+     * its explicit resolve calls it with `?.`, as graphql-js' default resolver tolerated.
+     */
+    optionalMethod?: boolean;
   }
 }
