@@ -292,7 +292,9 @@ describe("generate", () => {
         const error = yield* Effect.flip(Effect.scoped(generate(tsconfig)));
         assert.instanceOf(error, ConfigError);
         expect(error.message).toContain("Two generated files would both be written to");
-        yield* Effect.flip(Effect.scoped(check(tsconfig)));
+        // A ConfigError, not StaleFilesError: no output exists yet, so check() would fail anyway.
+        const checked = yield* Effect.flip(Effect.scoped(check(tsconfig)));
+        assert.instanceOf(checked, ConfigError);
       }).pipe(Effect.provide(NodeFileSystem.layer), Effect.ensuring(Effect.sync(project.remove)));
     });
   }
