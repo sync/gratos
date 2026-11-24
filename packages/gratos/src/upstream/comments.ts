@@ -1,7 +1,6 @@
 import * as ts from "typescript-baseline";
 import { rangeErr } from "./utils/DiagnosticError.ts";
 import * as E from "./Errors.ts";
-import * as Act from "./CodeActions.ts";
 import {
   ALL_GQL_TAGS,
   KILLS_PARENT_ON_EXCEPTION_TAG,
@@ -40,20 +39,12 @@ export function detectInvalidComments(
       }
       if (isLine) {
         errors.push(
-          rangeErr(sourceFile, range, E.gqlTagInLineComment(), [], {
-            fixName: "convert-line-comment-to-docblock-comment",
-            description: "Convert to a docblock comment",
-            changes: [Act.convertLineCommentToDocblock(sourceFile, comment)],
-          }),
+          rangeErr(sourceFile, range, E.gqlTagInLineComment(), []),
         );
       } else {
         if (textSlice[0] !== "*") {
           errors.push(
-            rangeErr(sourceFile, range, E.gqlTagInNonJSDocBlockComment(), [], {
-              fixName: "convert-block-comment-to-docblock-comment",
-              description: "Convert to a docblock comment",
-              changes: [Act.convertBlockCommentToDocblock(sourceFile, comment)],
-            }),
+            rangeErr(sourceFile, range, E.gqlTagInNonJSDocBlockComment(), []),
           );
         } else {
           errors.push(

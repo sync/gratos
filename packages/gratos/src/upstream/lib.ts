@@ -40,7 +40,6 @@ import { validateSomeTypesAreDefined } from "./validations/validateSomeTypesAreD
 
 // Export the TypeScript plugin implementation used by
 // grats-ts-plugin
-export { initTsPlugin } from "./tsPlugin/initTsPlugin.ts";
 
 export type { GratsConfig } from "./gratsConfig.ts";
 

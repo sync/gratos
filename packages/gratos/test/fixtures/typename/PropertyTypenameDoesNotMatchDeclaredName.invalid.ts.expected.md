@@ -21,33 +21,3 @@ src/tests/fixtures/typename/PropertyTypenameDoesNotMatchDeclaredName.invalid.ts:
 3   __typename = "UserModel" as const;
                  ~~~~~~~~~~~
 ```
-
-#### Code Action: "Create Grats-compatible `__typename` property" (fix-typename-property)
-
-```diff
-- Original
-+ Fixed
-
-@@ -2,3 +2,3 @@
-  export class UserModel {
--   __typename = "UserModel" as const;
-+   __typename = "User" as const;
-    /** @gqlField */
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Create Grats-compatible `__typename` property" in grats/src/tests/fixtures/typename/PropertyTypenameDoesNotMatchDeclaredName.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-/** @gqlType User */
-export class UserModel {
-  __typename = "User" as const;
-  /** @gqlField */
-  name: string = "Alice";
-}
-```

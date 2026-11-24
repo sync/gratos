@@ -16,25 +16,3 @@ src/tests/fixtures/user_error/GqlTagDoesNotExist.invalid.ts:1:6 - error: `@gqlFi
 1 /** @gqlFiled */
        ~~~~~~~~
 ```
-
-#### Code Action: "Change to @gqlField" (change-to-gqlField)
-
-```diff
-- Original
-+ Fixed
-
-- /** @gqlFiled */
-+ /** @gqlField */
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Change to @gqlField" in grats/src/tests/fixtures/user_error/GqlTagDoesNotExist.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-/** @gqlField */
-```

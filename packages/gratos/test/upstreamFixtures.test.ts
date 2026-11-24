@@ -1,7 +1,7 @@
 // A vitest port of upstream Grats v0.0.36 src/tests/test.ts (MIT): the three fixture suites
 // (config parser, schema fixtures, integration fixtures). The transformers follow upstream
 // closely, so the committed `.expected.md` snapshots stay the source of truth.
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { Predicate, Schema } from "effect";
@@ -14,25 +14,20 @@ import {
   printSchema,
   specifiedScalarTypes,
 } from "graphql";
-import { diff } from "jest-diff";
 import { createCompilerHost, version as tsVersion } from "typescript-baseline";
-import type { TextChange } from "typescript-baseline";
 import { vi } from "vitest";
 
 import { codegen } from "../src/upstream/codegen/schemaCodegen.ts";
-import { applyFixes } from "../src/upstream/fixFixable.ts";
 import { validateGratsOptions } from "../src/upstream/gratsConfig.ts";
 import type { ParsedCommandLineGrats } from "../src/upstream/gratsConfig.ts";
 import { buildSchemaAndDocResult, buildSchemaAndDocResultWithHost } from "../src/upstream/lib.ts";
-import { locate } from "../src/upstream/Locate.ts";
 import {
   applySDLHeader,
   applyTypeScriptHeader,
   printEnumsModule,
 } from "../src/upstream/printSchema.ts";
 import { SEMANTIC_NON_NULL_DIRECTIVE } from "../src/upstream/publicDirectives.ts";
-import { gqlErr, ReportableDiagnostics } from "../src/upstream/utils/DiagnosticError.ts";
-import { extend } from "../src/upstream/utils/helpers.ts";
+import { ReportableDiagnostics } from "../src/upstream/utils/DiagnosticError.ts";
 
 import { defineFixtureSuite } from "./support/fixtureRunner.ts";
 import type { TransformerResult } from "./support/fixtureRunner.ts";
@@ -112,8 +107,6 @@ const toUpstreamPaths = (text: string): string =>
     /(^|\s)test\/(fixtures|integrationFixtures|configParserFixtures)\//g,
     "$1src/tests/$2/",
   );
-
-const noColor = (text: string): string => text;
 
 defineFixtureSuite({
   name: "configParserFixtures",
@@ -213,25 +206,6 @@ defineFixtureSuite({
       parsedOptions.raw.grats,
       codegen(schema, resolvers, parsedOptions.raw.grats, join(fixturesDir, fileName)),
     );
-
-    const locationMatch = /^\/\/ Locate: (.*)/.exec(code);
-    if (locationMatch !== null) {
-      const locResult = locate(schema, (locationMatch[1] ?? "").trim());
-      if (locResult.kind === "ERROR") {
-        const markdown = new Markdown();
-        markdown.addHeader(3, "Error Locating Type");
-        markdown.addCodeBlock(locResult.err, "text");
-        return err(markdown);
-      }
-      return err(
-        formatDiagnosticsWithContext(
-          code,
-          new ReportableDiagnostics(compilerHost, [
-            gqlErr({ loc: locResult.value }, "Located here"),
-          ]),
-        ),
-      );
-    }
 
     const docSansDirectives = {
       ...doc,
@@ -335,78 +309,14 @@ const printSDLWithoutSemanticNonNull = (schema: GraphQLSchema): string =>
 const compareSchemas = (actual: GraphQLSchema, expected: GraphQLSchema): string | null => {
   const actualSDL = printSDLWithoutSemanticNonNull(actual);
   const expectedSDL = printSDLWithoutSemanticNonNull(expected);
-  return actualSDL === expectedSDL ? null : diff(expectedSDL, actualSDL);
+  return actualSDL === expectedSDL
+    ? null
+    : `--- SDL schema\n${expectedSDL}\n--- codegen schema\n${actualSDL}`;
 };
 
-function formatDiagnosticsWithContext(code: string, diagnostics: ReportableDiagnostics): Markdown {
+function formatDiagnosticsWithContext(_code: string, diagnostics: ReportableDiagnostics): Markdown {
   const markdown = new Markdown();
   markdown.addHeader(3, "Error Report");
   markdown.addCodeBlock(toUpstreamPaths(diagnostics.formatDiagnosticsWithContext()), "text");
-
-  const actions: Array<{ fixName: string; description: string; diff: string }> = [];
-  for (const diagnostic of diagnostics._diagnostics) {
-    if (diagnostic.fix === undefined) {
-      continue;
-    }
-    const textChanges: Array<TextChange> = [];
-    for (const change of diagnostic.fix.changes) {
-      extend(textChanges, change.textChanges);
-    }
-    let newCode = code;
-    // Apply edits in reverse so earlier spans stay valid.
-    for (const textChange of textChanges.toSorted((a, b) => b.span.start - a.span.start)) {
-      newCode =
-        newCode.slice(0, textChange.span.start) +
-        textChange.newText +
-        newCode.slice(textChange.span.start + textChange.span.length);
-    }
-    actions.push({
-      fixName: diagnostic.fix.fixName,
-      description: diagnostic.fix.description,
-      diff:
-        diff(code, newCode, {
-          aAnnotation: "Original",
-          bAnnotation: "Fixed",
-          aColor: noColor,
-          bColor: noColor,
-          changeColor: noColor,
-          commonColor: noColor,
-          patchColor: noColor,
-          contextLines: 1,
-          expand: false,
-        }) ?? "No diff",
-    });
-  }
-  if (actions.length === 0) {
-    return markdown;
-  }
-
-  for (const action of actions) {
-    markdown.addHeader(4, `Code Action: "${action.description}" (${action.fixName})`);
-    markdown.addCodeBlock(action.diff, "diff");
-  }
-
-  const fileName = diagnostics._diagnostics.find((diagnostic) => diagnostic.fix !== undefined)?.file
-    ?.fileName;
-  if (fileName === undefined) {
-    throw new Error("Cannot apply fixes to diagnostic with no file");
-  }
-  const logEvents: Array<string> = [];
-  const current = readFileSync(fileName, "utf8");
-  applyFixes(diagnostics._diagnostics, {
-    fix: true,
-    log: (event: string) => logEvents.push(event),
-  });
-  const newText = readFileSync(fileName, "utf8");
-  writeFileSync(fileName, current, "utf8");
-
-  markdown.addHeader(4, "Applied Fixes");
-  // Upstream ran its fixes from the parent of its repo, so the log says "grats/src/tests/…".
-  markdown.addCodeBlock(
-    logEvents.join("\n").replaceAll(" in test/fixtures/", " in grats/src/tests/fixtures/"),
-    "text",
-  );
-  markdown.addHeader(4, "Fixed Text");
-  markdown.addCodeBlock(newText, "typescript");
   return markdown;
 }

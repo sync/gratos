@@ -27,39 +27,3 @@ src/tests/fixtures/typename/PropertySignatureTypenameMissingType.invalid.ts:3:3 
 3   __typename;
     ~~~~~~~~~~
 ```
-
-#### Code Action: "Create Grats-compatible `__typename` property" (fix-typename-property)
-
-```diff
-- Original
-+ Fixed
-
-@@ -2,3 +2,3 @@
-  export class User implements IPerson {
--   __typename;
-+   __typename = "User" as const;
-    /** @gqlField */
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Create Grats-compatible `__typename` property" in grats/src/tests/fixtures/typename/PropertySignatureTypenameMissingType.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-/** @gqlType */
-export class User implements IPerson {
-  __typename = "User" as const;
-  /** @gqlField */
-  name: string;
-}
-
-/** @gqlInterface */
-export interface IPerson {
-  /** @gqlField */
-  name: string;
-}
-```

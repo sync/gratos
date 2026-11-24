@@ -22,32 +22,3 @@ src/tests/fixtures/custom_scalars/SpecifiedByOldSyntax.invalid.ts:3:4 - error: T
 4  */
   ~
 ```
-
-#### Code Action: "Replace @specifiedBy with @gqlAnnotate" (replace-specifiedBy-with-gqlAnnotate)
-
-```diff
-- Original
-+ Fixed
-
-@@ -2,4 +2,3 @@
-   * @gqlScalar
--  * @specifiedBy https://tools.ietf.org/html/rfc4122
--  */
-+  * @gqlAnnotate specifiedBy(url: "https://tools.ietf.org/html/rfc4122")*/
-  export type UUID = string;
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Replace @specifiedBy with @gqlAnnotate" in grats/src/tests/fixtures/custom_scalars/SpecifiedByOldSyntax.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-/**
- * @gqlScalar
- * @gqlAnnotate specifiedBy(url: "https://tools.ietf.org/html/rfc4122")*/
-export type UUID = string;
-```

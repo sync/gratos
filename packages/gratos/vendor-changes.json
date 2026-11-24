@@ -2,12 +2,12 @@
   "upstream": "captbaritone/grats@5ab66166446b4f80263cda1a13de7d3a69a1c2f8",
   "changes": {
     "src/upstream/cli.ts": {
-      "sha": "83e218554990501d9cf43da2712c50a8f1eb0e15",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "sha": "470a3adb908d9b2a5a84036c445e96a0e39f3f74",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: --watch, --fix and the locate command are removed (commander stays until M2 swaps in node:util parseArgs)"
     },
     "src/upstream/CodeActions.ts": {
-      "sha": "8425b353eb1b47f4c6137f54458c0ceddb19d464",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
     "src/upstream/codegen/enumCodegen.ts": {
       "sha": "a5feb54583763ed15e7c6fd7d1782af0c821e1ba",
@@ -34,8 +34,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/comments.ts": {
-      "sha": "78b5142de7b04913cfad672c320196bf64180665",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "sha": "6c8dad52c6fcf501e8a15a338c2743b465369e6e",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics"
     },
     "src/upstream/configSpec.ts": {
       "sha": "5aa4ddffebd52528219ef883f9d19c598183ecc4",
@@ -46,12 +46,12 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/Extractor.ts": {
-      "sha": "6c2d870ba6680612adbc382c6171c61465f986cb",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "sha": "bf966f0ae972f55118ecd668763535d62fd571e7",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics"
     },
     "src/upstream/fixFixable.ts": {
-      "sha": "4180a63ae7a08b02f05e37b440d859216a3588ee",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
     "src/upstream/GraphQLAstExtensions.ts": {
       "sha": "986ffcde558db1331cbb55e79f1059c1abe6dc67",
@@ -74,12 +74,12 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/lib.ts": {
-      "sha": "322eafed239ea68d92858238adaf7c89441480c2",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "sha": "3f6f77924c605637c63afec0b1b8cc677bb2940c",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: the initTsPlugin export (language-service plugin) is removed"
     },
     "src/upstream/Locate.ts": {
-      "sha": "be30f9f9f103cd1cbf7315c22d0c459031bafceb",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
     "src/upstream/printSchema.ts": {
       "sha": "b6bdbd23b9fc18233730d01837958b3c2848fee3",
@@ -94,8 +94,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/runCache.ts": {
-      "sha": "763c2e7f0fdf50411c781cdbdaff3d894b88ca7b",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
     "src/upstream/transforms/addImplicitRootTypes.ts": {
       "sha": "032cd69e0b4fb47bf6fcaa64a1c5444c1e4fdaba",
@@ -142,8 +142,8 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/tsPlugin/initTsPlugin.ts": {
-      "sha": "17b4cfdd22d48c07dcf5d2883907b3c0dadac624",
-      "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
     "src/upstream/TypeContext.ts": {
       "sha": "7bc49f7162347e460b6b7d1fddd2d819f9ef229f",
@@ -201,13 +201,49 @@
       "sha": "2f603544ba258ce0e0578fe99468837f0368fa60",
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
+    "test/fixtures/arguments/NullableArgumentErrors.invalid.ts.expected.md": {
+      "sha": "26216dbb32268e9216d4515a365970b46153e746",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/arguments/OptionalNonNullableArgument.invalid.ts.expected.md": {
+      "sha": "92f9d92fce225bc4d1d88097e788c736cec4870e",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
     "test/fixtures/arguments/PositionalArgDeprecatedWithDefault.ts.expected.md": {
       "sha": "d6f432f4fc13f59e68484841f08a3279166c3b3c",
       "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
     },
+    "test/fixtures/arguments/PositionalArgOptionalNotNullable.invalid.ts.expected.md": {
+      "sha": "79bf4065b59aba152f857bb9c264af86a16aeb3c",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/comments/detachedBlockCommentNotJSDocWithoutStar.invalid.ts.expected.md": {
+      "sha": "50eb2662a1811048711d98bde28d50191ac1447e",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/comments/invalidTagInLinecomment.invalid.ts.expected.md": {
+      "sha": "f0d98c8316d7d92b26e1fa50df2c638529ac54ef",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/comments/lineComment.invalid.ts.expected.md": {
+      "sha": "dd528f3115314c9f4e4414fdab9d4cd2f1d4d2dc",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/comments/lineCommentWrongCasing.invalid.ts.expected.md": {
+      "sha": "be13423e4e5fc130843e05f7e6dd3cbc23fb197f",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/comments/nonJSDocBlockComment.invalid.ts.expected.md": {
+      "sha": "c81388080f8c8561e81e645cfe261529898de3c7",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
     "test/fixtures/custom_scalars/SpecifiedByMissingUrlinvalid.invalid.ts.expected.md": {
       "sha": "80eafb7621af231f833ededba494d13a1b6142f1",
       "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
+    },
+    "test/fixtures/custom_scalars/SpecifiedByOldSyntax.invalid.ts.expected.md": {
+      "sha": "c2833db2e730e92a4209b73c8e6df4bf6fefbce6",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     },
     "test/fixtures/default_values/DefaultArgumentObjectLiteral.ts.expected.md": {
       "sha": "1ca1d03a2228fc1b6c4262bb2a985510bce62236",
@@ -221,9 +257,185 @@
       "sha": "b08c030b81ed95339255fbc26dd6d5279dc94a0c",
       "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
     },
+    "test/fixtures/enums/EnumNotExportedWithEmitEnumsConfig.invalid.ts.expected.md": {
+      "sha": "83731c3024952c80bd49401fb1de20b895a4ed9c",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
     "test/fixtures/enums/NonNullEnumDefaultInInputObject.ts.expected.md": {
       "sha": "05de79b489266c5b73c0c9a60ab5abba19f5e1ff",
       "reason": "M1b graphql 17.1: snapshot shows graphql 17's own output (SDL object-literal spacing, reworded @specifiedBy/@oneOf/argument messages, TypeInfo now reports the directive argument's input type)"
+    },
+    "test/fixtures/extend_type/fieldAsArrowFunctionNotExported.invalid.ts.expected.md": {
+      "sha": "424b5ae4a5e559b1dfec339e908893c57cbdb262",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/extend_type/notExported.invalid.ts.expected.md": {
+      "sha": "bb3445cf6a0fc66b82734ee72cdd7f4b9d5fc1dd",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/field_definitions/asyncFunctionFieldNotExported.invalid.ts.expected.md": {
+      "sha": "6c83d19fe396a4f691379117bc2ce208c1beacbe",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/field_definitions/FieldAsStaticClassMethodNotExported.invalid.ts.expected.md": {
+      "sha": "43a4823e98586fd5ee35345e2690873ebe6c33b5",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/field_definitions/ParameterPropertyFieldNoModifier.invalid.ts.expected.md": {
+      "sha": "9d311b9bbb9a4bdccc7e8db655db8dfe150eaa30",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/field_definitions/ParameterPropertyFieldReadOnlyPrivate.invalid.ts.expected.md": {
+      "sha": "df50f0c6c3125080a6ae87ef0a83627d7865e2da",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/input_type_one_of/simpleOneOfDeprecatedTag.invalid.ts.expected.md": {
+      "sha": "c7af13c29250e80a49b7fdb66f3d0176fe07624e",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/input_types/inputFieldWithGqlField.invalid.ts.expected.md": {
+      "sha": "6fc627d6a36aa8a93c4e9af9772ede8983a3ef5c",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/fieldOnScalar.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/fieldOnScalar.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/genericType.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/genericType.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/genericTypeField.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/genericTypeField.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/inputType.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/inputType.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/inputTypeField.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/inputTypeField.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/interface.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/interface.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/malformedEntitySyntax.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/malformedEntitySyntax.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/notFoundField.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/notFoundField.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/notFoundType.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/notFoundType.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/type.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/type.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/typeField.invalid.ts": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/locate/typeField.invalid.ts.expected.md": {
+      "removed": true,
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/typename/PropertySignatureTypenameIncorrectName.invalid.ts.expected.md": {
+      "sha": "dbbe7dd60ab3075c780046054a1c71a9cb2389e2",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/typename/PropertySignatureTypenameMissingType.invalid.ts.expected.md": {
+      "sha": "b5a2bdbd6c2cdcce2ad53aab77f62b65fb66f721",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/typename/PropertySignatureTypenameNonLiteralType.invalid.ts.expected.md": {
+      "sha": "654c9537f3171a7ea9d3777ee05d57f32ad5d3fd",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/typename/PropertyTypenameDoesNotMatchClassName.invalid.ts.expected.md": {
+      "sha": "8efc0715b5b8dc1aa48d431bcde5bf692d52e831",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/typename/PropertyTypenameDoesNotMatchDeclaredName.invalid.ts.expected.md": {
+      "sha": "647fb2d2a91f731386b0cfca46480b090b6f2efd",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/typename/PropertyTypenameMustNeedToBeDeclaredAsConst.invalid.ts.expected.md": {
+      "sha": "6340b20a849037b3e01823b1635f77396b7544e9",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/typename/PropertyTypenameMustNeedToBeDeclaredAsExactlyConst.invalid.ts.expected.md": {
+      "sha": "4c4f40c8f934e09e5b42fd86e43e9c24b49b2441",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/typename/PropertyTypenameNoInitializer.invalid.ts.expected.md": {
+      "sha": "7a32e15656d8541597b3ee56fce061a9fd1eb3bf",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/typename/PropertyTypenameNonStringInitializer.invalid.ts.expected.md": {
+      "sha": "ca6a129e2247128ac7fd2ecbbec8937bd1140f31",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/unions/UnionAsMemberOfItself.invalid.ts.expected.md": {
+      "sha": "d40dab6058860078d5d084e4cfaf01687b3004b9",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/user_error/DuplicateOneOfTag.invalid.ts.expected.md": {
+      "sha": "9565112a9a8fdc17c2af2f588b0865be61dacaae",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/user_error/GqlTagDoesNotExist.invalid.ts.expected.md": {
+      "sha": "ba65ab6b50f1b1ec5d988ece8ae29941ae5490bd",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
+    },
+    "test/fixtures/user_error/WrongCaseGqlTag.invalid.ts.expected.md": {
+      "sha": "6bdb01f224f8b73d86cbca17c3616c0025f723a2",
+      "reason": "M1b cut (spec: editor and CLI extras): the TypeScript language-service plugin, code actions and --fix, locate, and watch mode are removed; their fixture snapshot sections (Code Action, Applied Fixes, Fixed Text) and the locate fixtures go with them"
     }
   }
 }

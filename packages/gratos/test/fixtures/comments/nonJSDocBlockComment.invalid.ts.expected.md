@@ -19,31 +19,3 @@ src/tests/fixtures/comments/nonJSDocBlockComment.invalid.ts:3:4 - error: Unexpec
 3 /* @gqlType */
      ~~~~~~~~
 ```
-
-#### Code Action: "Convert to a docblock comment" (convert-block-comment-to-docblock-comment)
-
-```diff
-- Original
-+ Fixed
-
-@@ -2,3 +2,3 @@
-
-- /* @gqlType */
-+ /** @gqlType */
-  class Composer {}
-```
-
-#### Applied Fixes
-
-```text
-  * Applied fix "Convert to a docblock comment" in grats/src/tests/fixtures/comments/nonJSDocBlockComment.invalid.ts
-```
-
-#### Fixed Text
-
-```typescript
-// Oops! Forgot to use two asterisks for the JSDoc block comment.
-
-/** @gqlType */
-class Composer {}
-```
