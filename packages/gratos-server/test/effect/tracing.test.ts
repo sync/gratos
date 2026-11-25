@@ -622,4 +622,43 @@ describe("effect() tracing with a Clock that is not performance.now()", () => {
     expect(resolver?.parentId).toBe(operation?.spanId);
     expect((resolver?.endTime ?? 0n) <= (operation?.endTime ?? -1n)).toBe(true);
   });
+
+  it.each([
+    ["an async", (value: Effect.Effect<string>) => value.pipe(Effect.delay("2 millis"))],
+    ["a synchronous", (value: Effect.Effect<string>) => value],
+  ])(
+    "ends the operation span after %s resolver span when the Clock rolls back after it",
+    async (_name, timing) => {
+      const tracer = recordingTracer();
+      let ahead = false;
+      // 10 s, then 20 s while the resolver ends (its span's end reads it), then 10 s again.
+      const rolling = makeClock(() =>
+        ahead && !tracer.named("resolve Query.value").some((span) => span.ended)
+          ? 20_000_000_000n
+          : 10_000_000_000n,
+      );
+      const server = createServer({
+        schema: effectSchema(
+          makeSchema("type Query { value: String }", {
+            Query: {
+              value: () =>
+                timing(Effect.sync(() => "v")).pipe(
+                  Effect.map((value) => {
+                    ahead = true;
+                    return value;
+                  }),
+                ),
+            },
+          }),
+          { failure, isFailure },
+        ),
+        plugins: [effect({ context: Context.add(tracer.context, Clock.Clock, rolling) })],
+      });
+      expect((await gql(server, "{ value }")).body).toEqual({ data: { value: "v" } });
+      const [operation] = operations(tracer);
+      const [resolver] = tracer.named("resolve Query.value");
+      expect(resolver?.endTime).toBe(20_000_000_000n);
+      expect((resolver?.endTime ?? 0n) <= (operation?.endTime ?? -1n)).toBe(true);
+    },
+  );
 });

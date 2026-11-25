@@ -18,7 +18,7 @@
 // Stream items are not checked here: the subscription field's own resolve(payload) keeps Grats'
 // assertNonNull, so a null item is one event with an error and the subscription carries on.
 import { Context, Effect, Exit, Predicate, Stream } from "effect";
-import type { Fiber } from "effect";
+import type { Fiber, Tracer } from "effect";
 import { HttpServerError } from "effect/http";
 import { isObjectType } from "graphql";
 import type { GraphQLField, GraphQLFieldResolver, GraphQLSchema } from "graphql";
@@ -46,6 +46,7 @@ const emptyScope: RequestScope = {
   fibers: new Set(),
   interruptOnAbort: false,
   aborted: false,
+  spanEnded: () => {},
 };
 
 /** A Promise as graphql-js tells one: an object whose `then` is a function. */
@@ -99,16 +100,30 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
       // never started. track() still interrupts a fiber whose own startup saw the abort.
       throw cancelled();
     }
+    // As Effect.withSpan, keeping the span to report its end time to the request scope.
+    let span: Tracer.Span | undefined;
     const fiber = internals.runForkWith(servicesFor<unknown>(scope.context))(
-      Effect.withSpan(effect, spanName),
+      // oxlint-disable-next-line react-hooks/rules-of-hooks -- Effect.useSpan is not a React hook.
+      Effect.useSpan(spanName, (opened) => {
+        span = opened;
+        return Effect.withParentSpan(effect, opened);
+      }),
     );
+    /** The span ends in the fiber, before its exit is observed. */
+    const spanEnded = (): void => {
+      if (span?.status._tag === "Ended") {
+        scope.spanEnded(span.status.endTime);
+      }
+    };
     const exit = fiber.pollUnsafe();
     if (exit !== undefined) {
+      spanEnded();
       return settleExit(exit);
     }
     track(scope, fiber);
     return new Promise<unknown>((resolve, reject) => {
       fiber.addObserver((done) => {
+        spanEnded();
         try {
           resolve(settleExit(done));
         } catch (error) {

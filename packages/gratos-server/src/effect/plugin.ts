@@ -73,6 +73,8 @@ interface SpanState {
   mutation: "none" | "pending" | "started" | "skipped" | "settled";
   /** A settled mutation's answer status (mutationOf(req).status()). */
   answered: number | undefined;
+  /** The latest end time of a child span (a phase, a resolver), in Clock nanoseconds. */
+  childEnd: bigint;
   ended: boolean;
 }
 
@@ -108,10 +110,15 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     span.attribute("http.response.status_code", status);
     // Never before a phase (on the anchored timeline: a coarse Clock read alone could end the
     // operation before a jit compile reported after onContext) nor before a resolver span
-    // (which ends on a Clock read: the anchor alone can be a little behind the Clock).
-    const anchored = nanosOf(state, performance.now());
-    const read = state.clock.currentTimeNanosUnsafe();
-    span.end(anchored > read ? anchored : read, exit);
+    // (which ends on a Clock read: the anchor alone can be a little behind the Clock), whose
+    // recorded end also bounds it (a Clock set back after the resolver ended reads earlier).
+    let end = nanosOf(state, performance.now());
+    for (const bound of [state.clock.currentTimeNanosUnsafe(), state.childEnd]) {
+      if (bound > end) {
+        end = bound;
+      }
+    }
+    span.end(end, exit);
     options.onSpanEnd?.(span, state.request);
   };
 
@@ -154,6 +161,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       errors: 0,
       mutation: "none",
       answered: undefined,
+      childEnd: 0n,
       ended: false,
     };
     state = created;
@@ -177,6 +185,12 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     return anchor.nanos + BigInt(Math.round((perf - anchor.perf) * 1_000_000));
   };
 
+  const childEnded = (state: SpanState, endTime: bigint): void => {
+    if (endTime > state.childEnd) {
+      state.childEnd = endTime;
+    }
+  };
+
   const emitPhase = (state: SpanState, span: Tracer.Span, phase: Phase): void => {
     const child = state.tracer.span({
       name: phase.name,
@@ -188,7 +202,9 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       root: false,
       sampled: span.sampled,
     });
-    child.end(nanosOf(state, phase.end), Exit.void);
+    const end = nanosOf(state, phase.end);
+    child.end(end, Exit.void);
+    childEnded(state, end);
   };
 
   /** Creates the operation span (or the early-exit span), backdated to t0, with its phases. */
@@ -275,6 +291,9 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       fibers: new Set(),
       interruptOnAbort: type !== "mutation",
       aborted: false,
+      spanEnded: (endTime) => {
+        childEnded(state, endTime);
+      },
     };
     bindScope(request, scope);
     const signal = signalOf(request);

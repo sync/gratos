@@ -54,6 +54,11 @@ export interface RequestScope {
   readonly interruptOnAbort: boolean;
   /** Set once the client has left: a fiber forked later is interrupted at once. */
   aborted: boolean;
+  /**
+   * Records a resolver span's end time (Clock nanoseconds): the operation span never ends before
+   * it, even when the Clock reads earlier by then (a wall clock set back).
+   */
+  readonly spanEnded: (endTime: bigint) => void;
 }
 
 const requestScopes = new WeakMap<Request, RequestScope>();
