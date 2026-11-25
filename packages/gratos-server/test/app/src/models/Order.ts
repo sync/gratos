@@ -1,0 +1,123 @@
+import { Effect, Stream } from "effect";
+
+import type { Ctx, Viewer } from "../context.ts";
+import type { AppError } from "../errors.ts";
+import { Api, Bus, JournalRef } from "../services.ts";
+import type { OrderRow } from "../services.ts";
+
+/** @gqlType */
+export class Order {
+  /** @gqlField */
+  id: string;
+  /** @gqlField */
+  status: string;
+
+  constructor(row: OrderRow) {
+    this.id = row.id;
+    this.status = row.status;
+  }
+
+  /** An Effect field: no assertNonNull, the Effect layer checks the value (semanticNonNull). */
+  /** @gqlField */
+  label(): Effect.Effect<string> {
+    return Effect.succeed(`${this.id}:${this.status}`);
+  }
+}
+
+/** @gqlQueryField */
+export function order(id: string, ctx: Ctx): Effect.Effect<Order, AppError, Api> {
+  return ctx.guard({
+    scopes: ["orders:read"],
+    effect: Effect.gen(function* () {
+      const api = yield* Api;
+      return new Order(yield* api.order(id));
+    }),
+  });
+}
+
+/** Admits null as a string: how this fixture returns null from an Effect<string>. */
+const admitsNull = (value: string | null): value is string =>
+  typeof value === "string" || value === null;
+
+const NULL: string | null = null;
+
+/** Succeeds with null although its type says string (a semanticNonNull field error). */
+/** @gqlQueryField */
+export function missingLabel(): Effect.Effect<string> {
+  return admitsNull(NULL) ? Effect.succeed(NULL) : Effect.die("unreachable");
+}
+
+/** Uses the async derived context: Grats wraps the Effect in a Promise. */
+/** @gqlQueryField */
+export function greeting(viewer: Viewer): Effect.Effect<string> {
+  return Effect.succeed(`hello ${viewer.name}`).pipe(Effect.delay("1 millis"));
+}
+
+/** Two of these in one mutation run serially: the shutdown tests hold the first. */
+/** @gqlMutationField */
+export function setStatus(
+  id: string,
+  status: string,
+  ctx: Ctx,
+): Effect.Effect<Order, AppError, Api> {
+  return ctx.guard({
+    scopes: ["orders:write"],
+    effect: Effect.gen(function* () {
+      const api = yield* Api;
+      return new Order(yield* api.setStatus(id, status));
+    }),
+  });
+}
+
+/** Yields null, then a valid value: one event with an error, then the value. */
+/** @gqlSubscriptionField */
+export function labels(): Stream.Stream<string> {
+  return admitsNull(NULL) ? Stream.make(NULL, "o-1:open") : Stream.empty;
+}
+
+/** Uses the async derived context: Grats wraps the Stream in a Promise. */
+/** @gqlSubscriptionField */
+export function greetings(viewer: Viewer): Stream.Stream<string> {
+  return Stream.make(`hello ${viewer.name}`, `bye ${viewer.name}`);
+}
+
+/** A guarded subscription whose setup is an Effect (guardStream bounds the setup only). */
+/** @gqlSubscriptionField */
+export function orderChanged(id: string, ctx: Ctx): Stream.Stream<Order, AppError, Bus | Api> {
+  return ctx.guardStream({
+    scopes: ["orders:read"],
+    stream: Effect.gen(function* () {
+      const api = yield* Api;
+      yield* api.order(id);
+      const bus = yield* Bus;
+      return bus.changes.pipe(
+        Stream.filter((row) => row.id === id),
+        Stream.map((row) => new Order(row)),
+      );
+    }),
+  });
+}
+
+/**
+ * An idle subscription whose setup acquires a resource: the Stream's scope releases it when the
+ * stream closes. With a slow derived context, the source settles after a client that left: it
+ * must not acquire anything then (graphql 17.1 drops such a source without `return()`).
+ */
+/** @gqlSubscriptionField */
+export function watch(viewer: Viewer, ctx: Ctx): Stream.Stream<string, AppError, JournalRef> {
+  return ctx.guardStream({
+    stream: Effect.gen(function* () {
+      const journal = yield* JournalRef;
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          journal.entries.push(`watch acquired ${viewer.name}`);
+        }),
+        () =>
+          Effect.sync(() => {
+            journal.entries.push(`watch released ${viewer.name}`);
+          }),
+      );
+      return Stream.never;
+    }),
+  });
+}

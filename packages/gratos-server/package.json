@@ -10,8 +10,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "codegen": "node -e \"console.log('codegen: nothing to generate yet (M2)')\"",
-    "codegen:check": "node -e \"console.log('codegen:check: nothing to check yet (M2)')\""
+    "codegen": "gratos --tsconfig test/app/tsconfig.json",
+    "codegen:check": "gratos --check --tsconfig test/app/tsconfig.json"
   },
   "dependencies": {
     "graphql": "catalog:",
