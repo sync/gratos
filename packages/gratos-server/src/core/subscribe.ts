@@ -140,6 +140,11 @@ const responseStream = (
       try {
         pulled = await Promise.race([iterator.next(), closed.promise]);
       } catch (error) {
+        // The stream was closed while the pull was pending, and the source's rejection came
+        // first: the read is settled as closed, like any read a close interrupts.
+        if (finished) {
+          return DONE;
+        }
         // A source that throws ends the stream with its error; a later `return()` still reaches
         // it, as in subscribe().
         finished = true;

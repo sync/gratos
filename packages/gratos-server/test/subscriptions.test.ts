@@ -1276,6 +1276,62 @@ const probedStream = async (
   return { stream: result, probe };
 };
 
+/** A stream over a source whose first pull settles only through `pull` (a gate). */
+const gatedPullStream = async () => {
+  const pull = gate<IteratorResult<number>>();
+  const probe = { pulls: 0, returns: 0 };
+  const schema = makeSchema(
+    `
+      type Query { hello: String }
+      type Subscription { held: Int }
+    `,
+    { Subscription: { held: (payload: number) => payload } },
+  );
+  Object.assign(schema.getSubscriptionType()?.getFields()["held"] ?? {}, {
+    subscribe: () => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          probe.pulls += 1;
+          return pull.promise;
+        },
+        return: () => {
+          probe.returns += 1;
+          return Promise.resolve({ done: true, value: undefined });
+        },
+      }),
+    }),
+  });
+  const result = await subscribeOnce({ schema, document: parse("subscription { held }") });
+  if (!(Symbol.asyncIterator in result)) {
+    throw new Error("no stream");
+  }
+  return { stream: result, pull, probe };
+};
+
+describe("a source pull that rejects", () => {
+  it("as the consumer closes the stream (the same turn): the read is done, not the error", async () => {
+    const { stream, pull, probe } = await gatedPullStream();
+    const pending = stream.next();
+    await flush();
+    expect(probe.pulls).toBe(1);
+    pull.reject(new Error("source failed"));
+    const returned = stream.return();
+    expect(await pending).toEqual({ done: true, value: undefined });
+    await returned;
+    expect(probe).toEqual({ pulls: 1, returns: 1 });
+  });
+
+  it("with no close started: the read rejects with the source's error", async () => {
+    const { stream, pull } = await gatedPullStream();
+    const pending = stream.next();
+    await flush();
+    const error = new Error("source failed");
+    pull.reject(error);
+    await expect(pending).rejects.toBe(error);
+    expect(await stream.next()).toEqual({ done: true, value: undefined });
+  });
+});
+
 describe("closing the response stream while a source pull never settles", () => {
   it("return() settles the pending pull and closes the source once", async () => {
     const { stream, probe } = await probedStream({ stuck: true });
