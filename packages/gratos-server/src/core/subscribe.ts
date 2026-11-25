@@ -91,28 +91,37 @@ const responseStream = (
    * `thrown`, the source gets it through its `throw()` when it has one (as graphql-js forwards
    * it), else `return()`; a source that catches it and goes on is closed with `return()`.
    */
+  const closeSource = async (thrown: { readonly error: unknown } | undefined): Promise<void> => {
+    try {
+      if (thrown !== undefined && iterator.throw !== undefined) {
+        const after = await iterator.throw(thrown.error);
+        if (after.done !== true) {
+          await iterator.return?.();
+        }
+      } else {
+        await iterator.return?.();
+      }
+    } catch {
+      // Ignored, as subscribe() ignores it.
+    }
+  };
   const close = (thrown?: { readonly error: unknown }): Promise<void> => {
     finished = true;
     for (const settle of pending) {
       settle(CLOSED);
     }
     pending.clear();
-    closing ??= ended
-      ? Promise.resolve()
-      : (async () => {
-          try {
-            if (thrown !== undefined && iterator.throw !== undefined) {
-              const after = await iterator.throw(thrown.error);
-              if (after.done !== true) {
-                await iterator.return?.();
-              }
-            } else {
-              await iterator.return?.();
-            }
-          } catch {
-            // Ignored, as subscribe() ignores it.
-          }
-        })();
+    if (closing === undefined) {
+      if (ended) {
+        closing = Promise.resolve();
+      } else {
+        // Published before the source is called, so a close from inside its `throw()` or
+        // `return()` (reentrant) waits on this one instead of closing the source again.
+        const closed = Promise.withResolvers<void>();
+        closing = closed.promise;
+        closed.resolve(closeSource(thrown));
+      }
+    }
     return closing;
   };
 

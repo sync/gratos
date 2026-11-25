@@ -1170,6 +1170,11 @@ const streamOf = async (n: number) => {
   return { stream: result, probe };
 };
 
+/** Where a test keeps a response stream its own source reaches. */
+interface StreamHolder {
+  stream?: AsyncGenerator<unknown, void, void>;
+}
+
 describe("the response stream of a subscription", () => {
   it("return() before the first pull closes the source, once", async () => {
     const { stream, probe } = await streamOf(3);
@@ -1177,6 +1182,40 @@ describe("the response stream of a subscription", () => {
     await stream.return();
     expect(probe).toEqual({ iterators: 1, pulls: 0, returns: 1 });
     expect(await stream.next()).toEqual({ done: true, value: undefined });
+  });
+
+  it("a close from inside the source's return() (reentrant) reuses the close in progress", async () => {
+    const schema = makeSchema(
+      `
+        type Query { hello: String }
+        type Subscription { reentrant: Int }
+      `,
+      { Subscription: { reentrant: (payload: number) => payload } },
+    );
+    let returns = 0;
+    let inner: Promise<unknown> | undefined;
+    const holder: StreamHolder = {};
+    Object.assign(schema.getSubscriptionType()?.getFields()["reentrant"] ?? {}, {
+      subscribe: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.resolve({ done: false, value: 1 }),
+          return: () => {
+            returns += 1;
+            // The source's cleanup closes the response stream again (not awaited).
+            inner ??= holder.stream?.return();
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        }),
+      }),
+    });
+    const result = await subscribeOnce({ schema, document: parse("subscription { reentrant }") });
+    if (!(Symbol.asyncIterator in result)) {
+      throw new Error("no stream");
+    }
+    holder.stream = result;
+    await result.return();
+    expect(await inner).toEqual({ done: true, value: undefined });
+    expect(returns).toBe(1);
   });
 
   it("a source that ended is not closed again", async () => {
