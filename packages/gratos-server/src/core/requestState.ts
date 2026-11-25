@@ -9,6 +9,7 @@ const starts = new WeakMap<Request, number>();
 const mutations = new WeakMap<Request, MutationState>();
 const endedStreams = new WeakSet<Request>();
 const operations = new WeakMap<Request, Set<OperationDefinitionNode>>();
+const answers = new WeakMap<Request, number>();
 
 /**
  * The core's abort signal for a request: linked to `Request.signal` and aborted when the response
@@ -53,6 +54,20 @@ export const bindOperation = (request: Request, operation: OperationDefinitionNo
   }
 };
 
+/**
+ * The HTTP status of the GraphQL answer the core built for the request's latest handle() call (a
+ * request error, a refusal, a single result, a failure's 500), also when it went out as
+ * GraphQL-over-SSE with a 200 (a client that accepts no JSON type): the status a JSON client
+ * would have got. `undefined` for a streamed result (its payloads carry its outcome) and for a
+ * transport answer (its status is the response's).
+ */
+export const answerStatusOf = (request: Request): number | undefined => answers.get(request);
+
+/** Records the status of the answer the core built for the request (see answerStatusOf). */
+export const recordAnswer = (request: Request, status: number): void => {
+  answers.set(request, status);
+};
+
 /** A mutation's started/settled signals, with the functions that publish them. */
 export interface MutationTracker {
   readonly state: MutationState;
@@ -68,6 +83,7 @@ export interface MutationTracker {
 export const registerRequest = (request: Request, signal: AbortSignal, start: number): void => {
   signals.set(request, signal);
   starts.set(request, start);
+  answers.delete(request);
 };
 
 export const registerMutation = (request: Request): MutationTracker => {

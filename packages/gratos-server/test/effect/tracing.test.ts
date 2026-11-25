@@ -1153,6 +1153,32 @@ describe("effect() span bookkeeping", () => {
     expect(operation?.endCalls).toBe(1);
   });
 
+  it("ends an SSE-only client's request error, sent as an event with a 200, with error", async () => {
+    const built = build([]);
+    const response = await built.server.handle(
+      post({ query: "{ absent }" }, { accept: "text/event-stream" }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("event: complete");
+    const [operation] = operations(built.tracer);
+    expect(operation?.outcome).toBe("error");
+    expect(operation?.attributes.get("http.response.status_code")).toBe(200);
+    expect(operation?.endCalls).toBe(1);
+  });
+
+  it("ends an SSE-only client's successful single result ok", async () => {
+    const built = build([]);
+    const response = await built.server.handle(
+      post({ query: "query V { value }" }, { accept: "text/event-stream" }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('"value":"v"');
+    const [operation] = operations(built.tracer);
+    expect(operation?.outcome).toBe("ok");
+    expect(operation?.attributes.get("http.response.status_code")).toBe(200);
+    expect(operation?.endCalls).toBe(1);
+  });
+
   it("gives a Request handed to handle() twice a span for each call", async () => {
     const built = build([]);
     const request = new Request(URL_, { method: "HEAD" });

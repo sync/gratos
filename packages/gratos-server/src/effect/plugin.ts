@@ -11,7 +11,8 @@
 //   (jit compiles after onContext) are emitted at once;
 // - on an early exit (no onContext: a parse or validation error, an onParams throw, an onRequest
 //   answer) creates a `graphql anonymous` span in onResponse, an error only for a status >= 400;
-// - counts errors in onResult, skipping cancelled() ones;
+// - counts errors in onResult, skipping cancelled() ones, and reads the status of the answer the
+//   core built (answerStatusOf), which an SSE-only client gets as an event with a 200;
 // - ends the span once, from one idempotent finalizer with three triggers: the response body (a
 //   pass-through wrapper that sees done, a read error or a cancel; done after the request's own
 //   signal aborted, the client leaving a stream, is a cancel), a null body (ended in
@@ -35,7 +36,14 @@ import type { ExecutionResult, OperationDefinitionNode } from "graphql";
 
 import { isCancelled } from "../core/errors.ts";
 import { payloadErrors } from "../core/payload.ts";
-import { mutationOf, operationsOf, signalOf, startOf, streamEnded } from "../core/requestState.ts";
+import {
+  answerStatusOf,
+  mutationOf,
+  operationsOf,
+  signalOf,
+  startOf,
+  streamEnded,
+} from "../core/requestState.ts";
 import type { Phase, Plugin } from "../core/types.ts";
 import { OperationType } from "./guard.ts";
 import { bindScope, enterScope, routeOf, settled } from "./state.ts";
@@ -120,6 +128,9 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     // The status the core answered with, or, once a started mutation has settled before
     // onResponse ran (its client left first), the status of the answer built from its result.
     const status = state.status === 0 ? (state.answered ?? 0) : state.status;
+    // The status of the answer the core built, which an SSE-only client gets as an event with a
+    // 200 (a request error, a failure's 500): it counts, and the attribute keeps the 200 it got.
+    const answered = answerStatusOf(state.request) ?? 0;
     if (state.mutation === "settled") {
       // A started mutation always finished: ok or error, never cancel. Its answer failing (a
       // throwing result hook's 500) or its body failing is an error too.
@@ -129,12 +140,18 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
         state.errors > 0 ||
         status >= 400 ||
         (state.answered ?? 0) >= 400 ||
+        answered >= 400 ||
         state.trigger === "error"
           ? Exit.fail(state.trigger === "error" ? "response body failed" : "graphql errors")
           : Exit.void;
     } else if (state.trigger === "cancel" || state.status === 499) {
       exit = Exit.interrupt();
-    } else if (state.trigger === "error" || state.status >= 400 || state.errors > 0) {
+    } else if (
+      state.trigger === "error" ||
+      state.status >= 400 ||
+      answered >= 400 ||
+      state.errors > 0
+    ) {
       exit = Exit.fail(state.trigger === "error" ? "response body failed" : "graphql errors");
     } else {
       exit = Exit.void;

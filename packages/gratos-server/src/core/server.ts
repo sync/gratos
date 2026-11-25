@@ -40,7 +40,13 @@ import {
 } from "./http.ts";
 import type { Accepted, MediaType } from "./http.ts";
 import { hasIncrementalDirectives, NoIncrementalMutationsRule } from "./incremental.ts";
-import { bindOperation, endStream, registerMutation, registerRequest } from "./requestState.ts";
+import {
+  bindOperation,
+  endStream,
+  recordAnswer,
+  registerMutation,
+  registerRequest,
+} from "./requestState.ts";
 import type { MutationTracker } from "./requestState.ts";
 import { enterOrRun, multipartResponse, sseResponse } from "./stream.ts";
 import { subscribeOnce } from "./subscribe.ts";
@@ -456,6 +462,9 @@ const serve = <Ctx>(
    * connection without the errors.
    */
   const respond = (run: Run, result: ExecutionResult, status?: number): Response => {
+    const answered = status ?? statusOf(result, run.mediaType);
+    // The status a JSON client would get, also for an SSE-only one's 200 (answerStatusOf).
+    recordAnswer(run.request, answered);
     if (run.errorsAsEvents) {
       return sseResponse({
         first: { result, hasNext: false },
@@ -471,7 +480,7 @@ const serve = <Ctx>(
         },
       });
     }
-    return jsonResponse(result, status ?? statusOf(result, run.mediaType), run.mediaType, () => {
+    return jsonResponse(result, answered, run.mediaType, () => {
       abortInside(run);
     });
   };
