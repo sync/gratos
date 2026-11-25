@@ -216,10 +216,11 @@ report sees unmasked errors. Plugins that only observe or refuse (`effect()`, `s
   (report failure through its result or a rejected Promise). Breaking this is handled on a
   best-effort basis only, and work started in that instant may not be stopped. What the client
   gets depends on the response format and on when it throws. A JSON response gets an error result
-  whose status is the core's default for it, 500, but the result hooks still run on it: they see
-  the original error (`reportErrors()` reports it) and may change the status (behind
-  `maskErrors()`, as in the example, the client gets a 200 for `application/json` and a 400 for
-  `application/graphql-response+json`). A streamed response (SSE, `@defer`, `@stream`) has its
+  whose status is the core's default for it, 500, but the result hooks still run on it and may
+  change it. `reportErrors()` gets the thrown value as the error's `originalError` when it is an
+  `Error`. Behind `maskErrors()`, as in the example, a thrown plain `Error` is replaced, and the
+  client gets a 200 for `application/json` and a 400 for `application/graphql-response+json`; a
+  thrown `GraphQLError` or non-`Error` value keeps the 500. A streamed response (SSE, `@defer`, `@stream`) has its
   200 status already: a throw around the executor call, or on any pull of its body (the first one
   included), ends the stream with an error as its last payload. The core's logger records none of
   these. A throw while a stream closes or aborts is only logged.
