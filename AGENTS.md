@@ -7,9 +7,9 @@ source of truth for scope, milestones and acceptance criteria.
 
 ## Packages
 
-- `@dblechoc/gratos` (`packages/gratos`): the Effect-aware compiler, vendored from Grats. Its CLI binary is `gratos` (never `grats`).
+- `@dblechoc/gratos` (`packages/gratos`): the Effect-aware compiler, vendored from Grats. Its CLI binary is `gratos` (never `grats`). The dev boot step is the lazy `@dblechoc/gratos/dev` entry (types from `src/devApi.ts`, so consumers never typecheck the engine).
 - `@dblechoc/gratos-server` (`packages/gratos-server`): the GraphQL server core and plugins, with the Effect layer at `@dblechoc/gratos-server/effect`.
-- `examples/orders`: the example app.
+- `examples/orders`: the example app. `pnpm dev` there is the live-rebuild loop (`node --watch-path`); its Grats config is `src/tsconfig.json`.
 
 All packages are `private: true` until publishing is decided.
 

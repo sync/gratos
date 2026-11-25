@@ -3,23 +3,24 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
+    "start": "node src/server.ts",
+    "dev": "GRATS_DEV=1 node --watch-path=src/models --watch-path=src/services --watch-preserve-output src/server.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "codegen": "node -e \"console.log('codegen: nothing to generate yet (M2)')\"",
-    "codegen:check": "node -e \"console.log('codegen:check: nothing to check yet (M2)')\""
+    "codegen": "gratos --tsconfig src/tsconfig.json",
+    "codegen:check": "gratos --check --tsconfig src/tsconfig.json"
   },
   "dependencies": {
     "@dblechoc/gratos": "workspace:*",
-    "@dblechoc/gratos-server": "workspace:*"
+    "@dblechoc/gratos-server": "workspace:*",
+    "@effect/platform-node": "catalog:",
+    "effect": "catalog:",
+    "graphql": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
-    "effect": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"
