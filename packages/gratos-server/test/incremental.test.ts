@@ -800,6 +800,7 @@ const claims = (query: string, operationName?: string) => {
     operationKey: {},
     request: post({ query }),
     phase: () => undefined,
+    bindOperation: () => {},
   };
   const args: ExecutionArgs = {
     schema: withIncrementalDirectives(schema),
@@ -847,6 +848,7 @@ describe("which operations incremental() claims", () => {
           operationKey: {},
           request: post({}),
           phase: () => undefined,
+          bindOperation: () => {},
         },
         { schema, document },
       ),

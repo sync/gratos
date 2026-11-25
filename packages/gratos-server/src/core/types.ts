@@ -88,6 +88,14 @@ export interface ExecuteInput {
   readonly request: Request;
   /** Reports a phase to every `onPhase` hook (jit uses it when it compiles). */
   readonly phase: (name: PhaseName, start: number, end: number) => void;
+  /**
+   * Binds another operation node to the request's execution (the selected one always is): an
+   * executor that runs a document of its own (a rewritten or re-parsed one, through its own
+   * `execute()`) binds the operation it runs, before running it, so request-local state that
+   * recognizes the request's resolvers by `info.operation` (the Effect layer's request scope)
+   * covers that execution too.
+   */
+  readonly bindOperation: (operation: OperationDefinitionNode) => void;
 }
 
 /** What `onServer` receives, once, when the server is created. */

@@ -40,7 +40,7 @@ import {
 } from "./http.ts";
 import type { Accepted, MediaType } from "./http.ts";
 import { hasIncrementalDirectives, NoIncrementalMutationsRule } from "./incremental.ts";
-import { endStream, registerMutation, registerRequest } from "./requestState.ts";
+import { bindOperation, endStream, registerMutation, registerRequest } from "./requestState.ts";
 import type { MutationTracker } from "./requestState.ts";
 import { multipartResponse, sseResponse } from "./stream.ts";
 import { subscribeOnce } from "./subscribe.ts";
@@ -835,6 +835,7 @@ const serve = <Ctx>(
     }
 
     // context
+    bindOperation(request, operation);
     const context = await contextOf(run, { operation, document, params });
     if (context._tag === "answer") {
       return context.response;
@@ -866,6 +867,9 @@ const serve = <Ctx>(
       request,
       phase: (name, start, end) => {
         reportPhase(request, name, start, end);
+      },
+      bindOperation: (bound) => {
+        bindOperation(request, bound);
       },
     };
     const dispatched = startExecution(run, input, args);

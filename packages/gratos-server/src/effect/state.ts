@@ -50,11 +50,12 @@ export const closeRoute = (state: RouteState): void => {
  */
 export interface RequestScope {
   /**
-   * The operation the request executes (the node in its document, which every resolver's
-   * `info.operation` is). A resolver of another execution that inherited the store (a nested
-   * server's, run from a timer the request's resolver set) does not belong to this scope.
+   * The operation nodes the request's execution runs (the core's `operationsOf(req)`: the
+   * selected one, and any its executor bound), which a resolver's `info.operation` is. A
+   * resolver of another execution that inherited the store (a nested server's, run from a timer
+   * the request's resolver set) does not belong to this scope.
    */
-  readonly operation: OperationDefinitionNode | undefined;
+  readonly operations: ReadonlySet<OperationDefinitionNode>;
   readonly context: Context.Context<never>;
   readonly fibers: Set<Fiber.Fiber<unknown, unknown>>;
   /** Interrupt fibers on a client abort (false for a mutation: its fibers always finish). */
@@ -101,13 +102,26 @@ export const enterScope = <T>(request: Request, run: () => T): T => {
 
 /**
  * The request scope of the execution a resolver is called in, if any: the store, when the
- * resolver belongs to its execution (see RequestScope.operation). An AsyncLocalStorage store
+ * resolver belongs to its execution (see RequestScope.operations). An AsyncLocalStorage store
  * follows every async continuation, so another execution started from one (a nested bare server,
  * a direct `execute()`) inherits it; such a resolver has no request scope.
+ *
+ * Known limitation: the check is by operation node, not by execution instance. graphql 17.1
+ * gives a resolver no per-execution identity the request can know in advance: info.variableValues,
+ * info.fragments and the info.getAbortSignal/getAsyncHelpers closures are created inside each
+ * `execute()` (each subscription event, for the closures), after the wrapper has entered, and
+ * by graphql-jit for its own executions; info.rootValue and the context are the app's values (a
+ * subscription event's rootValue is the event). Claiming the first identity a resolver shows
+ * would let a nested execution run from a plain resolver win. So a nested `execute()` that a
+ * request's resolver starts on a document holding one of the request's own operation nodes
+ * (reusing info.operation, say) runs with the request's scope: its Effect resolvers get the
+ * request's services, OperationType and span parent, and their fibers are the request's (a
+ * client abort interrupts them). Any other execution, a parse of the same text included, has
+ * none.
  */
 export const currentScope = (info: GraphQLResolveInfo): RequestScope | undefined => {
   const scope = executionScope.getStore();
-  return scope?.operation === info.operation ? scope : undefined;
+  return scope?.operations.has(info.operation) === true ? scope : undefined;
 };
 
 /**

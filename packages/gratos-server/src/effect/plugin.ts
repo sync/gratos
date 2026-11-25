@@ -31,7 +31,7 @@ import type { ExecutionResult, OperationDefinitionNode } from "graphql";
 
 import { isCancelled } from "../core/errors.ts";
 import { payloadErrors } from "../core/payload.ts";
-import { mutationOf, signalOf, startOf, streamEnded } from "../core/requestState.ts";
+import { mutationOf, operationsOf, signalOf, startOf, streamEnded } from "../core/requestState.ts";
 import type { Phase, Plugin } from "../core/types.ts";
 import { OperationType } from "./guard.ts";
 import { bindScope, enterScope, routeOf } from "./state.ts";
@@ -291,7 +291,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       span.attribute("graphql.mutation", true);
     }
     const scope: RequestScope = {
-      operation,
+      operations: operationsOf(request) ?? new Set([operation]),
       context: Context.add(
         Context.add(state.context, Tracer.ParentSpan, span),
         OperationType,

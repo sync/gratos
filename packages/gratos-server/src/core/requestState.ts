@@ -1,11 +1,14 @@
 // Per-request state that hooks read through core exports, backed by WeakMaps keyed by the
 // uncloned incoming Request (docs/plan.html M4a, "The core owns the abort signal").
+import type { OperationDefinitionNode } from "graphql";
+
 import type { MutationState } from "./types.ts";
 
 const signals = new WeakMap<Request, AbortSignal>();
 const starts = new WeakMap<Request, number>();
 const mutations = new WeakMap<Request, MutationState>();
 const endedStreams = new WeakSet<Request>();
+const operations = new WeakMap<Request, Set<OperationDefinitionNode>>();
 
 /**
  * The core's abort signal for a request: linked to `Request.signal` and aborted when the response
@@ -30,6 +33,24 @@ export const streamEnded = (request: Request): boolean => endedStreams.has(reque
 /** Records that the core has ended the request's streamed response (see streamEnded). */
 export const endStream = (request: Request): void => {
   endedStreams.add(request);
+};
+
+/**
+ * The operation nodes the request's execution runs: the selected one, bound before the context
+ * phase, and any an executor bound (`ExecuteInput.bindOperation`: one it runs from a rewritten or
+ * re-parsed document). A resolver whose `info.operation` is one of them belongs to the request.
+ */
+export const operationsOf = (request: Request): ReadonlySet<OperationDefinitionNode> | undefined =>
+  operations.get(request);
+
+/** Binds an operation node to the request's execution (see operationsOf). */
+export const bindOperation = (request: Request, operation: OperationDefinitionNode): void => {
+  const bound = operations.get(request);
+  if (bound === undefined) {
+    operations.set(request, new Set([operation]));
+  } else {
+    bound.add(operation);
+  }
 };
 
 /** A mutation's started/settled signals, with the functions that publish them. */

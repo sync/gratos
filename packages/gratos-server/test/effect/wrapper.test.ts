@@ -5,7 +5,14 @@ import { EventEmitter } from "node:events";
 
 import { Cause, Context, Data, Effect, Match, Predicate, Stream } from "effect";
 import { HttpServerRequest } from "effect/http";
-import { createSourceEventStream, execute, parse, validateSubscriptionArgs } from "graphql";
+import {
+  createSourceEventStream,
+  execute,
+  getOperationAST,
+  parse,
+  print,
+  validateSubscriptionArgs,
+} from "graphql";
 import type {
   GraphQLError,
   GraphQLFieldResolver,
@@ -911,6 +918,58 @@ describe("effectSchema", () => {
     expect(shared.getQueryType()?.getFields()["value"]).toBe(field);
     effectSchema(shared, { failure, isFailure: isAppError });
     expect(field?.resolve).toBe(once);
+  });
+});
+
+/**
+ * A server whose executor runs a document of its own (the request's, re-parsed) through
+ * graphql-js, binding the operation it runs to the request or not.
+ */
+const rewriting = (bind: boolean) => {
+  const tracer = recordingTracer();
+  const server = createServer({
+    schema: effectSchema(
+      makeSchema("type Query { value: String }", {
+        Query: { value: () => Effect.succeed("v").pipe(Effect.delay("1 millis")) },
+      }),
+      { failure, isFailure: isAppError },
+    ),
+    plugins: [
+      {
+        onExecute: (input, args) => () => {
+          const document = parse(print(args.document));
+          const operation = getOperationAST(document, args.operationName);
+          if (bind && operation !== null && operation !== undefined) {
+            input.bindOperation(operation);
+          }
+          return execute({ ...args, document });
+        },
+      },
+      effect({ context: tracer.context }),
+    ],
+  });
+  return { server, tracer };
+};
+
+describe("an executor that runs a document of its own", () => {
+  it("gives its resolvers the request scope once it binds the operation it runs", async () => {
+    const { server, tracer } = rewriting(true);
+    expect((await gql(server, "query Rewritten { value }")).body).toEqual({
+      data: { value: "v" },
+    });
+    const [operation] = tracer.named("graphql Rewritten");
+    const [resolver] = tracer.named("resolve Query.value");
+    expect(resolver?.parentId).toBe(operation?.spanId);
+  });
+
+  it("gives them no request scope when it does not bind it", async () => {
+    const { server, tracer } = rewriting(false);
+    expect((await gql(server, "query Rewritten { value }")).body).toEqual({
+      data: { value: "v" },
+    });
+    // The resolver ran with no request scope: not on the request's tracer.
+    expect(tracer.named("graphql Rewritten")).toHaveLength(1);
+    expect(tracer.named("resolve Query.value")).toEqual([]);
   });
 });
 

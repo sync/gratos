@@ -274,6 +274,7 @@ describe("jit({ after })", () => {
           operationKey: document,
           request: post({}),
           phase: () => {},
+          bindOperation: () => {},
         },
         { schema, document },
       ),

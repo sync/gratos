@@ -4,8 +4,8 @@
 // - a plain value is returned after one Effect.isEffect check;
 // - an Exit (Effect.succeed, Effect.fail, a guard refusal) is answered at once, with no fiber;
 // - an Effect is forked with runForkWith(the request's fork context, from the execution scope
-//   effect()'s wrapExecution enters, when the resolver's info.operation is the scope's operation;
-//   never from the context value); when pollUnsafe already has its exit (a synchronous Effect),
+//   effect()'s wrapExecution enters, when the resolver's info.operation is one of the request's
+//   bound operations; never from the context value); when pollUnsafe already has its exit (a synchronous Effect),
 //   the value is returned with no Promise, else the fiber is tracked in the request scope until
 //   it completes (addObserver) and a Promise is returned.
 // A thenable (Grats' async adapters for an async derived context) keeps its fast path, but its
@@ -49,7 +49,7 @@ export const internals = {
 
 /** The fork context of a request without an effect() plugin (unit tests, a bare server). */
 const emptyScope: RequestScope = {
-  operation: undefined,
+  operations: new Set(),
   context: Context.empty(),
   fibers: new Set(),
   interruptOnAbort: false,
