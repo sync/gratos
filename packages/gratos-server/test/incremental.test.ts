@@ -36,6 +36,7 @@ const SDL = `
     fails: String
     list: [Int]
     items: [Item]
+    watched: [Int]
   }
   type Created { id: ID! detail: String tags: [String] }
   type Mutation { create: Created! }
@@ -48,6 +49,8 @@ const fixture = () => {
     calls[name] = (calls[name] ?? 0) + 1;
   };
   const hold = gate();
+  // A list source whose cleanup is observable: one item, then a pull that only return() ends.
+  const watched = { pulls: 0, returns: 0 };
   const schema = makeSchema(SDL, {
     Query: {
       hello: () => {
@@ -74,6 +77,24 @@ const fixture = () => {
         { id: "1", name: "one" },
         { id: "2", name: "two" },
       ],
+      watched: () => {
+        const release = Promise.withResolvers<IteratorResult<number>>();
+        return {
+          [Symbol.asyncIterator]: () => ({
+            next: () => {
+              watched.pulls += 1;
+              return watched.pulls === 1
+                ? Promise.resolve({ done: false, value: 1 })
+                : release.promise;
+            },
+            return: () => {
+              watched.returns += 1;
+              release.resolve({ done: true, value: undefined });
+              return Promise.resolve({ done: true, value: undefined });
+            },
+          }),
+        };
+      },
     },
     Item: {
       fails: () => {
@@ -87,7 +108,7 @@ const fixture = () => {
       },
     },
   });
-  return { schema, calls, hold };
+  return { schema, calls, hold, watched };
 };
 
 describe("incremental() at startup", () => {
@@ -246,13 +267,19 @@ describe("multipart/mixed; deferSpec=20220824", () => {
   });
 
   it("a client that does not accept multipart gets a 406 and the execution is closed", async () => {
-    const { schema } = fixture();
+    const { schema, watched } = fixture();
     const server = createServer({ schema, plugins: [incremental()] });
-    const sent = await gql(server, "{ hello ... @defer { list } }", { accept: "application/json" });
-    expect(sent.status).toBe(406);
-    expect(sent.error?.message).toBe(
-      "This operation uses @defer or @stream, which needs Accept: multipart/mixed.",
+    const response = await server.handle(
+      post({ query: "{ hello watched @stream(initialCount: 1) }" }, { accept: "application/json" }),
     );
+    // The streamed list's source was closed before the 406 was returned.
+    expect(watched.returns).toBe(1);
+    expect(response.status).toBe(406);
+    expect(await response.json()).toEqual({
+      errors: [
+        { message: "This operation uses @defer or @stream, which needs Accept: multipart/mixed." },
+      ],
+    });
   });
 
   it("a range with another deferSpec does not accept the multipart response", async () => {
