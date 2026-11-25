@@ -59,6 +59,7 @@ const fixture = () => {
         failing(kind: String!): Int
         refused: Int
         slowSetup: Int
+        fresh: Int
       }
     `,
     {
@@ -171,8 +172,32 @@ const fixture = () => {
     },
     resolve: (payload: number) => payload,
   });
+  // A plain AsyncIterable that makes a new iterator on every call. Each iterator's pull waits
+  // until its return() releases it (an idle source that only return() can stop).
+  const fresh = { iterators: 0, pulls: 0, returns: 0 };
+  Object.assign(field("fresh"), {
+    subscribe: () => ({
+      [Symbol.asyncIterator]: () => {
+        fresh.iterators += 1;
+        const release = Promise.withResolvers<IteratorResult<number>>();
+        return {
+          next: () => {
+            fresh.pulls += 1;
+            return release.promise;
+          },
+          return: () => {
+            fresh.returns += 1;
+            release.resolve({ done: true, value: undefined });
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        };
+      },
+    }),
+    resolve: (payload: number) => payload,
+  });
   return {
     schema,
+    fresh,
     sourceArgs,
     cleanups,
     started,
@@ -386,6 +411,29 @@ describe("a standalone handle(Request): cancelling the body", () => {
     expect(signalOf(request)?.aborted).toBe(true);
     expect(await read).toEqual({ done: true, value: undefined });
     await eventually(() => cleanups.includes("waits"));
+  });
+
+  it("closes the iterator it reads, for a source that makes a new iterator on every call", async () => {
+    const { schema, fresh } = fixture();
+    const server = createServer({ schema });
+    const request = post({ query: "subscription { fresh }" }, { accept: "text/event-stream" });
+    const response = await server.handle(request);
+    const reader = response.body?.getReader();
+    if (reader === undefined) {
+      throw new Error("no body");
+    }
+    const read = reader.read();
+    await eventually(() => fresh.pulls === 1);
+    // subscribe() asked the source once: it reads and closes the same iterator.
+    expect(fresh.iterators).toBe(1);
+    // return() reaches the iterator whose pull is pending and releases it, so the cancel ends.
+    const timedOut = sleep(1000).then(() => "the body cancel hangs");
+    expect(await Promise.race([reader.cancel().then(() => "cancelled"), timedOut])).toBe(
+      "cancelled",
+    );
+    expect(await read).toEqual({ done: true, value: undefined });
+    expect(signalOf(request)?.aborted).toBe(true);
+    expect(fresh).toEqual({ iterators: 1, pulls: 1, returns: 1 });
   });
 
   it("stops a source that is mid-stream: its finally runs, nothing is reported", async () => {
@@ -726,6 +774,30 @@ describe("onExecute and subscriptions", () => {
 });
 
 describe("the default executor", () => {
+  it("runs a subscription on a schema in which another type refers to the Subscription type", async () => {
+    const schema = makeSchema(
+      `
+        type Query { root: Subscription }
+        type Subscription { tick(n: Int!): Int }
+      `,
+      { Subscription: { tick: (payload: number) => payload } },
+    );
+    const tick = schema.getSubscriptionType()?.getFields()["tick"];
+    Object.assign(tick ?? {}, {
+      async *subscribe(_source: unknown, args: { n: number }) {
+        for (let index = 1; index <= args.n; index += 1) {
+          yield index;
+        }
+      },
+    });
+    const server = createServer({ schema });
+    const response = await subscribe(server, "subscription { tick(n: 2) }");
+    expect(readSse(await response.text()).payloads).toEqual([
+      { data: { tick: 1 } },
+      { data: { tick: 2 } },
+    ]);
+  });
+
   it("runs a subscription through subscribe() even on a schema with @defer", async () => {
     const { schema } = fixture();
     const server = createServer({ schema, plugins: [incremental()] });
