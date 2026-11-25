@@ -3,16 +3,15 @@
 // and @stream, and by fetch for the SSE subscription (Apollo's HttpLink speaks multipart
 // subscriptions, not SSE). Apollo gets Defer20220824Handler explicitly, the incremental format the
 // server speaks. Every wait is bounded; nothing depends on timing.
-import { setTimeout as sleep } from "node:timers/promises";
-
 import { ApolloClient, gql, HttpLink, InMemoryCache } from "@apollo/client";
 import { Defer20220824Handler } from "@apollo/client/incremental";
 import { CombinedGraphQLErrors } from "@apollo/client/errors";
 import { PersistedQueryLink } from "@apollo/client/link/persisted-queries";
 import { Schema } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 
-import { AUTHORIZATION, until } from "./support/app.ts";
+import type { OrderRow } from "../src/services/Api.ts";
+import { AUTHORIZATION } from "./support/app.ts";
 import { serve } from "./support/serve.ts";
 import type { Served } from "./support/serve.ts";
 
@@ -174,6 +173,25 @@ describe("the orders app over HTTP, with Apollo Client", () => {
       fetchPolicy: "network-only",
     });
     expect(after.data).toEqual({ order: { __typename: "Order", id: "o-4", status: "cancelled" } });
+
+    // Only an open order can be cancelled: o-2 has shipped.
+    const refused = await apollo
+      .mutate({
+        mutation: gql`
+          mutation {
+            cancelOrder(id: "o-2") {
+              status
+            }
+          }
+        `,
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(CombinedGraphQLErrors.is(refused) ? refused.errors : []).toEqual([
+      expect.objectContaining({ message: "Forbidden", path: ["cancelOrder"] }),
+    ]);
   });
 
   it("refuses a guest with the app's Forbidden, and maps NotFound", async () => {
@@ -348,21 +366,18 @@ const post = (query: string, accept = "application/graphql-response+json") =>
     signal: AbortSignal.timeout(10_000),
   });
 
+/** An `orderChanged` event of o-3 with `status`. */
+const o3Event = (status: string) => ({ data: { orderChanged: { id: "o-3", status } } });
+
+/** A change the backend makes on its own: no mutation of the app refunds an order. */
+const REFUNDED: OrderRow = { id: "o-3", total: 7.25, status: "refunded", customer_id: "u-1" };
+
 describe("the orders app over HTTP, SSE subscriptions", () => {
-  it("streams each change to the order as an SSE event", async () => {
-    const subscription = post(
-      'subscription { orderChanged(id: "o-2") { id status } }',
+  it("streams the order, then each change to it, as SSE events", async () => {
+    // The core answers with the first event: the order as it is when the subscription starts.
+    const response = await post(
+      'subscription { orderChanged(id: "o-3") { id status } }',
       "text/event-stream",
-    );
-    const cancel = 'mutation { cancelOrder(id: "o-2") { status } }';
-    // The core answers with the first event, and the subscription starts once the request is
-    // read: cancel until its first event has come.
-    const response = await until(
-      async () => {
-        expect((await post(cancel)).status).toBe(200);
-        return Promise.race([subscription, sleep(20, undefined)]);
-      },
-      { timeoutMs: 10_000, message: "the subscription never answered" },
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
@@ -370,6 +385,8 @@ describe("the orders app over HTTP, SSE subscriptions", () => {
     if (reader === undefined) {
       throw new Error("the subscription has no body");
     }
+    // The client leaves when the test ends, also a failed one (a second cancel is harmless).
+    onTestFinished(() => reader.cancel());
     const decoder = new TextDecoder();
     let text = "";
     /** The `data` of every complete `next` event read so far. */
@@ -388,21 +405,24 @@ describe("the orders app over HTTP, SSE subscriptions", () => {
         text += decoder.decode(chunk.value, { stream: true });
       }
     };
+    const cancel = async () => {
+      const answer = await post('mutation { cancelOrder(id: "o-3") { status } }');
+      expect(await answer.json()).toEqual({ data: { cancelOrder: { status: "cancelled" } } });
+    };
 
     await readEvents(1);
-    // Two more changes, two more events.
-    await post(cancel);
-    await post(cancel);
+    // The cancel publishes a change; its retry changes nothing and publishes nothing. A change the
+    // backend makes on its own (no mutation does) comes next on the same topic: a republished
+    // cancel would come before it.
+    await cancel();
+    await cancel();
+    served.publish("orders.o-3", REFUNDED);
     await readEvents(3);
-    expect(events().slice(0, 3)).toEqual(
-      Array.from({ length: 3 }, () => ({
-        data: { orderChanged: { id: "o-2", status: "cancelled" } },
-      })),
-    );
+    expect(events()).toEqual([o3Event("open"), o3Event("cancelled"), o3Event("refunded")]);
     await reader.cancel();
 
     // The server goes on answering after the client left.
-    expect((await post('{ order(id: "o-2") { status } }')).status).toBe(200);
+    expect((await post('{ order(id: "o-3") { status } }')).status).toBe(200);
   });
 
   it("refuses a guest's subscription with one error event, then complete", async () => {

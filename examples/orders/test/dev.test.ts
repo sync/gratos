@@ -274,8 +274,9 @@ describe("pnpm dev", () => {
       dataOf(await post(dev.url, persisted), { order: { id: "o-1", status: "open" } }),
     ).toBeDefined();
 
-    // An open subscription, which has received an event (the core answers with the first one).
-    const subscription = fetch(dev.url, {
+    // An open subscription, which has received an event: the core answers with the first one,
+    // the order as it is.
+    const opened = await fetch(dev.url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -285,16 +286,6 @@ describe("pnpm dev", () => {
       body: JSON.stringify({ query: 'subscription { orderChanged(id: "o-2") { status } }' }),
       signal: AbortSignal.timeout(BOOT_MS),
     });
-    const cancelled = { cancelOrder: { status: "cancelled" } };
-    const cancel = { query: 'mutation { cancelOrder(id: "o-2") { status } }' };
-    // Cancel until the subscription has started (its setup runs after the request is sent).
-    const opened = await until(
-      async () => {
-        expect(dataOf(await post(dev.url, cancel), cancelled)).toBeDefined();
-        return Promise.race([subscription, sleep(50, undefined)]);
-      },
-      { timeoutMs: BOOT_MS, message: "the subscription never answered", app: dev },
-    );
     expect(opened.status).toBe(200);
     expect(opened.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
     const reader = opened.body?.getReader();
@@ -303,7 +294,7 @@ describe("pnpm dev", () => {
     }
     const decoder = new TextDecoder();
     const first = await reader.read();
-    expect(decoder.decode(first.value)).toContain('"status":"cancelled"');
+    expect(decoder.decode(first.value)).toContain('"status":"shipped"');
     const ended = (async () => {
       try {
         while (!(await reader.read()).done) {

@@ -5,7 +5,7 @@ import { Effect, Layer } from "effect";
 import { Api } from "./Api.ts";
 import type { OrderRow, UserRow } from "./Api.ts";
 import { Bus } from "./Bus.ts";
-import { NotFound } from "./errors.ts";
+import { Forbidden, NotFound } from "./errors.ts";
 
 const SEED_ORDERS: ReadonlyArray<OrderRow> = [
   { id: "o-1", total: 42.5, status: "open", customer_id: "u-1" },
@@ -25,7 +25,7 @@ const find = <A>(rows: ReadonlyMap<string, A>, what: string, id: string) => {
   return row === undefined ? Effect.fail(new NotFound({ what })) : Effect.succeed(row);
 };
 
-/** The Api over in-memory rows; a cancel publishes the new row on `orders.<id>`. */
+/** The Api over in-memory rows; a cancel that changes an order publishes it on `orders.<id>`. */
 const apiLayer = (seed: ReadonlyArray<OrderRow>) =>
   Layer.effect(
     Api,
@@ -44,7 +44,15 @@ const apiLayer = (seed: ReadonlyArray<OrderRow>) =>
           ).pipe(Effect.withSpan("rpc order_list")),
         order_cancel: ({ id }) =>
           Effect.gen(function* () {
-            const row: OrderRow = { ...(yield* find(orders, "order", id)), status: "cancelled" };
+            const current = yield* find(orders, "order", id);
+            if (current.status === "cancelled") {
+              // A retry: nothing changes, so nothing is published.
+              return current;
+            }
+            if (current.status !== "open") {
+              return yield* new Forbidden();
+            }
+            const row: OrderRow = { ...current, status: "cancelled" };
             orders.set(id, row);
             yield* bus.publish(`orders.${id}`, row);
             return row;

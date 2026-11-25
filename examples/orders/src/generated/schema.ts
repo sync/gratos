@@ -166,7 +166,7 @@ export function getSchema(): GraphQLSchema {
         fields() {
             return {
                 orderChanged: {
-                    description: "Each change to one order, from the moment the subscription starts.",
+                    description: "One order as it is now, then each change to it.",
                     name: "orderChanged",
                     type: OrderType,
                     args: {

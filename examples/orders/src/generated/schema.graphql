@@ -55,7 +55,7 @@ type Query {
 }
 
 type Subscription {
-  """Each change to one order, from the moment the subscription starts."""
+  """One order as it is now, then each change to it."""
   orderChanged(id: ID!): Order @semanticNonNull
 }
 

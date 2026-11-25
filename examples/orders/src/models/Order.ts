@@ -77,7 +77,7 @@ export function cancelOrder(ctx: Ctx, id: ID): Effect.Effect<Order, AppError, Se
   });
 }
 
-/** Each change to one order, from the moment the subscription starts. @gqlSubscriptionField */
+/** One order as it is now, then each change to it. @gqlSubscriptionField */
 export function orderChanged(ctx: Ctx, id: ID): Stream.Stream<Order, AppError, Services> {
   return ctx.guardStream({
     scopes: ["USER"],
@@ -85,10 +85,12 @@ export function orderChanged(ctx: Ctx, id: ID): Stream.Stream<Order, AppError, S
     // order must exist), never the stream's lifetime. When the client leaves, the encoder calls
     // return(), and the Stream's scope closes its bus subscription.
     stream: Effect.gen(function* () {
-      const api = yield* Api;
-      yield* api.order_get({ id });
       const bus = yield* Bus;
-      return bus.watch(`orders.${id}`).pipe(Stream.map((row) => new Order(row)));
+      // Subscribed before the read, so no change made in between is lost.
+      const changes = yield* bus.subscribe(`orders.${id}`);
+      const api = yield* Api;
+      const now = yield* api.order_get({ id });
+      return Stream.concat(Stream.succeed(now), changes).pipe(Stream.map((row) => new Order(row)));
     }),
   });
 }

@@ -52,6 +52,8 @@ export interface AppOptions {
   readonly report?: ((error: GraphQLError) => void) | undefined;
   /** No request log and no "Listening on" line (tests). Default false. */
   readonly quiet?: boolean | undefined;
+  /** The services the app runs on. Default: FakeApi.layer (a test builds its own, to reach the Bus). */
+  readonly backend?: Layer.Layer<Services> | undefined;
 }
 
 export const makeServer = (
@@ -89,8 +91,8 @@ export const makeServer = (
 
 /**
  * The app on an HttpServer: one route, /graphql (every method, so the core answers GET with its
- * 405), served with the app's services. They are provided to the route layer, whose finalizer
- * drains the in-flight mutations on shutdown before the services are released.
+ * 405), served with the app's services (`backend`). They are provided to the route layer, whose
+ * finalizer drains the in-flight mutations on shutdown before the services are released.
  */
 export const appLayer = (schema: GraphQLSchema, options: AppOptions = {}) =>
   HttpRouter.serve(
@@ -100,4 +102,4 @@ export const appLayer = (schema: GraphQLSchema, options: AppOptions = {}) =>
       ),
     ),
     { disableLogger: options.quiet === true, disableListenLog: options.quiet === true },
-  ).pipe(Layer.provide(FakeApi.layer));
+  ).pipe(Layer.provide(options.backend ?? FakeApi.layer));

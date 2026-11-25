@@ -7,11 +7,16 @@ import { Effect, Exit, Fiber, Stream } from "effect";
 import { anonymousContext, contextFor } from "../src/models/context.ts";
 import { cancelOrder, order, orderChanged, orders } from "../src/models/Order.ts";
 import { user } from "../src/models/User.ts";
+import type { OrderRow } from "../src/services/Api.ts";
+import { Bus } from "../src/services/Bus.ts";
 import { Forbidden, NotFound } from "../src/services/errors.ts";
 import { FakeApi } from "../src/services/FakeApi.ts";
 
 const guestCtx = () => anonymousContext();
 const userCtx = () => contextFor({ userId: "u-1", scopes: ["USER"] });
+
+/** An event published straight on the bus (no Api call makes it): a status no cancel produces. */
+const SHIPPED: OrderRow = { id: "o-1", total: 42.5, status: "shipped", customer_id: "u-1" };
 
 describe("resolvers, with no server", () => {
   it.effect("a guest cannot cancel an order", () =>
@@ -64,24 +69,65 @@ describe("resolvers, with no server", () => {
     }),
   );
 
-  it.effect("cancelOrder cancels, and orderChanged streams each change to its order only", () =>
+  it.effect("orderChanged streams the order now, then each change to it only", () =>
     Effect.gen(function* () {
       // Started at once: the stream has subscribed to the bus when the fork returns.
       const changes = yield* orderChanged(userCtx(), "o-1").pipe(
-        Stream.take(2),
+        Stream.take(3),
         Stream.runCollect,
         Effect.forkChild({ startImmediately: true }),
       );
       const cancelled = yield* cancelOrder(userCtx(), "o-1");
-      yield* cancelOrder(userCtx(), "o-2");
-      yield* cancelOrder(userCtx(), "o-1");
+      // Another order's change is on another topic.
+      yield* cancelOrder(userCtx(), "o-3");
+      const bus = yield* Bus;
+      yield* bus.publish("orders.o-1", { ...SHIPPED, id: "o-1" });
 
       expect(cancelled).toMatchObject({ id: "o-1", status: "cancelled" });
       const streamed = yield* Fiber.join(changes);
       expect(streamed.map((o) => `${o.id}:${o.status}`)).toEqual([
+        "o-1:open",
         "o-1:cancelled",
-        "o-1:cancelled",
+        "o-1:shipped",
       ]);
+    }).pipe(Effect.provide(FakeApi.layer)),
+  );
+
+  it.effect("a retried cancel returns the cancelled order and publishes nothing", () =>
+    Effect.gen(function* () {
+      const changes = yield* orderChanged(userCtx(), "o-1").pipe(
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* cancelOrder(userCtx(), "o-1");
+      const retried = yield* cancelOrder(userCtx(), "o-1");
+      // The next event on the topic: a republished cancel would come before it.
+      const bus = yield* Bus;
+      yield* bus.publish("orders.o-1", { ...SHIPPED, id: "o-1" });
+
+      expect(retried).toMatchObject({ id: "o-1", status: "cancelled" });
+      const streamed = yield* Fiber.join(changes);
+      expect(streamed.map((o) => o.status)).toEqual(["open", "cancelled", "shipped"]);
+    }).pipe(Effect.provide(FakeApi.layer)),
+  );
+
+  it.effect("a shipped order cannot be cancelled: Forbidden, unchanged, nothing published", () =>
+    Effect.gen(function* () {
+      const changes = yield* orderChanged(userCtx(), "o-2").pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      const refused = yield* cancelOrder(userCtx(), "o-2").pipe(Effect.flip);
+      const bus = yield* Bus;
+      yield* bus.publish("orders.o-2", { ...SHIPPED, id: "o-2", status: "delivered" });
+      const after = yield* order(userCtx(), "o-2");
+
+      expect(refused).toEqual(new Forbidden());
+      expect(after.status).toBe("shipped");
+      const streamed = yield* Fiber.join(changes);
+      expect(streamed.map((o) => o.status)).toEqual(["shipped", "delivered"]);
     }).pipe(Effect.provide(FakeApi.layer)),
   );
 

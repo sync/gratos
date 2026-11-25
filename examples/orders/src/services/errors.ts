@@ -7,7 +7,10 @@ export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
   what: Schema.String,
 }) {}
 
-/** The session may not do this (a guest, or missing scopes). */
+/**
+ * The session may not do this: a guest, missing scopes, or a change the order's state does not
+ * allow (cancelling an order that has shipped).
+ */
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {}) {}
 
 export type AppError = NotFound | Forbidden;

@@ -1,5 +1,6 @@
-// Order events, by topic (`orders.<id>`): a publisher, and a stream of one topic's events.
+// Order events, by topic (`orders.<id>`): a publisher, and a subscription to one topic's events.
 import { Context, Effect, Layer, PubSub, Stream } from "effect";
+import type { Scope } from "effect";
 
 import type { OrderRow } from "./Api.ts";
 
@@ -13,10 +14,12 @@ export class Bus extends Context.Service<
   {
     readonly publish: (topic: string, row: OrderRow) => Effect.Effect<void>;
     /**
-     * Every event published on `topic` once the stream runs: it subscribes when it starts, in
-     * the stream's scope, and unsubscribes when that scope closes (the client left).
+     * Subscribes to `topic` now, in the caller's scope (it unsubscribes when that scope closes:
+     * the client left), and gives the stream of every event published from then on.
      */
-    readonly watch: (topic: string) => Stream.Stream<OrderRow>;
+    readonly subscribe: (
+      topic: string,
+    ) => Effect.Effect<Stream.Stream<OrderRow>, never, Scope.Scope>;
   }
 >()("orders/services/Bus") {
   static readonly layer = Layer.effect(
@@ -25,10 +28,12 @@ export class Bus extends Context.Service<
       const pubsub = yield* PubSub.unbounded<Event>();
       return Bus.of({
         publish: (topic, row) => PubSub.publish(pubsub, { topic, row }).pipe(Effect.asVoid),
-        watch: (topic) =>
-          Stream.fromPubSub(pubsub).pipe(
-            Stream.filter((event) => event.topic === topic),
-            Stream.map((event) => event.row),
+        subscribe: (topic) =>
+          Effect.map(PubSub.subscribe(pubsub), (subscription) =>
+            Stream.fromSubscription(subscription).pipe(
+              Stream.filter((event) => event.topic === topic),
+              Stream.map((event) => event.row),
+            ),
           ),
       });
     }),

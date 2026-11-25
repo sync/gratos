@@ -40,7 +40,7 @@ curl -s localhost:4000/graphql -H 'content-type: application/json' \
   -H 'authorization: Bearer u-1' \
   -d '{"query":"{ orders(userId: \"u-1\") { id total customer { name } } }"}'
 
-# A subscription is GraphQL over SSE: one `next` event per change.
+# A subscription is GraphQL over SSE: a `next` event with the order now, then one per change.
 curl -sN localhost:4000/graphql -H 'content-type: application/json' \
   -H 'accept: text/event-stream' -H 'authorization: Bearer u-1' \
   -d '{"query":"subscription { orderChanged(id: \"o-1\") { id status } }"}'
