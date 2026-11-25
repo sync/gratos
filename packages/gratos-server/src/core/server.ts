@@ -41,7 +41,9 @@ import {
 import type { Accepted, MediaType } from "./http.ts";
 import { hasIncrementalDirectives, NoIncrementalMutationsRule } from "./incremental.ts";
 import {
+  beginHandling,
   bindOperation,
+  endHandling,
   endStream,
   recordAnswer,
   registerMutation,
@@ -1105,6 +1107,22 @@ const serve = <Ctx>(
 
   const handle = async (request: Request): Promise<Response> => {
     const start = performance.now();
+    const owns = beginHandling(request);
+    if (!owns) {
+      logger.warn(
+        "gratos-server: a Request was passed to handle() while an earlier call on it is in flight; its per-request state is shared. Pass request.clone() instead.",
+      );
+    }
+    try {
+      return await handleOwned(request, start);
+    } finally {
+      if (owns) {
+        endHandling(request);
+      }
+    }
+  };
+
+  const handleOwned = async (request: Request, start: number): Promise<Response> => {
     const enter = entryOf(request);
     // The client leaving aborts the core signal inside the execution wrappers.
     const controller = linkedController(request.signal, enter, logger);

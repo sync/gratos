@@ -10,6 +10,27 @@ const mutations = new WeakMap<Request, MutationState>();
 const endedStreams = new WeakSet<Request>();
 const operations = new WeakMap<Request, Set<OperationDefinitionNode>>();
 const answers = new WeakMap<Request, number>();
+/** Requests a `handle()` call (of any server) is working on, until it returns its Response. */
+const handling = new WeakSet<Request>();
+
+/**
+ * Marks `request` as being handled. Returns false when another `handle()` call is still working
+ * on the same Request object: the per-request state above is keyed by the Request, so the two
+ * calls would share it (see `Server.handle`).
+ * @internal
+ */
+export const beginHandling = (request: Request): boolean => {
+  if (handling.has(request)) {
+    return false;
+  }
+  handling.add(request);
+  return true;
+};
+
+/** @internal */
+export const endHandling = (request: Request): void => {
+  handling.delete(request);
+};
 
 /**
  * The core's abort signal for a request: linked to `Request.signal` and aborted when the response

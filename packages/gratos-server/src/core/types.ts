@@ -309,6 +309,15 @@ export interface ServerControl {
 }
 
 export interface Server {
+  /**
+   * Handles one GraphQL-over-HTTP request. The Request object is the key of every per-request
+   * state the core and its plugins keep (`signalOf`, `startOf`, `mutationOf`, a plugin's own
+   * `WeakMap<Request, …>`), so a Request object must not be passed to `handle()` again, on this
+   * server or another, while an earlier call on it is still in flight, including a response body
+   * still being streamed. Parallel calls need distinct Request objects; to replay one, pass
+   * `request.clone()`. Reusing a Request after its earlier response has finished (or was
+   * cancelled) works. An overlapping call is not blocked: the core logs a warning.
+   */
   readonly handle: (request: Request) => Promise<Response>;
   readonly control: ServerControl;
 }

@@ -1023,6 +1023,34 @@ describe("a wrapper that throws on the core's own entries", () => {
   });
 });
 
+describe("a Request passed to handle() again", () => {
+  it("warns, without blocking, when an earlier call on it is still in flight", async () => {
+    const hold = gate();
+    const warn = vi.fn();
+    const server = createServer({
+      schema: basicSchema(),
+      logger: { warn, error: () => {} },
+      context: () => hold.promise.then(() => ({})),
+    });
+    const request = post({ query: "{ count }" });
+    const first = server.handle(request);
+    const second = server.handle(request);
+    hold.resolve();
+    await Promise.all([first, second]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("request.clone()");
+  });
+
+  it("does not warn when the Request is reused after the earlier call returned", async () => {
+    const warn = vi.fn();
+    const server = createServer({ schema: basicSchema(), logger: { warn, error: () => {} } });
+    const request = new Request(URL_, { method: "GET" });
+    await (await server.handle(request)).text();
+    await (await server.handle(request)).text();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 describe("aborts of an unread JSON body", () => {
   it("runs the core signal's listeners inside the wrappers when the body is cancelled", async () => {
     const storage = new AsyncLocalStorage<Request>();
