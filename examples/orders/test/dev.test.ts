@@ -186,14 +186,26 @@ describe("pnpm dev", () => {
       source.replace("PubSub.unbounded<OrderRow>();", "PubSub.unbounded<OrderRow>(;"),
     );
     const syntax = await gratsError("Expression expected");
-    expect(syntax.body).toMatchObject({
+    expect(syntax.body).toEqual({
       errors: [
         {
-          message: expect.stringContaining("Gratos could not load the app: SyntaxError"),
-          extensions: { code: "GRATS_ERROR" },
+          message:
+            "Gratos could not load the app: SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expression expected",
+          extensions: {
+            code: "GRATS_ERROR",
+            diagnostics: [
+              {
+                message: "SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expression expected",
+                file: "src/services/Bus.ts",
+                line: 18,
+              },
+            ],
+          },
         },
       ],
     });
+    // The terminal shows Node's report, with the source line.
+    expect(dev.output()).toContain("PubSub.unbounded<OrderRow>(;");
 
     // Every request answers it, on any path, not only /graphql.
     const other = await fetch(new URL("/health", dev.url));

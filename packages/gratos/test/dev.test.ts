@@ -2,6 +2,7 @@
 // only the generated files that changed, loads the schema module only once they are written,
 // and turns every failure into a GratsDevError that answers 500 GRATS_ERROR with the
 // diagnostics. The `pnpm dev` loop itself is tested on the real process in examples/orders.
+import { spawnSync } from "node:child_process";
 import { readFileSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -127,6 +128,50 @@ describe("devSchema", () => {
       );
       expect(error.message).toBe("Gratos could not load the app: SyntaxError: Unexpected token");
       expect(error.diagnostics).toEqual([{ message: "SyntaxError: Unexpected token" }]);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.ensuring(Effect.sync(project.remove)));
+  });
+
+  it.effect("points a load error at the file and line Node reports", () => {
+    const project = smokeCopy("dev-load-syntax");
+    // Outside the tsconfig's include: only loading it fails, as with an app's service.
+    project.write("services/Bus.ts", "export const bus = make(;\n");
+    // Node's own error (vitest's import() would go through Vite): the stack of a real import.
+    const imported = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        "try { await import(process.argv[1]); } catch (e) { process.stdout.write(e.stack); }",
+        pathToFileURL(project.path("services/Bus.ts")).href,
+      ],
+      { encoding: "utf8" },
+    );
+    const nodeError = new SyntaxError("Expression expected");
+    nodeError.name = "SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]";
+    nodeError.stack = imported.stdout;
+    const { lines, log } = silent();
+    return Effect.gen(function* () {
+      expect(imported.stdout).toMatch(/^(?:file:\/\/)?\/.*\/services\/Bus\.ts:1\n/);
+      const error = yield* Effect.flip(
+        devSchema({
+          tsconfig: project.path("tsconfig.json"),
+          load: () => Promise.reject(nodeError),
+          log,
+        }),
+      );
+      expect(error.message).toBe(
+        "Gratos could not load the app: SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expression expected",
+      );
+      expect(error.diagnostics).toEqual([
+        {
+          message: "SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expression expected",
+          file: expect.stringMatching(/^test\/\.scratch\/dev-load-syntax-\w+\/services\/Bus\.ts$/),
+          line: 1,
+        },
+      ]);
+      // The terminal gets Node's own report: where, the source line and the caret.
+      expect(error.formatted).toContain("export const bus = make(;\n");
+      expect(lines[0]).toBe(error.formatted);
     }).pipe(Effect.provide(NodeServices.layer), Effect.ensuring(Effect.sync(project.remove)));
   });
 

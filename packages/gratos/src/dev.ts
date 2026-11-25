@@ -16,7 +16,7 @@ import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { layer as NodeServicesLayer } from "@effect/platform-node/NodeServices";
-import { Cause, Effect } from "effect";
+import { Cause, Effect, Predicate } from "effect";
 
 import { GRATS_ERROR, GratsDevError } from "./devApi.ts";
 import type {
@@ -60,12 +60,29 @@ const devError = (error: GratsError): GratsDevError => {
   });
 };
 
+/**
+ * Where Node says a module failed to load: it starts the stack of a syntax error (a type-stripping
+ * one included) with `<path or file URL>:<line>`, then the source line and a caret.
+ */
+const NODE_ERROR_SOURCE = /^((?:file:\/\/)?\/[^\n]*?):(\d+)\n/;
+
 const loadError = (cause: unknown): GratsDevError => {
   const message = `Gratos could not load the app: ${String(cause)}`;
+  const stack = Predicate.isError(cause) ? cause.stack : undefined;
+  const [, where, line] = (stack === undefined ? null : NODE_ERROR_SOURCE.exec(stack)) ?? [];
+  const diagnostic: DevDiagnostic =
+    where === undefined || line === undefined
+      ? { message: String(cause) }
+      : {
+          message: String(cause),
+          file: relative(process.cwd(), where.startsWith("file:") ? fileURLToPath(where) : where),
+          line: Number(line),
+        };
   return new GratsDevError({
     message,
-    diagnostics: [{ message: String(cause) }],
-    formatted: message,
+    diagnostics: [diagnostic],
+    // The terminal gets Node's own report (with the source line), or the stack.
+    formatted: stack === undefined ? message : `${message}\n${stack}`,
   });
 };
 
