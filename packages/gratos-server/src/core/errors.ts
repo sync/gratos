@@ -60,3 +60,30 @@ export const serverDraining = (): GraphQLError =>
   gqlError("The server is shutting down and accepts no new mutations.", 503, {
     code: "SERVER_DRAINING",
   });
+
+/** The errors made by `cancelled()`. */
+const cancellations = new WeakSet<object>();
+
+/**
+ * The sentinel for work stopped because the client left (docs/plan.html M5): a resolver
+ * interrupted on a client abort rejects with it. It is not a failure: `reportErrors()` and the
+ * Effect layer's error counter skip it, wherever graphql-js puts it (as the error itself, or as
+ * the `originalError` of the located error it builds).
+ */
+export const cancelled = (): GraphQLError => {
+  const error = new GraphQLError("The client closed the request.", {
+    extensions: { code: "CLIENT_CLOSED_REQUEST" },
+  });
+  cancellations.add(error);
+  return error;
+};
+
+/** True for a `cancelled()` error, or a GraphQL error located from one. */
+export const isCancelled = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  (cancellations.has(error) ||
+    ("originalError" in error &&
+      typeof error.originalError === "object" &&
+      error.originalError !== null &&
+      cancellations.has(error.originalError)));
