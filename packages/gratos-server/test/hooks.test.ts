@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createServer, gqlError, incremental, signalOf } from "../src/index.ts";
 import type { Executor, Phase, Plugin, Server } from "../src/index.ts";
-import { flush, gate, gql, post, send, URL_ } from "./support/http.ts";
+import { flush, gate, gql, post, send, URL_, waitFor } from "./support/http.ts";
 import type { Sent } from "./support/http.ts";
 import { basicSchema, makeSchema } from "./support/schema.ts";
 import { readUntil } from "./support/stream.ts";
@@ -708,19 +708,9 @@ const streamServer = (request: Request, outsideStore = false): StreamServer => {
   return { server, seen, pulls: () => pulls };
 };
 
-/**
- * Waits, at most `timeoutMs`, for the source's `return()` to have been called (`returned` records
- * each call); a regression fails with a message naming the missing call instead of polling forever.
- */
-const returnCalled = async (returned: ReadonlyArray<string>, timeoutMs = 2000): Promise<void> => {
-  const start = performance.now();
-  while (returned.length === 0) {
-    if (performance.now() - start > timeoutMs) {
-      throw new Error(`the source's return() was not called within ${timeoutMs} ms`);
-    }
-    await flush();
-  }
-};
+/** Waits, bounded, for the source's `return()` to have been called (`returned` records each call). */
+const returnCalled = (returned: ReadonlyArray<string>): Promise<void> =>
+  waitFor(() => returned.length > 0, "the source's return() call");
 
 /** Reads the initial result, then leaves a read pending on the idle pull. */
 const readToIdlePull = async (

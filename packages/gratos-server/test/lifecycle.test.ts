@@ -16,7 +16,7 @@ import {
   startOf,
 } from "../src/index.ts";
 import type { ExecuteInput, ExecutorResult, Plugin } from "../src/index.ts";
-import { flush, gate, gql, post, send, sleep } from "./support/http.ts";
+import { flush, gate, gql, post, send, sleep, waitFor } from "./support/http.ts";
 import { basicSchema } from "./support/schema.ts";
 import { readMultipart } from "./support/stream.ts";
 
@@ -842,8 +842,10 @@ describe("control.drain", () => {
       unhandled.push(reason);
     };
     process.on("unhandledRejection", listener);
+    const caught = gate();
+    const abandon = gate();
+    const fallback = gate();
     try {
-      const fallback = gate();
       let entries = 0;
       const server = createServer({
         schema: basicSchema(),
@@ -855,15 +857,16 @@ describe("control.drain", () => {
               try {
                 return await next();
               } catch {
+                caught.resolve();
                 await fallback.promise;
                 return { data: { hello: "fallback" } };
               }
             },
           },
-          // Its execution, which the throwing wrapper leaves running, fails meanwhile.
+          // Its execution, which the throwing wrapper leaves running, fails once told to.
           {
             onExecute: () => async () => {
-              await sleep(1);
+              await abandon.promise;
               throw new Error("abandoned");
             },
           },
@@ -882,15 +885,19 @@ describe("control.drain", () => {
         ],
       });
       const sent = gql(server, "{ hello }");
-      await sleep(20);
+      // The abandoned execution rejects while the fallback is still held, and Node gets a full
+      // event-loop turn to report the rejection before anything else can observe it.
+      await caught.promise;
+      abandon.resolve();
+      await flush();
+      expect(unhandled).toEqual([]);
       fallback.resolve();
       const response = await sent;
       expect(response.error).toBeUndefined();
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ data: { hello: "fallback" } });
-      await sleep(5);
-      expect(unhandled).toEqual([]);
     } finally {
+      fallback.resolve();
       process.off("unhandledRejection", listener);
     }
   });
@@ -1024,16 +1031,7 @@ describe("control.drain", () => {
       { data: { hello: "sent" }, hasNext: true },
       { incremental: [{ data: { count: 1 }, path: [] }], hasNext: false },
     ]);
-    const closed = await Promise.race([
-      (async () => {
-        while (returns === 0) {
-          await sleep(1);
-        }
-        return "closed";
-      })(),
-      sleep(1000).then(() => "never closed"),
-    ]);
-    expect(closed).toBe("closed");
+    await waitFor(() => returns > 0, "the abandoned stream's return() call");
     expect(signalOf(request)?.aborted).toBe(false);
   });
 

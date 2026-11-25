@@ -96,6 +96,25 @@ export const flush = () =>
     setImmediate(resolve);
   });
 
+/**
+ * Waits, at most `timeoutMs`, for `condition` to hold, checking once per event-loop turn. Past the
+ * deadline it stops checking and fails naming what it waited for, so a regression fails instead of
+ * polling forever.
+ */
+export const waitFor = async (
+  condition: () => boolean,
+  what: string,
+  timeoutMs = 2000,
+): Promise<void> => {
+  const deadline = performance.now() + timeoutMs;
+  while (!condition()) {
+    if (performance.now() > deadline) {
+      throw new Error(`${what} did not happen within ${timeoutMs} ms`);
+    }
+    await flush();
+  }
+};
+
 /** Waits `ms` milliseconds. */
 export const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
