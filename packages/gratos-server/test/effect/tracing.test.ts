@@ -486,24 +486,28 @@ describe("effect() tracing of incremental delivery and jit", () => {
   });
 });
 
-describe("effect() tracing with a coarse Clock", () => {
+/** A Clock reading `nanos`, sleeping on real timers. */
+const makeClock = (nanos: () => bigint): Clock.Clock => ({
+  currentTimeMillisUnsafe: () => Number(nanos() / 1_000_000n),
+  currentTimeMillis: Effect.sync(() => Number(nanos() / 1_000_000n)),
+  currentTimeNanosUnsafe: nanos,
+  currentTimeNanos: Effect.sync(nanos),
+  monotonicTimeNanosUnsafe: nanos,
+  monotonicTimeNanos: Effect.sync(nanos),
+  sleep: (duration) =>
+    Effect.promise(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(resolve, Duration.toMillis(duration));
+        }),
+    ),
+});
+
+const twiceAsFast = (): bigint => BigInt(Math.round(performance.now() * 2_000_000));
+
+describe("effect() tracing with a Clock that is not performance.now()", () => {
   /** A Clock that never moves: the coarsest one, as a millisecond Clock is within a millisecond. */
-  const fixed = 1_000_000_000n;
-  const clock: Clock.Clock = {
-    currentTimeMillisUnsafe: () => 1000,
-    currentTimeMillis: Effect.succeed(1000),
-    currentTimeNanosUnsafe: () => fixed,
-    currentTimeNanos: Effect.succeed(fixed),
-    monotonicTimeNanosUnsafe: () => fixed,
-    monotonicTimeNanos: Effect.succeed(fixed),
-    sleep: (duration) =>
-      Effect.promise(
-        () =>
-          new Promise((resolve) => {
-            setTimeout(resolve, Duration.toMillis(duration));
-          }),
-      ),
-  };
+  const clock = makeClock(() => 1_000_000_000n);
 
   it("ends the operation span after a phase reported after onContext (a jit compile)", async () => {
     const tracer = recordingTracer();
@@ -528,5 +532,25 @@ describe("effect() tracing with a coarse Clock", () => {
     expect(compile?.parentId).toBe(operation?.spanId);
     expect((compile?.startTime ?? -1n) >= (operation?.startTime ?? 0n)).toBe(true);
     expect((compile?.endTime ?? 0n) <= (operation?.endTime ?? -1n)).toBe(true);
+  });
+
+  it("ends the operation span after its resolver spans, on a Clock that runs ahead", async () => {
+    // Twice as fast as performance.now(): the anchored timeline alone falls behind it.
+    const fast = makeClock(twiceAsFast);
+    const tracer = recordingTracer();
+    const server = createServer({
+      schema: effectSchema(
+        makeSchema("type Query { value: String }", {
+          Query: { value: () => Effect.succeed("v").pipe(Effect.delay("5 millis")) },
+        }),
+        { failure },
+      ),
+      plugins: [effect({ context: Context.add(tracer.context, Clock.Clock, fast) })],
+    });
+    expect((await gql(server, "{ value }")).body).toEqual({ data: { value: "v" } });
+    const [operation] = operations(tracer);
+    const [resolver] = tracer.named("resolve Query.value");
+    expect(resolver?.parentId).toBe(operation?.spanId);
+    expect((resolver?.endTime ?? 0n) <= (operation?.endTime ?? -1n)).toBe(true);
   });
 });

@@ -105,9 +105,12 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     }
     span.attribute("graphql.errors", state.errors);
     span.attribute("http.response.status_code", status);
-    // On the anchored timeline, as every phase: a coarse Clock read here could end the
-    // operation before a phase reported after onContext (a jit compile).
-    span.end(nanosOf(state, performance.now()), exit);
+    // Never before a phase (on the anchored timeline: a coarse Clock read alone could end the
+    // operation before a jit compile reported after onContext) nor before a resolver span
+    // (which ends on a Clock read: the anchor alone can be a little behind the Clock).
+    const anchored = nanosOf(state, performance.now());
+    const read = state.clock.currentTimeNanosUnsafe();
+    span.end(anchored > read ? anchored : read, exit);
     options.onSpanEnd?.(span, state.request);
   };
 
