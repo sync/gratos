@@ -5,7 +5,7 @@
 // from the child's process.execArgv. In dev, the boot step from @dblechoc/gratos/dev, imported
 // only then, regenerates src/generated/ from the models, then loads the app: the generated schema
 // module and the wiring in graphql.ts (which imports the services). When either does not build or
-// load, every /graphql request answers 500 GRATS_ERROR with the diagnostics until the next
+// load, every request, on any path, answers 500 GRATS_ERROR with the diagnostics until the next
 // good save restarts the process. This file therefore imports nothing from the watched folders.
 // A production start loads the same two modules and never loads the compiler or TypeScript.
 import { createServer as createHttpServer } from "node:http";
@@ -43,7 +43,7 @@ const app: Effect.Effect<Result.Result<AppLayer, GratsDevError>, never, FileSyst
     )
   : Effect.map(Effect.promise(loadApp), Result.succeed);
 
-/** The app, or a route answering GRATS_ERROR to every /graphql request. */
+/** The app, or one route answering GRATS_ERROR to every request on every path. */
 const appLayer = Layer.unwrap(
   Effect.map(app, (loaded) => {
     if (Result.isSuccess(loaded)) {
@@ -53,7 +53,7 @@ const appLayer = Layer.unwrap(
     return HttpRouter.serve(
       HttpRouter.add(
         "*",
-        "/graphql",
+        "/*",
         Effect.sync(() => HttpServerResponse.fromWeb(error.response())),
       ),
     );

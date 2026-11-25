@@ -165,7 +165,7 @@ describe("pnpm dev", () => {
     expect(dev.restarts()).toBe(3);
   });
 
-  it("breaks a service, answers GRATS_ERROR, and recovers on the fix", async () => {
+  it("breaks a service, answers GRATS_ERROR on every path, and recovers on the fix", async () => {
     const { app, dev } = await startDev();
     await firstGood(dev, ORDER, { order: { id: "o-1", status: "open" } }, BOOT_MS);
 
@@ -193,6 +193,13 @@ describe("pnpm dev", () => {
           extensions: { code: "GRATS_ERROR" },
         },
       ],
+    });
+
+    // Every request answers it, on any path, not only /graphql.
+    const other = await fetch(new URL("/health", dev.url));
+    expect(other.status).toBe(500);
+    expect(await other.json()).toMatchObject({
+      errors: [{ extensions: { code: "GRATS_ERROR" } }],
     });
 
     // A service only the app's wiring imports, which builds but throws when it is loaded.
