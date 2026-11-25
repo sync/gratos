@@ -1107,8 +1107,7 @@ const serve = <Ctx>(
 
   const handle = async (request: Request): Promise<Response> => {
     const start = performance.now();
-    const owns = beginHandling(request);
-    if (!owns) {
+    if (!beginHandling(request)) {
       logger.warn(
         "gratos-server: a Request was passed to handle() while an earlier call on it is in flight; its per-request state is shared. Pass request.clone() instead.",
       );
@@ -1116,9 +1115,7 @@ const serve = <Ctx>(
     try {
       return await handleOwned(request, start);
     } finally {
-      if (owns) {
-        endHandling(request);
-      }
+      endHandling(request);
     }
   };
 

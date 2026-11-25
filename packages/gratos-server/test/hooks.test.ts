@@ -1023,6 +1023,25 @@ describe("a wrapper that throws on the core's own entries", () => {
   });
 });
 
+/** A server whose onRequest holds call `n` (from 1) on `holds[n - 1]`, counting the calls. */
+const heldServer = (holds: ReadonlyArray<PromiseWithResolvers<void>>) => {
+  const warn = vi.fn();
+  const calls = { entered: 0 };
+  const server = createServer({
+    schema: basicSchema(),
+    logger: { warn, error: () => {} },
+    plugins: [
+      {
+        onRequest: async () => {
+          calls.entered += 1;
+          await holds[calls.entered - 1]?.promise;
+        },
+      },
+    ],
+  });
+  return { server, warn, calls };
+};
+
 describe("a Request passed to handle() again", () => {
   it("warns, without blocking, when an earlier call on it is still in flight", async () => {
     const hold = gate();
@@ -1039,6 +1058,31 @@ describe("a Request passed to handle() again", () => {
     await Promise.all([first, second]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain("request.clone()");
+  });
+
+  it("keeps counting a warned call: a third call that overlaps only the second warns", async () => {
+    const holdFirst = gate();
+    const holdSecond = gate();
+    const { server, warn, calls } = heldServer([holdFirst, holdSecond]);
+    const request = new Request(URL_, { method: "GET" });
+    try {
+      const first = server.handle(request);
+      const second = server.handle(request);
+      await waitFor(() => calls.entered === 2, "the second call's onRequest");
+      holdFirst.resolve();
+      await first;
+      // The first call has returned; the second is still in flight.
+      await server.handle(request);
+      expect(warn).toHaveBeenCalledTimes(2);
+      holdSecond.resolve();
+      await second;
+    } finally {
+      holdFirst.resolve();
+      holdSecond.resolve();
+    }
+    // None is in flight any more: no warning.
+    await server.handle(request);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it("does not warn when the Request is reused after the earlier call returned", async () => {

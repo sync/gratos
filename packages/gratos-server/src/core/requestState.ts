@@ -10,26 +10,30 @@ const mutations = new WeakMap<Request, MutationState>();
 const endedStreams = new WeakSet<Request>();
 const operations = new WeakMap<Request, Set<OperationDefinitionNode>>();
 const answers = new WeakMap<Request, number>();
-/** Requests a `handle()` call (of any server) is working on, until it returns its Response. */
-const handling = new WeakSet<Request>();
+/** How many `handle()` calls (of any server) are working on each Request, until each one ends. */
+const handling = new WeakMap<Request, number>();
 
 /**
- * Marks `request` as being handled. Returns false when another `handle()` call is still working
- * on the same Request object: the per-request state above is keyed by the Request, so the two
- * calls would share it (see `Server.handle`).
+ * Counts a `handle()` call on `request`. Returns false when another call on the same Request
+ * object is still working on it: the per-request state above is keyed by the Request, so the
+ * calls share it (see `Server.handle`). Every call, a warned one included, is counted until its
+ * `endHandling`, so a third call that overlaps only the second is warned about too.
  * @internal
  */
 export const beginHandling = (request: Request): boolean => {
-  if (handling.has(request)) {
-    return false;
-  }
-  handling.add(request);
-  return true;
+  const active = handling.get(request) ?? 0;
+  handling.set(request, active + 1);
+  return active === 0;
 };
 
-/** @internal */
+/** Ends one call counted by `beginHandling`. @internal */
 export const endHandling = (request: Request): void => {
-  handling.delete(request);
+  const active = (handling.get(request) ?? 1) - 1;
+  if (active === 0) {
+    handling.delete(request);
+  } else {
+    handling.set(request, active);
+  }
 };
 
 /**
