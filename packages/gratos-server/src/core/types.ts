@@ -309,11 +309,6 @@ export interface ServerControl {
 }
 
 export interface Server {
-  /**
-   * Answers a request. Calls on one Request run one at a time (hooks know a call only by its
-   * Request): a call on a Request another call is still handling starts once that one has
-   * returned its Response.
-   */
   readonly handle: (request: Request) => Promise<Response>;
   readonly control: ServerControl;
 }

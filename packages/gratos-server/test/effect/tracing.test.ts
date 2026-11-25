@@ -1211,41 +1211,6 @@ describe("effect() span bookkeeping", () => {
     expect(failed?.attributes.get("http.response.status_code")).toBe(500);
   });
 
-  it("gives overlapping handle() calls on one Request a span each, with its own status", async () => {
-    const held = gate();
-    let calls = 0;
-    const built = build([
-      {
-        // Holds the first call in onRequest; each call answers with a status of its own.
-        onRequest: async () => {
-          calls += 1;
-          const call = calls;
-          if (call === 1) {
-            await held.promise;
-          }
-          return new Response(`call ${call}`, { status: call === 1 ? 201 : 202 });
-        },
-      },
-    ]);
-    const request = new Request(URL_, { method: "HEAD" });
-    const first = built.server.handle(request);
-    await flush();
-    const second = built.server.handle(request);
-    await flush();
-    held.resolve();
-    const [answered, again] = await Promise.all([first, second]);
-    expect([answered.status, again.status]).toEqual([201, 202]);
-    expect([await answered.text(), await again.text()]).toEqual(["call 1", "call 2"]);
-    const spans = operations(built.tracer);
-    expect(spans.map((span) => span.attributes.get("http.response.status_code"))).toEqual([
-      201, 202,
-    ]);
-    for (const span of spans) {
-      expect(span.endCalls).toBe(1);
-      expect(span.outcome).toBe("ok");
-    }
-  });
-
   it("gives a Request handed to handle() twice a span for each call", async () => {
     const built = build([]);
     const request = new Request(URL_, { method: "HEAD" });

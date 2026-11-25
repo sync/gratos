@@ -1103,34 +1103,8 @@ const serve = <Ctx>(
     }
   };
 
-  /** The end of the latest handle() call on each Request still running (see handle). */
-  const calls = new WeakMap<Request, Promise<void>>();
-
-  /**
-   * Handles one call at a time per Request: every hook knows a call only by its Request (the
-   * core's per-request state, signalOf(req) and the rest, and a plugin's own WeakMap), so a call
-   * on a Request that another call is still handling (a bodyless one can be handed in again)
-   * starts once that call has returned its Response, and every call keeps its own state.
-   */
   const handle = async (request: Request): Promise<Response> => {
     const start = performance.now();
-    const previous = calls.get(request);
-    const ended = Promise.withResolvers<void>();
-    calls.set(request, ended.promise);
-    try {
-      if (previous !== undefined) {
-        await previous;
-      }
-      return await handleCall(request, start);
-    } finally {
-      ended.resolve();
-      if (calls.get(request) === ended.promise) {
-        calls.delete(request);
-      }
-    }
-  };
-
-  const handleCall = async (request: Request, start: number): Promise<Response> => {
     const enter = entryOf(request);
     // The client leaving aborts the core signal inside the execution wrappers.
     const controller = linkedController(request.signal, enter, logger);
