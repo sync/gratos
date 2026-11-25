@@ -47,6 +47,11 @@ export interface StreamOptions {
   readonly failure: (error: unknown) => GraphQLError;
   /** The core's request signal, and the controller that aborts it. */
   readonly controller: AbortController;
+  /**
+   * The incoming request's own signal: the client leaving. Watched until the closing frame is
+   * queued, also after the core signal was aborted to stop a failed source.
+   */
+  readonly clientSignal: AbortSignal;
   readonly logger: Logger;
   /** Called once the stream has ended normally: its closing frame is in the body. */
   readonly onEnd: () => void;
@@ -101,7 +106,7 @@ const sseFraming: Framing = {
 };
 
 const streamResponse = (framing: Framing, options: StreamOptions): Response => {
-  const { first, rest, process, failure, controller, logger, onEnd } = options;
+  const { first, rest, process, failure, controller, clientSignal, logger, onEnd } = options;
   const { signal } = controller;
   /** Set once the stream has ended or was cancelled: nothing more may touch its controller. */
   let finished = false;
@@ -114,8 +119,13 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
     started = true;
     return encoder.encode(prefix + text);
   };
-  /** Removes the abort listener once the stream has ended. */
+  /** Removes the abort listeners once the stream has ended. */
   const listening = new AbortController();
+  /**
+   * Set when the stream aborts the core signal itself to stop a failed source while it still
+   * sends that source's error: that abort is not the client leaving.
+   */
+  let stoppingSource = false;
   let closing: Promise<void> | undefined;
 
   /** Closes the executor's iterator once; its own failure is not the client's concern. */
@@ -156,11 +166,22 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           stream.close();
           void stop();
         };
-        if (signal.aborted) {
+        if (signal.aborted || clientSignal.aborted) {
           leave();
           return;
         }
-        signal.addEventListener("abort", leave, { once: true, signal: listening.signal });
+        signal.addEventListener(
+          "abort",
+          () => {
+            if (!stoppingSource) {
+              leave();
+            }
+          },
+          { once: true, signal: listening.signal },
+        );
+        // The client leaving is watched on its own signal too, so it still ends the body while
+        // the stream sends a failed source's error after aborting the core signal itself.
+        clientSignal.addEventListener("abort", leave, { once: true, signal: listening.signal });
       },
       pull: async (stream) => {
         if (finished) {
@@ -243,10 +264,11 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
             return;
           }
           // The source failed. The executor is stopped as a cancel stops it: the core signal
-          // first (its listener here detached, the body still sends the error), so a cleanup
-          // that waits on the signal ends; `return()` comes once the last payload is sent. The
-          // source's error is that last payload, through the same result hooks.
-          listening.abort();
+          // first (so a cleanup that waits on the signal ends), while the body still sends the
+          // error; `return()` comes once the last payload is sent. The source's error is that
+          // last payload, through the same result hooks. A client that leaves before the closing
+          // frame is queued still ends the body (its own signal is still watched).
+          stoppingSource = true;
           controller.abort();
           const result = await processed({ errors: [failure(error)] });
           if (result !== undefined) {

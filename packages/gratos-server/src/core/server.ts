@@ -413,6 +413,7 @@ const serve = <Ctx>(
         process: (payload) => payload,
         failure: sourceFailure,
         controller: run.controller,
+        clientSignal: run.request.signal,
         logger,
         onEnd: () => {
           endStream(run.request);
@@ -685,6 +686,7 @@ const serve = <Ctx>(
     process: (payload) => processPayload(run, ctx, payload),
     failure: sourceFailure,
     controller: run.controller,
+    clientSignal: run.request.signal,
     logger,
     onEnd: () => {
       endStream(run.request);

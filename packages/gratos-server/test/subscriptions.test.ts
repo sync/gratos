@@ -700,6 +700,35 @@ describe("a standalone handle(Request): cancelling the body", () => {
     },
   );
 
+  it("a client that leaves while a failed source's error is processed gets no closing frame", async () => {
+    const { schema } = fixture();
+    const client = new AbortController();
+    const server = createServer({
+      schema,
+      plugins: [
+        {
+          // The source failed: the core signal is already aborted to stop it, and the client
+          // leaves before the error and the closing frame are queued.
+          onResult: (payload) => {
+            if (payload.errors !== undefined) {
+              client.abort();
+            }
+            return undefined;
+          },
+        },
+      ],
+    });
+    const response = await server.handle(
+      post(
+        { query: 'subscription { failing(kind: "graphql") }' },
+        { accept: "text/event-stream", signal: client.signal },
+      ),
+    );
+    const { names, payloads } = readSse(await response.text());
+    expect(names).toEqual(["next"]);
+    expect(payloads).toEqual([{ data: { failing: 1 } }]);
+  });
+
   it("a result hook that throws on a later event fails the body and stops the source", async () => {
     const { schema, cleanups } = fixture();
     const errors: Array<unknown> = [];

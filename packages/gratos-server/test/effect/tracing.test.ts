@@ -316,6 +316,44 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     expect(operation?.endCalls).toBe(1);
   });
 
+  it("ends with cancel when the client leaves while a failed source's error is processed", async () => {
+    const client = new AbortController();
+    const built = build(
+      executor.plugins(),
+      {
+        Subscription: {
+          events: () => Stream.make("a").pipe(Stream.concat(Stream.die(new Error("boom")))),
+        },
+      },
+      {
+        quiet: true,
+        after: [
+          {
+            // The core signal is already aborted to stop the failed source; the client leaves
+            // before the error and the closing frame are queued.
+            onResult: (payload) => {
+              if (payload.errors !== undefined) {
+                client.abort();
+              }
+              return undefined;
+            },
+          },
+        ],
+      },
+    );
+    const response = await built.server.handle(
+      post(
+        { query: "subscription Failing { events }" },
+        { accept: "text/event-stream", signal: client.signal },
+      ),
+    );
+    expect(readSse(await readBody(response)).names).toEqual(["next"]);
+    await flush();
+    const [operation] = operations(built.tracer);
+    expect(operation?.outcome).toBe("cancel");
+    expect(operation?.endCalls).toBe(1);
+  });
+
   it.each([
     { source: "ended", events: () => Stream.make("a"), outcome: "ok", then: "reads EOF" },
     { source: "ended", events: () => Stream.make("a"), outcome: "ok", then: "cancels" },
@@ -615,6 +653,42 @@ describe("effect() tracing of incremental delivery and jit", () => {
     const later = built.tracer.named("resolve Item.later");
     expect(later[0]?.parentId).toBe(operation?.spanId);
   });
+
+  it.each(["reads EOF", "cancels"] as const)(
+    "keeps the ok outcome of a @defer response once its closing delimiter is sent, though its client leaves before EOF and %s",
+    async (then) => {
+      const built = build(executors[2]?.plugins() ?? []);
+      const controller = new AbortController();
+      const response = await built.server.handle(
+        post(
+          { query: "query Deferred { item { value ... @defer { later } } }" },
+          { accept: "multipart/mixed", signal: controller.signal },
+        ),
+      );
+      const reader = (response.body ?? new ReadableStream<Uint8Array>()).getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      // The closing delimiter (`-----`) is the core ending the multipart body itself.
+      while (!text.includes("\r\n-----")) {
+        const { done, value } = await reader.read();
+        if (done) {
+          throw new Error("EOF before the closing delimiter");
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      controller.abort();
+      if (then === "cancels") {
+        await reader.cancel();
+      } else {
+        expect((await reader.read()).done).toBe(true);
+      }
+      await flush();
+      const [operation] = operations(built.tracer);
+      expect(operation?.name).toBe("graphql Deferred");
+      expect(operation?.outcome).toBe("ok");
+      expect(operation?.endCalls).toBe(1);
+    },
+  );
 
   it("emits a jit child span on the third request for a document", async () => {
     const built = build([jit({ after: 3 })]);
