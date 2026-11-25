@@ -14,7 +14,7 @@ import type { GratsDevError } from "@dblechoc/gratos/dev";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Config, Effect, Layer, Result } from "effect";
 import type { FileSystem } from "effect";
-import { HttpRouter, HttpServerResponse } from "effect/http";
+import { HttpServer, HttpServerResponse } from "effect/http";
 
 const dev = process.env["GRATS_DEV"] === "1";
 
@@ -43,20 +43,17 @@ const app: Effect.Effect<Result.Result<AppLayer, GratsDevError>, never, FileSyst
     )
   : Effect.map(Effect.promise(loadApp), Result.succeed);
 
-/** The app, or one route answering GRATS_ERROR to every request on every path. */
+/**
+ * The app, or GRATS_ERROR for every request: served by the HTTP server itself, with no router, so
+ * no path (not even one the router could not decode, such as `/%FF`) misses it.
+ */
 const appLayer = Layer.unwrap(
   Effect.map(app, (loaded) => {
     if (Result.isSuccess(loaded)) {
       return loaded.success;
     }
     const error = loaded.failure;
-    return HttpRouter.serve(
-      HttpRouter.add(
-        "*",
-        "/*",
-        Effect.sync(() => HttpServerResponse.fromWeb(error.response())),
-      ),
-    );
+    return HttpServer.serve(Effect.sync(() => HttpServerResponse.fromWeb(error.response())));
   }),
 );
 

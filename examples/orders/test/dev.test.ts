@@ -213,6 +213,12 @@ describe("pnpm dev", () => {
     expect(await other.json()).toMatchObject({
       errors: [{ extensions: { code: "GRATS_ERROR" } }],
     });
+    // Even a path a router could not decode (the failure is served with no router at all).
+    const undecodable = await fetch(`${new URL(dev.url).origin}/%FF`, { method: "DELETE" });
+    expect(undecodable.status).toBe(500);
+    expect(await undecodable.json()).toMatchObject({
+      errors: [{ extensions: { code: "GRATS_ERROR" } }],
+    });
 
     // A service only the app's wiring imports, which builds but throws when it is loaded.
     save(app, "src/services/Bus.ts", (source) =>

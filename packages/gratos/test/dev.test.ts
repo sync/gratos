@@ -188,22 +188,58 @@ describe("devSchema", () => {
   it.effect("turns a defect into a GratsDevError", () => {
     const { log } = silent();
     return Effect.gen(function* () {
+      // Not a file URL: reading its path throws inside the boot step, a defect.
       const error = yield* Effect.flip(
         devSchema({
-          tsconfig: join(import.meta.dirname, "smoke", "tsconfig.json"),
+          tsconfig: new URL("http://example.test/tsconfig.json"),
           load: async () => 1,
-          log: (line) => {
-            log(line);
-            if (line.startsWith("Gratos: the schema")) {
-              throw new Error("boom");
-            }
-          },
+          log,
         }),
       );
       expect(error.message).toBe("Gratos failed unexpectedly while building the schema.");
-      expect(error.diagnostics[0]?.message).toContain("boom");
+      expect(error.diagnostics[0]?.message).toContain("file");
     }).pipe(Effect.provide(NodeServices.layer));
   });
+
+  it.effect("keeps a loaded app when the logger throws on the success line", () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    return Effect.gen(function* () {
+      const loaded = yield* devSchema({
+        tsconfig: join(import.meta.dirname, "smoke", "tsconfig.json"),
+        load: async () => "the app",
+        log: (line) => {
+          if (line.startsWith("Gratos: the schema") || line.startsWith("Gratos: wrote")) {
+            throw new Error("boom");
+          }
+        },
+      });
+      expect(loaded).toBe("the app");
+      // The line still reaches the terminal.
+      expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join("")).toMatch(
+        /Gratos: (the schema|wrote)/,
+      );
+    }).pipe(
+      Effect.provide(NodeServices.layer),
+      Effect.ensuring(Effect.sync(() => stderr.mockRestore())),
+    );
+  });
+
+  it.effect("keeps Node's load error when its stack names a file URL that does not decode", () =>
+    Effect.gen(function* () {
+      const cause = new SyntaxError("Unexpected token");
+      cause.stack =
+        "file:///tmp/100%.js:1\nconst x = ;\n          ^\n\nSyntaxError: Unexpected token";
+      const error = yield* Effect.flip(
+        devSchema({
+          tsconfig: join(import.meta.dirname, "smoke", "tsconfig.json"),
+          load: () => Promise.reject(cause),
+          log: () => {},
+        }),
+      );
+      expect(error.message).toBe("Gratos could not load the app: SyntaxError: Unexpected token");
+      expect(error.diagnostics).toEqual([{ message: "SyntaxError: Unexpected token" }]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });
 
 const throwing = (line: string) => {
@@ -235,9 +271,9 @@ describe("devSchema's error report", () => {
       expect(bad.failure.message).toBe(
         "Gratos could not load the app: SyntaxError: Unexpected token",
       );
-      // The terminal still gets the error.
+      // The terminal still gets the error, on standard error.
       expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join("")).toContain(
-        `${bad.failure.formatted}\nGratos: the dev log failed: Error: the logger is broken`,
+        bad.failure.formatted,
       );
     } finally {
       stderr.mockRestore();

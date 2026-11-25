@@ -66,18 +66,28 @@ const devError = (error: GratsError): GratsDevError => {
  */
 const NODE_ERROR_SOURCE = /^((?:file:\/\/)?\/[^\n]*?):(\d+)\n/;
 
+/** The file path in a stack location, or `undefined` for a file URL that does not decode. */
+const filePathOf = (where: string): string | undefined => {
+  if (!where.startsWith("file:")) {
+    return where;
+  }
+  try {
+    return fileURLToPath(where);
+  } catch {
+    return undefined;
+  }
+};
+
 const loadError = (cause: unknown): GratsDevError => {
   const message = `Gratos could not load the app: ${String(cause)}`;
   const stack = Predicate.isError(cause) ? cause.stack : undefined;
   const [, where, line] = (stack === undefined ? null : NODE_ERROR_SOURCE.exec(stack)) ?? [];
+  const file = where === undefined ? undefined : filePathOf(where);
+  // The location is best effort: one that cannot be read leaves Node's error as it is.
   const diagnostic: DevDiagnostic =
-    where === undefined || line === undefined
+    file === undefined || line === undefined
       ? { message: String(cause) }
-      : {
-          message: String(cause),
-          file: relative(process.cwd(), where.startsWith("file:") ? fileURLToPath(where) : where),
-          line: Number(line),
-        };
+      : { message: String(cause), file: relative(process.cwd(), file), line: Number(line) };
   return new GratsDevError({
     message,
     diagnostics: [diagnostic],
@@ -95,13 +105,24 @@ const unexpectedError = (cause: Cause.Cause<never>): GratsDevError => {
   });
 };
 
+/** The default dev log, and the fallback when a caller's logger throws. */
+const toStderr = (line: string): void => void process.stderr.write(`${line}\n`);
+
 /**
  * The boot step as an Effect: generate() for `options.tsconfig` (writing only the files whose
  * content changed), then `options.load()`. Every failure, a defect included, is a GratsDevError,
  * so the caller can always start a server.
  */
 export const devSchema: typeof declaredDevSchema = (options) => {
-  const log = options.log ?? ((line: string) => void process.stderr.write(`${line}\n`));
+  const given = options.log ?? toStderr;
+  /** The caller's logger; one that throws never fails the boot: the line goes to stderr. */
+  const log = (line: string): void => {
+    try {
+      given(line);
+    } catch {
+      toStderr(line);
+    }
+  };
   const started = performance.now();
   const elapsed = () => `${Math.round(performance.now() - started)} ms`;
   return Effect.gen(function* () {
@@ -129,16 +150,7 @@ export const devSchema: typeof declaredDevSchema = (options) => {
           `Gratos: every request answers 500 ${GRATS_ERROR} until the next good save (${elapsed()}).`,
         );
       }).pipe(
-        // Outside catchDefect above: a logger that throws must not replace the error it reports.
-        // The terminal still gets the error, on standard error.
-        Effect.catchDefect((defect) =>
-          Effect.sync(
-            () =>
-              void process.stderr.write(
-                `${error.formatted}\nGratos: the dev log failed: ${String(defect)}\n`,
-              ),
-          ),
-        ),
+        // `log` falls back to stderr itself; should stderr fail too, the error is still kept.
         Effect.catchDefect(() => Effect.void),
       ),
     ),
