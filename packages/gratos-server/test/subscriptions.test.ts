@@ -636,7 +636,7 @@ describe("a standalone handle(Request): cancelling the body", () => {
     if (body === null) {
       throw new Error("no body");
     }
-    const { text, reader } = await readUntil(body, (sofar) => sofar.includes('"forever":3'));
+    const { text, reader } = await readUntil(body, (sofar) => readSse(sofar).payloads.length === 3);
     expect(readSse(text).names).toEqual(["next", "next", "next"]);
     await reader.cancel();
     await eventually(() => cleanups.includes("forever"));
@@ -951,7 +951,7 @@ describe("over real HTTP (node:http)", () => {
         if (body === null) {
           throw new Error("no body");
         }
-        await readUntil(body, (sofar) => sofar.includes('"forever":2'));
+        await readUntil(body, (sofar) => readSse(sofar).payloads.length === 2);
       }
       expect(cleanups).toEqual([]);
       client.abort();
@@ -1487,5 +1487,13 @@ describe("throw() on the response stream", () => {
     await stream.return();
     expect(await stream.next()).toEqual({ done: true, value: undefined });
     expect(probe).toEqual({ pulls: events, returns: 1, throws: [] });
+  });
+});
+
+describe("the test SSE reader", () => {
+  it("counts only events terminated by a blank line", () => {
+    const text = 'event: next\ndata: {"data":1}\n\nevent: next\ndata: {"da';
+    expect(readSse(text)).toEqual({ names: ["next"], payloads: [{ data: 1 }] });
+    expect(readSse(`${text}ta":2}\n\n`).names).toEqual(["next", "next"]);
   });
 });

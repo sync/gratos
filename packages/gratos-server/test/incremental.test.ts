@@ -692,7 +692,7 @@ describe("aborts", () => {
     if (body === null) {
       throw new Error("no body");
     }
-    const { text, reader } = await readUntil(body, (sofar) => sofar.includes("hasNext"));
+    const { text, reader } = await readUntil(body, (sofar) => readMultipart(sofar).length === 1);
     expect(readMultipart(text)).toEqual([{ data: { hello: "world" }, hasNext: true }]);
     await reader.cancel();
     expect(signalOf(request)?.aborted).toBe(true);

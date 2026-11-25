@@ -30,10 +30,14 @@ export interface SseEvent {
   readonly data: string;
 }
 
-/** Splits an SSE body into its events. */
+/**
+ * Splits an SSE body into its events. Only events terminated by a blank line count, as a client
+ * dispatches an event only then: an unterminated trailing block (a partial read) is ignored.
+ */
 export const parseSse = (text: string): Array<SseEvent> =>
   text
     .split("\n\n")
+    .slice(0, -1)
     .filter((block) => block !== "")
     .map((block) => {
       let event = "message";
