@@ -13,7 +13,7 @@ import { closeRoute, registerRoute } from "../../src/effect/state.ts";
 import { flush, gate, gql, post } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
 import { readSse } from "../support/stream.ts";
-import { executors, recordingTracer } from "./support.ts";
+import { executors, recordingTracer, until } from "./support.ts";
 import type { RecordedSpan, RecordingTracer } from "./support.ts";
 
 type Resolver = GraphQLFieldResolver<never, unknown>;
@@ -235,6 +235,100 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     expect(built.tracer.open()).toEqual([]);
   });
 
+  it("ends a 499 from a standalone abort after its interrupted resolver's held finalizer, once", async () => {
+    const started = gate();
+    const releasing = gate();
+    const hold = gate();
+    let hang = false;
+    const built = build(executor.plugins(), {
+      Query: {
+        slow: () =>
+          hang
+            ? Effect.acquireRelease(
+                Effect.sync(() => {
+                  started.resolve();
+                }),
+                () =>
+                  Effect.sync(() => {
+                    releasing.resolve();
+                  }).pipe(Effect.andThen(Effect.promise(() => hold.promise))),
+              ).pipe(Effect.andThen(Effect.never), Effect.scoped)
+            : Effect.succeed("warm"),
+      },
+    });
+    await warm(built.server, "{ slow }");
+    built.tracer.clear();
+    built.ended.length = 0;
+    hang = true;
+    const controller = new AbortController();
+    const pending = built.server.handle(post({ query: "{ slow }" }, { signal: controller.signal }));
+    await started.promise;
+    controller.abort();
+    // jit ignores the abort signal: the core answers its 499 once its result came, after the
+    // finalizer. The other executors answer at once.
+    const early = executor.name === "jit" ? undefined : await pending;
+    await releasing.promise;
+    await flush();
+    const [operation] = operations(built.tracer);
+    // The interrupted resolver's fiber is still in its finalizer.
+    expect(operation?.ended).toBe(false);
+    hold.resolve();
+    const response = early ?? (await pending);
+    await response.text();
+    expect(response.status).toBe(499);
+    await until(() => built.tracer.open().length === 0);
+    const [resolver] = built.tracer.named("resolve Query.slow");
+    expect(resolver?.parentId).toBe(operation?.spanId);
+    expect(operation?.outcome).toBe("cancel");
+    expect(operation?.endCalls).toBe(1);
+    expect(built.ended).toEqual([operation]);
+    expect((operation?.endTime ?? 0n) >= (resolver?.endTime ?? 1n)).toBe(true);
+    expect((operation?.endedAtPerf ?? 0) >= (resolver?.endedAtPerf ?? 1)).toBe(true);
+  });
+
+  it("ends a 499 after the held finalizer of a resolver whose own startup saw the abort", async () => {
+    const releasing = gate();
+    const hold = gate();
+    const controller = new AbortController();
+    let hang = false;
+    const built = build(executor.plugins(), {
+      Query: {
+        slow: () =>
+          hang
+            ? Effect.acquireRelease(
+                Effect.sync(() => {
+                  // The client leaves while the fiber's synchronous part runs.
+                  controller.abort();
+                }),
+                () =>
+                  Effect.sync(() => {
+                    releasing.resolve();
+                  }).pipe(Effect.andThen(Effect.promise(() => hold.promise))),
+              ).pipe(Effect.andThen(Effect.never), Effect.scoped)
+            : Effect.succeed("warm"),
+      },
+    });
+    await warm(built.server, "{ slow }");
+    built.tracer.clear();
+    built.ended.length = 0;
+    hang = true;
+    const pending = built.server.handle(post({ query: "{ slow }" }, { signal: controller.signal }));
+    const early = executor.name === "jit" ? undefined : await pending;
+    await releasing.promise;
+    await flush();
+    const [operation] = operations(built.tracer);
+    expect(operation?.ended).toBe(false);
+    hold.resolve();
+    const response = early ?? (await pending);
+    await response.text();
+    expect(response.status).toBe(499);
+    await until(() => built.tracer.open().length === 0);
+    const [resolver] = built.tracer.named("resolve Query.slow");
+    expect(operation?.outcome).toBe("cancel");
+    expect(operation?.endCalls).toBe(1);
+    expect((operation?.endTime ?? 0n) >= (resolver?.endTime ?? 1n)).toBe(true);
+  });
+
   it("ends an SSE subscription's span once, at or after its last payload was written", async () => {
     const built = build(executor.plugins(), {
       Subscription: {
@@ -289,6 +383,8 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     expect(readSse(text).names).toEqual(["next"]);
     const [operation] = operations(built.tracer);
     expect(operation?.name).toBe("graphql Aborted");
+    // The span ends once the Stream has closed its scope, after the body ended.
+    await until(() => operation?.ended === true);
     expect(operation?.outcome).toBe("cancel");
     expect(operation?.endCalls).toBe(1);
     expect(built.ended).toEqual([operation]);

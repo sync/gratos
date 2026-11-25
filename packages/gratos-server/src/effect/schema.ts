@@ -52,6 +52,7 @@ const emptyScope: RequestScope = {
   operations: new Set(),
   context: Context.empty(),
   fibers: new Set(),
+  streams: new Set(),
   interruptOnAbort: false,
   aborted: false,
   spanEnded: () => {},
@@ -74,14 +75,14 @@ const track = (scope: RequestScope, fiber: Fiber.Fiber<unknown, unknown>): void 
   if (scope === emptyScope) {
     return;
   }
-  if (scope.aborted && scope.interruptOnAbort) {
-    fiber.interruptUnsafe(undefined, HttpServerError.ClientAbort.annotation);
-    return;
-  }
   scope.fibers.add(fiber);
   fiber.addObserver(() => {
     scope.fibers.delete(fiber);
   });
+  // Tracked still: an interrupted fiber runs its finalizers before it exits.
+  if (scope.aborted && scope.interruptOnAbort) {
+    fiber.interruptUnsafe(undefined, HttpServerError.ClientAbort.annotation);
+  }
 };
 
 /** One field's wrapped resolver (or subscribe), with its error mapping and markers. */
@@ -202,7 +203,65 @@ const streamSource = <A, E, R, F>(
   );
   let iterator: AsyncIterator<A> | undefined;
   return {
-    [Symbol.asyncIterator]: () => (iterator ??= iterable[Symbol.asyncIterator]()),
+    [Symbol.asyncIterator]: () => (iterator ??= tracked(iterable[Symbol.asyncIterator](), scope)),
+  };
+};
+
+/**
+ * The Stream's iterator, recording its close in the request scope (`streams`) from its first
+ * pull until its Stream's scope has closed: the iterator settles `return()`, `throw()`, a failed
+ * pull and the end only once the close has run its finalizers.
+ */
+const tracked = <A>(iterator: AsyncIterator<A>, scope: RequestScope): AsyncIterator<A> => {
+  if (scope === emptyScope) {
+    return iterator;
+  }
+  let closing: PromiseWithResolvers<void> | undefined;
+  let closed = false;
+  const open = (): void => {
+    if (closing === undefined && !closed) {
+      closing = Promise.withResolvers();
+      scope.streams.add(closing.promise);
+    }
+  };
+  const close = (): void => {
+    closed = true;
+    if (closing !== undefined) {
+      scope.streams.delete(closing.promise);
+      closing.resolve();
+    }
+  };
+  return {
+    next: async () => {
+      open();
+      try {
+        const result = await iterator.next();
+        if (result.done === true) {
+          close();
+        }
+        return result;
+      } catch (error) {
+        close();
+        throw error;
+      }
+    },
+    return: async (value?: unknown) => {
+      try {
+        return (await iterator.return?.(value)) ?? { done: true, value: undefined };
+      } finally {
+        close();
+      }
+    },
+    throw: async (error?: unknown) => {
+      try {
+        if (iterator.throw === undefined) {
+          throw error;
+        }
+        return await iterator.throw(error);
+      } finally {
+        close();
+      }
+    },
   };
 };
 

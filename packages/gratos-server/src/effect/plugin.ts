@@ -20,7 +20,10 @@
 //   closing frame sent, `streamEnded`) keeps the stream's outcome, never a cancel; plus, for a mutation, the request signal's abort (a standalone client
 //   that left, whose body nobody may read). A mutation the core reports as started defers its end
 //   until the core's tracked mutation settles, and ends ok or error (its errors, its answer's
-//   status, a failing body), never cancel.
+//   status, a failing body), never cancel. A cancel is recorded when it is decided, but with
+//   Effect work still running the span ends once that work has settled (the interrupted
+//   resolvers' fibers have exited, after their finalizers, and every pulled Stream has closed
+//   its scope), never before the spans that work ends.
 //
 // Span times are nanoseconds from the Effect Clock. The core reports performance.now()
 // milliseconds; every such value goes through one per-request anchor, a (clock nanos, perf ms)
@@ -34,7 +37,7 @@ import { payloadErrors } from "../core/payload.ts";
 import { mutationOf, operationsOf, signalOf, startOf, streamEnded } from "../core/requestState.ts";
 import type { Phase, Plugin } from "../core/types.ts";
 import { OperationType } from "./guard.ts";
-import { bindScope, enterScope, routeOf } from "./state.ts";
+import { bindScope, enterScope, routeOf, settled } from "./state.ts";
 import type { RequestScope } from "./state.ts";
 
 export interface EffectPluginOptions {
@@ -83,6 +86,9 @@ interface SpanState {
   answered: number | undefined;
   /** The latest end time of a child span (a phase, a resolver), in Clock nanoseconds. */
   childEnd: bigint;
+  /** The request scope onContext bound, with what interrupts its fibers (a client abort). */
+  scope: { readonly scope: RequestScope; readonly interrupt: () => void } | undefined;
+  /** Set once the end is decided (its outcome recorded); the span may end later. */
   ended: boolean;
 }
 
@@ -116,6 +122,33 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     }
     span.attribute("graphql.errors", state.errors);
     span.attribute("http.response.status_code", status);
+    const scope = state.scope;
+    if (
+      Exit.hasInterrupts(exit) &&
+      scope !== undefined &&
+      (scope.scope.fibers.size > 0 || scope.scope.streams.size > 0)
+    ) {
+      // The client left with Effect work still running: its outcome is recorded now, but the
+      // span ends once that work has settled (interrupted resolvers have exited, after their
+      // finalizers; pulled Streams have closed their scopes), after the spans it still ends.
+      // The transport is not held: the response is over for it already.
+      if (scope.scope.interruptOnAbort) {
+        scope.interrupt();
+      }
+      void settled(scope.scope).then(() => {
+        endSpan(state, span, exit);
+      });
+      return;
+    }
+    endSpan(state, span, exit);
+  };
+
+  /** Ends the operation span, at its end time, and reports it. */
+  const endSpan = (
+    state: SpanState,
+    span: Tracer.Span,
+    exit: Exit.Exit<unknown, unknown>,
+  ): void => {
     // Never before a phase (on the anchored timeline: a coarse Clock read alone could end the
     // operation before a jit compile reported after onContext) nor before a resolver span
     // (which ends on a Clock read: the anchor alone can be a little behind the Clock), whose
@@ -170,6 +203,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       mutation: "none",
       answered: undefined,
       childEnd: 0n,
+      scope: undefined,
       ended: false,
     };
     state = created;
@@ -298,6 +332,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
         type,
       ),
       fibers: new Set(),
+      streams: new Set(),
       interruptOnAbort: type !== "mutation",
       aborted: false,
       spanEnded: (endTime) => {
@@ -305,14 +340,18 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       },
     };
     bindScope(request, scope);
+    const interrupt = (): void => {
+      if (scope.aborted) {
+        return;
+      }
+      scope.aborted = true;
+      for (const fiber of scope.fibers) {
+        fiber.interruptUnsafe(undefined, HttpServerError.ClientAbort.annotation);
+      }
+    };
+    state.scope = { scope, interrupt };
     const signal = signalOf(request);
     if (scope.interruptOnAbort && signal !== undefined) {
-      const interrupt = (): void => {
-        scope.aborted = true;
-        for (const fiber of scope.fibers) {
-          fiber.interruptUnsafe(undefined, HttpServerError.ClientAbort.annotation);
-        }
-      };
       if (signal.aborted) {
         interrupt();
       } else {

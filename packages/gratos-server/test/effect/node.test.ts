@@ -23,8 +23,13 @@ interface Running {
 }
 
 const running: Array<Running> = [];
+/** Holds a test opens on a failure too, before the shutdown (which waits for their finalizers). */
+const releases: Array<() => void> = [];
 
 afterEach(async () => {
+  for (const release of releases.splice(0)) {
+    release();
+  }
   for (const { served } of running.splice(0)) {
     await served.close();
   }
@@ -193,6 +198,38 @@ describe.each(executors)("over NodeHttpServer ($name executor)", (executor) => {
     await until(() => tracer.open().length === 0);
   });
 
+  it("ends the span of a client that leaves mid-SSE once its Stream's held finalizer ran, with cancel", async () => {
+    const { served, tracer, journal, reported } = await start(executor);
+    const hold = Promise.withResolvers<void>();
+    journal.holds.set("heldWatch", hold.promise);
+    releases.push(hold.resolve);
+    const controller = new AbortController();
+    const response = await graphql(served.url, "subscription Held { heldWatch }", {
+      accept: "text/event-stream",
+      signal: controller.signal,
+    });
+    const body = response.body;
+    if (body === null) {
+      throw new Error("no body");
+    }
+    const { text } = await readUntil(body, (read) => read.includes("event: next"));
+    expect(text).toContain('"heldWatch":"first"');
+    controller.abort();
+    await until(() => journal.entries.includes("releasing heldWatch"));
+    const [operation] = tracer.named("graphql Held");
+    // The client has left and the transport is done, but the Stream's scope is still closing.
+    expect(operation?.ended).toBe(false);
+    hold.resolve();
+    await until(() => tracer.open().length === 0);
+    const [release] = tracer.named("release heldWatch");
+    expect(release?.parentId).toBe(operation?.spanId);
+    expect(operation?.endCalls).toBe(1);
+    expect(operation?.outcome).toBe("cancel");
+    expect((operation?.endTime ?? 0n) >= (release?.endTime ?? 1n)).toBe(true);
+    expect((operation?.endedAtPerf ?? 0) >= (release?.endedAtPerf ?? 1)).toBe(true);
+    expect(reported).toEqual([]);
+  });
+
   it("leaves no span open when the client leaves during a slow runInRequest context", async () => {
     const { served, tracer, reported } = await start(executor);
     const controller = new AbortController();
@@ -265,5 +302,46 @@ describe("over NodeHttpServer, incremental delivery", () => {
     const [operation] = tracer.named("graphql Deferred");
     expect(operation?.endCalls).toBe(1);
     expect(operation?.outcome).toBe("cancel");
+  });
+
+  it("ends the span of a client that leaves mid-multipart once its interrupted resolver's held finalizer ran", async () => {
+    const executor = executors[2];
+    if (executor === undefined) {
+      throw new Error("no incremental executor");
+    }
+    const { served, tracer, journal, reported } = await start(executor);
+    const hold = Promise.withResolvers<void>();
+    journal.holds.set("note o-1", hold.promise);
+    releases.push(hold.resolve);
+    const controller = new AbortController();
+    const response = await graphql(
+      served.url,
+      'query HeldDefer { order(id: "o-1") { id ... @defer { heldNote } } }',
+      { accept: "multipart/mixed", signal: controller.signal },
+    );
+    const body = response.body;
+    if (body === null) {
+      throw new Error("no body");
+    }
+    const { text } = await readUntil(body, (read) => read.includes('"hasNext":true'));
+    expect(text).toContain('"id":"o-1"');
+    await until(() => journal.entries.includes("acquired note o-1"));
+    controller.abort();
+    await until(() => journal.entries.includes("releasing note o-1"));
+    const [operation] = tracer.named("graphql HeldDefer");
+    // The client has left, but the interrupted resolver's fiber is still in its finalizer.
+    expect(operation?.ended).toBe(false);
+    hold.resolve();
+    await until(() => tracer.open().length === 0);
+    const [resolver] = tracer.named("resolve Order.heldNote");
+    const [release] = tracer.named("release note o-1");
+    expect(resolver?.parentId).toBe(operation?.spanId);
+    expect(release?.parentId).toBe(resolver?.spanId);
+    expect(resolver?.outcome).toBe("cancel");
+    expect(operation?.endCalls).toBe(1);
+    expect(operation?.outcome).toBe("cancel");
+    expect((operation?.endTime ?? 0n) >= (resolver?.endTime ?? 1n)).toBe(true);
+    expect((operation?.endedAtPerf ?? 0) >= (resolver?.endedAtPerf ?? 1)).toBe(true);
+    expect(reported).toEqual([]);
   });
 });

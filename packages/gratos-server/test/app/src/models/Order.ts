@@ -3,7 +3,7 @@ import { Effect, Stream } from "effect";
 import type { Ctx, Viewer } from "../context.ts";
 import type { AppError } from "../errors.ts";
 import { Api, Bus, JournalRef } from "../services.ts";
-import type { OrderRow } from "../services.ts";
+import type { Journal, OrderRow } from "../services.ts";
 
 /** @gqlType */
 export class Order {
@@ -33,6 +33,25 @@ export class Order {
     return `confirmed ${this.id}`;
   }
 
+  /**
+   * Never resolves, and holds a resource whose release waits for the journal's
+   * `note <id>` hold: an interrupted deferred selection of it exits once the release ran.
+   */
+  /** @gqlField */
+  heldNote(): Effect.Effect<string, never, JournalRef> {
+    const id = this.id;
+    return Effect.gen(function* () {
+      const journal = yield* JournalRef;
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          journal.entries.push(`acquired note ${id}`);
+        }),
+        () => heldRelease(journal, `note ${id}`),
+      );
+      return yield* Effect.never;
+    }).pipe(Effect.scoped);
+  }
+
   /** Never resolves: a deferred selection of it stays pending until it is interrupted. */
   /** @gqlField */
   slowNote(): Effect.Effect<string, never, JournalRef> {
@@ -50,6 +69,20 @@ export class Order {
     });
   }
 }
+
+/**
+ * A finalizer whose release waits for the journal's hold of `key` (a test opens it), inside a
+ * `release <key>` span: the operation span of a client that left must end after it.
+ */
+const heldRelease = (journal: Journal, key: string) =>
+  Effect.gen(function* () {
+    journal.entries.push(`releasing ${key}`);
+    const hold = journal.holds.get(key);
+    if (hold !== undefined) {
+      yield* Effect.promise(() => hold);
+    }
+    journal.entries.push(`released ${key}`);
+  }).pipe(Effect.withSpan(`release ${key}`));
 
 /** @gqlQueryField */
 export function order(id: string, ctx: Ctx): Effect.Effect<Order, AppError, Api> {
@@ -157,6 +190,26 @@ export function watch(viewer: Viewer, ctx: Ctx): Stream.Stream<string, AppError,
           }),
       );
       return Stream.never;
+    }),
+  });
+}
+
+/**
+ * One event, then idle, holding a resource whose release waits for the journal's `heldWatch`
+ * hold: the Stream's scope closes only once a test opens it.
+ */
+/** @gqlSubscriptionField */
+export function heldWatch(ctx: Ctx): Stream.Stream<string, AppError, JournalRef> {
+  return ctx.guardStream({
+    stream: Effect.gen(function* () {
+      const journal = yield* JournalRef;
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          journal.entries.push("acquired heldWatch");
+        }),
+        () => heldRelease(journal, "heldWatch"),
+      );
+      return Stream.make("first").pipe(Stream.concat(Stream.never));
     }),
   });
 }

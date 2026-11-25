@@ -37,6 +37,7 @@ type Mutation {
 
 type Order {
   confirmation: String @semanticNonNull
+  heldNote: String @semanticNonNull
   id: String @semanticNonNull
   label: String @semanticNonNull
   slowNote: String @semanticNonNull
@@ -51,6 +52,7 @@ type Query {
 
 type Subscription {
   greetings: String @semanticNonNull
+  heldWatch: String @semanticNonNull
   labels: String @semanticNonNull
   orderChanged(id: String!): Order @semanticNonNull
   watch: String @semanticNonNull

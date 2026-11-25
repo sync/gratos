@@ -1,5 +1,5 @@
 import { GraphQLSchema, GraphQLDirective, DirectiveLocation, GraphQLList, GraphQLInt, specifiedDirectives, GraphQLObjectType, GraphQLString, defaultFieldResolver, GraphQLNonNull } from "graphql";
-import { greeting as queryGreetingResolver, missingLabel as queryMissingLabelResolver, order as queryOrderResolver, setStatus as mutationSetStatusResolver, greetings as subscriptionGreetingsResolver, labels as subscriptionLabelsResolver, orderChanged as subscriptionOrderChangedResolver, watch as subscriptionWatchResolver } from "./../models/Order.ts";
+import { greeting as queryGreetingResolver, missingLabel as queryMissingLabelResolver, order as queryOrderResolver, setStatus as mutationSetStatusResolver, greetings as subscriptionGreetingsResolver, heldWatch as subscriptionHeldWatchResolver, labels as subscriptionLabelsResolver, orderChanged as subscriptionOrderChangedResolver, watch as subscriptionWatchResolver } from "./../models/Order.ts";
 import { viewerOf } from "./../context.ts";
 async function assertNonNull<T>(value: T | Promise<T>): Promise<T> {
     const awaited = await value;
@@ -17,6 +17,18 @@ export function getSchema(): GraphQLSchema {
                     type: GraphQLString,
                     resolve(source, _args, context) {
                         return assertNonNull(source.confirmation(context));
+                    }
+                },
+                heldNote: {
+                    name: "heldNote",
+                    type: GraphQLString,
+                    extensions: {
+                        gratos: {
+                            semanticNonNull: true
+                        }
+                    },
+                    resolve(source) {
+                        return source.heldNote();
                     }
                 },
                 id: {
@@ -144,6 +156,16 @@ export function getSchema(): GraphQLSchema {
                     type: GraphQLString,
                     async subscribe(_source, _args, context) {
                         return subscriptionGreetingsResolver(await viewerOf(context));
+                    },
+                    resolve(payload) {
+                        return assertNonNull(payload);
+                    }
+                },
+                heldWatch: {
+                    name: "heldWatch",
+                    type: GraphQLString,
+                    subscribe(_source, _args, context) {
+                        return subscriptionHeldWatchResolver(context);
                     },
                     resolve(payload) {
                         return assertNonNull(payload);

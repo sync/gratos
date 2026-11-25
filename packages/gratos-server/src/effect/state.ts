@@ -58,6 +58,12 @@ export interface RequestScope {
   readonly operations: ReadonlySet<OperationDefinitionNode>;
   readonly context: Context.Context<never>;
   readonly fibers: Set<Fiber.Fiber<unknown, unknown>>;
+  /**
+   * The closes of the request's Stream sources that were pulled and are not closed yet: each
+   * settles once its Stream's scope has closed (its finalizers ran). Its iterator's `return()`,
+   * a failed pull or the end of the stream closes it.
+   */
+  readonly streams: Set<Promise<void>>;
   /** Interrupt fibers on a client abort (false for a mutation: its fibers always finish). */
   readonly interruptOnAbort: boolean;
   /** Set once the client has left: a fiber forked later is interrupted at once. */
@@ -133,3 +139,22 @@ export function servicesFor<R>(context: Context.Context<never>): Context.Context
 export function servicesFor(context: Context.Context<never>): Context.Context<never> {
   return context;
 }
+
+/**
+ * Resolves once the request's Effect work has settled: every fiber it tracks has exited (an
+ * interrupted one after its finalizers) and every Stream source it pulled has closed. The
+ * operation span of a client that left ends then, after the spans that work still ends.
+ */
+export const settled = async (scope: RequestScope): Promise<void> => {
+  while (scope.fibers.size > 0 || scope.streams.size > 0) {
+    const fibers = [...scope.fibers].map(
+      (fiber) =>
+        new Promise<void>((resolve) => {
+          fiber.addObserver(() => {
+            resolve();
+          });
+        }),
+    );
+    await Promise.all([...fibers, ...scope.streams]);
+  }
+};
