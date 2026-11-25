@@ -179,7 +179,11 @@ const noop = (_status: number): void => {};
  * `enter`, that abort runs inside the request's execution wrappers: execution's listeners on the
  * controller's signal close sources (graphql-js closes the @stream sources from its own).
  */
-const linkedController = (incoming: AbortSignal, enter?: Enter): AbortController => {
+const linkedController = (
+  incoming: AbortSignal,
+  enter?: Enter,
+  logger?: Logger,
+): AbortController => {
   const controller = new AbortController();
   const abort = (): void => {
     controller.abort(incoming.reason);
@@ -192,8 +196,15 @@ const linkedController = (incoming: AbortSignal, enter?: Enter): AbortController
       () => {
         if (enter === undefined) {
           abort();
-        } else {
+          return;
+        }
+        // Inside an EventTarget listener a throwing wrapper would be an uncaught exception and
+        // leave the core signal unaborted (sources never told to stop): log it and abort anyway.
+        try {
           enter(abort);
+        } catch (error) {
+          logger?.error("gratos-server: a wrapExecution wrapper failed on a client abort.", error);
+          abort();
         }
       },
       { once: true, signal: controller.signal },
@@ -432,7 +443,7 @@ const serve = <Ctx>(
       });
     }
     return jsonResponse(result, status ?? statusOf(result, run.mediaType), run.mediaType, () => {
-      run.controller.abort();
+      abortInside(run);
     });
   };
 
@@ -492,9 +503,25 @@ const serve = <Ctx>(
    * client does not accept. It is JSON with its status (the M4a HTTP matrix) for every client,
    * an SSE-only one included: only GraphQL request errors go out as GraphQL-over-SSE events.
    */
+  /**
+   * Aborts the core signal inside the request's execution wrappers (a JSON body cancelled
+   * unread), so its listeners (signalOf, a source's cleanup) run there, as on every other abort
+   * the core makes. A throwing wrapper is logged and the signal aborted anyway.
+   */
+  const abortInside = (run: Run): void => {
+    try {
+      run.enter(() => {
+        run.controller.abort();
+      });
+    } catch (error) {
+      logger.error("gratos-server: a wrapExecution wrapper failed on an abort.", error);
+      run.controller.abort();
+    }
+  };
+
   const transportError = (run: Run, message: string, status: number): Response =>
     jsonResponse(errorResult([new GraphQLError(message)]), status, run.mediaType, () => {
-      run.controller.abort();
+      abortInside(run);
     });
 
   /** read: method, Accept, Content-Type, body, onParams, the "no query" check. */
@@ -919,7 +946,7 @@ const serve = <Ctx>(
     const start = performance.now();
     const enter = entryOf(request);
     // The client leaving aborts the core signal inside the execution wrappers.
-    const controller = linkedController(request.signal, enter);
+    const controller = linkedController(request.signal, enter, logger);
     registerRequest(request, controller.signal, start);
     const run: Run = {
       request,

@@ -6,7 +6,7 @@ import { GraphQLError, legacyExecuteIncrementally } from "graphql";
 import type { ExecutionResult, OperationDefinitionNode } from "graphql";
 import { describe, expect, it, vi } from "vitest";
 
-import { createServer, gqlError, incremental } from "../src/index.ts";
+import { createServer, gqlError, incremental, signalOf } from "../src/index.ts";
 import type { Executor, Phase, Plugin, Server } from "../src/index.ts";
 import { flush, gate, gql, post, send, URL_ } from "./support/http.ts";
 import type { Sent } from "./support/http.ts";
@@ -830,6 +830,62 @@ describe("wrapExecution of a @stream source's cleanup", () => {
       await flush();
     }
     expect(seen).toEqual(["return in"]);
+  });
+});
+
+describe("aborts of an unread JSON body", () => {
+  it("runs the core signal's listeners inside the wrappers when the body is cancelled", async () => {
+    const storage = new AsyncLocalStorage<Request>();
+    const request = post({ query: "{ count }" });
+    const seen: Array<string> = [];
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        {
+          wrapExecution: (wrapped, run) => storage.run(wrapped, run),
+          onResponse: (_response, req) => {
+            // A plugin listening on the core signal (as effect() does) sees its request's store.
+            signalOf(req)?.addEventListener("abort", () => {
+              seen.push(storage.getStore() === req ? "abort in" : "abort out");
+            });
+          },
+        },
+      ],
+    });
+    const response = await server.handle(request);
+    await response.body?.cancel();
+    await flush();
+    expect(seen).toEqual(["abort in"]);
+  });
+
+  it("aborts the core signal even when a wrapper throws on a client abort, and logs it", async () => {
+    const client = new AbortController();
+    const request = post({ query: "{ count }" }, { signal: client.signal });
+    const error = vi.fn();
+    let armed = false;
+    const server = createServer({
+      schema: basicSchema(),
+      logger: { warn: () => {}, error },
+      plugins: [
+        {
+          wrapExecution: (_wrapped, run) => {
+            if (armed) {
+              throw new Error("wrapper failed");
+            }
+            return run();
+          },
+        },
+      ],
+    });
+    const response = await server.handle(request);
+    armed = true;
+    client.abort();
+    expect(signalOf(request)?.aborted).toBe(true);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on a client abort.",
+      expect.any(Error),
+    );
+    await response.body?.cancel();
   });
 });
 
