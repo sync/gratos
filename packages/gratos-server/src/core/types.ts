@@ -168,8 +168,10 @@ export interface Plugin<Ctx = unknown> {
    * response, a subsequent incremental payload, or a subscription event (including the error a
    * failing source ends with). A subsequent payload keeps its errors in `incremental[].errors`:
    * read and rewrite errors with `payloadErrors` and `mapPayloadErrors`. Returns a replacement
-   * payload, or nothing (`hasNext` stays the executor's). Synchronous. It never runs for a
-   * payload that comes after the client has left.
+   * payload, or nothing (`hasNext` stays the executor's). Synchronous. A streamed response
+   * skips the payloads that arrive after the client has left. A single result is not skipped:
+   * a started mutation that finishes after a disconnect still runs the hooks on its result (its
+   * writes happened), and so does a query whose custom executor ignores the abort signal.
    */
   readonly onResult?: (
     payload: ExecutionResult,
