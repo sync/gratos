@@ -20,7 +20,7 @@ import {
   withIncrementalDirectives,
 } from "../src/index.ts";
 import type { ExecuteInput, Plugin } from "../src/index.ts";
-import { flush, gate, gql, post } from "./support/http.ts";
+import { flush, gate, gql, post, sleep } from "./support/http.ts";
 import { makeSchema } from "./support/schema.ts";
 import {
   readApolloMultipart,
@@ -471,6 +471,54 @@ describe("errors in incremental payloads", () => {
       post({ query: "{ hello ... @defer { list } }" }, { accept: APOLLO_ACCEPT }),
     );
     expect(readMultipart(await response.text()).map((part) => part.hasNext)).toEqual([true, false]);
+  });
+
+  it("a source that fails after a payload: the core signal aborts before return(), so a cleanup waiting on it ends", async () => {
+    const { schema } = fixture();
+    const closed = gate();
+    let pulls = 0;
+    const failing: Plugin = {
+      onExecute: (_input, args) => () => ({
+        initialResult: { data: { hello: "world" }, hasNext: true },
+        subsequentResults: {
+          next: async () => {
+            pulls += 1;
+            if (pulls === 1) {
+              return {
+                done: false,
+                value: { incremental: [{ data: { later: "later" }, path: [] }], hasNext: true },
+              };
+            }
+            throw new Error("source failed");
+          },
+          // A source that releases what it holds once the executor's signal aborts.
+          return: async () => {
+            const signal = args.abortSignal;
+            if (signal !== undefined && signal !== null && !signal.aborted) {
+              await new Promise((resolve) => {
+                signal.addEventListener("abort", resolve, { once: true });
+              });
+            }
+            closed.resolve();
+            return { done: true, value: undefined };
+          },
+          throw: (error: unknown) => Promise.reject(error),
+          [Symbol.asyncIterator]() {
+            return this;
+          },
+          [Symbol.asyncDispose]: () => Promise.resolve(),
+        },
+      }),
+    };
+    const server = createServer({ schema, plugins: [incremental(), failing] });
+    const request = post({ query: "{ hello }" }, { accept: APOLLO_ACCEPT });
+    const response = await server.handle(request);
+    const { parts, closed: ended } = readApolloMultipart(await response.text());
+    expect(ended).toBe(true);
+    expect(parts.at(-1)).toEqual({ errors: [{ message: "source failed" }], hasNext: false });
+    const timedOut = sleep(1000).then(() => "return() hangs");
+    expect(await Promise.race([closed.promise.then(() => "closed"), timedOut])).toBe("closed");
+    expect(signalOf(request)?.aborted).toBe(true);
   });
 
   it("an incremental result that ends after a hasNext: true part gets a terminal error part", async () => {

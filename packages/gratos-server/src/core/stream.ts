@@ -5,9 +5,9 @@
 // Both share one pull loop over the executor's payloads:
 // - each payload goes through the result hooks (`process`: onResult masking and reporting) before
 //   it is framed;
-// - a rejected pull (a source that failed) becomes a GraphQL error payload, goes through the same
-//   hooks, and is sent as the final payload, then the stream ends (`complete`, or the closing
-//   boundary);
+// - a rejected pull (a source that failed) aborts the core signal, becomes a GraphQL error
+//   payload, goes through the same hooks, and is sent as the final payload, then the stream ends
+//   (`complete`, or the closing boundary) and the iterator's `return()` is awaited;
 // - an incremental result whose payloads end after one that said `hasNext: true` gets a last
 //   payload with an error and `hasNext: false`, through the same hooks, so the client (Apollo
 //   Client) marks the result complete;
@@ -239,7 +239,12 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           if (finished) {
             return;
           }
-          // The source failed: its error is the last payload, through the same result hooks.
+          // The source failed. The executor is stopped as a cancel stops it: the core signal
+          // first (its listener here detached, the body still sends the error), so a cleanup
+          // that waits on the signal ends; `return()` comes once the last payload is sent. The
+          // source's error is that last payload, through the same result hooks.
+          listening.abort();
+          controller.abort();
           const result = await processed({ errors: [failure(error)] });
           if (result !== undefined) {
             await sendPayload({ result, hasNext: false });
