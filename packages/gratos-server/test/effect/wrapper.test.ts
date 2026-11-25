@@ -914,6 +914,39 @@ describe("effectRoute with a Web-backed request", () => {
 });
 
 describe("runInRequest", () => {
+  it("never starts the Effect when the client left during a pending onParams hook", async () => {
+    const effects: Array<string> = [];
+    const params = gate();
+    const reached = gate();
+    const server = createServer({
+      schema: makeSchema("type Query { a: String }"),
+      context: (request) =>
+        runInRequest(
+          request,
+          Effect.sync(() => {
+            effects.push("context work");
+          }),
+          Context.empty(),
+        ),
+      plugins: [
+        {
+          onParams: async () => {
+            reached.resolve();
+            await params.promise;
+          },
+        },
+        effect(),
+      ],
+    });
+    const client = new AbortController();
+    const sending = send(server, post({ query: "{ a }" }, { signal: client.signal }));
+    await reached.promise;
+    client.abort();
+    params.resolve();
+    expect((await sending).status).toBe(499);
+    expect(effects).toEqual([]);
+  });
+
   it("treats an Effect that interrupts itself as a context failure, not a client abort", async () => {
     const errors: Array<string> = [];
     const server = createServer({

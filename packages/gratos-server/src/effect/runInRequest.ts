@@ -3,9 +3,10 @@
 // route fiber's context (the services, the Tracer, the HTTP span as its parent), so its span
 // joins the request's trace; `services` fills in what a standalone request has no route for.
 // When the client leaves (the core signal aborts), its fiber is interrupted with the ClientAbort
-// annotation, so the core answers 499 and a mutation never starts. Any other failure, an
-// interrupt that is not a client abort included (an Effect that interrupts itself), is an
-// ordinary context failure: a masked 500, logged by the core.
+// annotation, so the core answers 499 and a mutation never starts; when the client has already
+// left, the Effect is never forked (forking runs its synchronous part at once). Any other
+// failure, an interrupt that is not a client abort included (an Effect that interrupts itself),
+// is an ordinary context failure: a masked 500, logged by the core.
 import { Cause, Context, Effect, Exit } from "effect";
 import { HttpServerError } from "effect/http";
 
@@ -19,14 +20,21 @@ export const runInRequest = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   services: Context.Context<R>,
 ): Promise<A> => {
+  const signal = signalOf(request);
+  /** Read afresh at each check: the client may leave while the Effect's synchronous part runs. */
+  const left = (): boolean => signal?.aborted === true;
+  if (left()) {
+    // The client left before the context phase (during a pending onParams hook, say).
+    return Promise.reject(cancelled());
+  }
   const route = routeOf(request);
   const context = route === undefined ? services : Context.merge(services, route.context);
   const fiber = Effect.runForkWith(context)(effect);
-  const signal = signalOf(request);
   const interrupt = (): void => {
     fiber.interruptUnsafe(undefined, HttpServerError.ClientAbort.annotation);
   };
-  if (signal?.aborted === true) {
+  if (left()) {
+    // The client left while the Effect's synchronous part ran.
     interrupt();
   } else {
     signal?.addEventListener("abort", interrupt, { once: true });
