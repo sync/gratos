@@ -41,9 +41,9 @@ export type {
 } from "./core/types.ts";
 
 export { apq, sha256Hex } from "./plugins/apq.ts";
+export { NoIncrementalMutationsRule } from "./core/incremental.ts";
 export {
   incremental,
-  NoIncrementalMutationsRule,
   usesIncrementalDelivery,
   withIncrementalDirectives,
 } from "./plugins/incremental.ts";

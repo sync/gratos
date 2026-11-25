@@ -503,6 +503,22 @@ describe("regression: no @defer or @stream on mutations", () => {
     },
   );
 
+  it.each(documents)(
+    "%s is rejected on a schema that already has the directives, without incremental()",
+    async (_name, query) => {
+      const { schema, calls } = fixture();
+      const server = createServer({ schema: withIncrementalDirectives(schema) });
+      const sent = await gql(server, query, { accept: APOLLO_ACCEPT });
+      expect(sent.status).toBe(400);
+      expect(sent.error?.message).toMatch(
+        /^@(defer|stream) is not supported on mutations: remove it from mutation/,
+      );
+      expect(calls["create"]).toBeUndefined();
+      // drain() has nothing to wait for: no deferred mutation work was left behind.
+      await server.control.drain();
+    },
+  );
+
   it("a query using the same fragments is still served incrementally", async () => {
     const { schema } = fixture();
     const server = createServer({ schema, plugins: [incremental()] });

@@ -113,7 +113,8 @@ export interface Plugin<Ctx = unknown> {
   readonly hideSuggestions?: boolean;
   /**
    * Validation rules run with graphql's specified rules on every document the cache does not hold
-   * yet (`incremental()` rejects @defer and @stream on mutations). Read once, at startup.
+   * yet. Read once, at startup. (The core adds `NoIncrementalMutationsRule` itself on a schema that
+   * declares @defer or @stream.)
    */
   readonly validationRules?: ReadonlyArray<ValidationRule>;
   /** Once, at startup. May replace the schema through `control.replaceSchema`. */

@@ -40,6 +40,7 @@ import {
   TEXT_EVENT_STREAM,
 } from "./http.ts";
 import type { Accepted, MediaType } from "./http.ts";
+import { hasIncrementalDirectives, NoIncrementalMutationsRule } from "./incremental.ts";
 import { registerMutation, registerRequest } from "./requestState.ts";
 import type { MutationTracker } from "./requestState.ts";
 import { multipartResponse, sseResponse } from "./stream.ts";
@@ -77,10 +78,6 @@ const isPromiseLike = <T>(value: PromiseOrValue<T>): value is Promise<T> =>
 /** Awaits a hook's result only when it is a Promise, so synchronous hooks cost no microtask. */
 const settle = async <T>(value: PromiseOrValue<T>): Promise<T> =>
   isPromiseLike(value) ? await value : value;
-
-/** True when the schema declares @defer or @stream (incremental() adds them). */
-const hasIncrementalDirectives = (schema: GraphQLSchema): boolean =>
-  schema.getDirective("defer") !== undefined || schema.getDirective("stream") !== undefined;
 
 /** Closes a streamed result the JSON path cannot send. */
 const closeStreamed = async (result: ExecutorResult): Promise<void> => {
@@ -220,10 +217,19 @@ const serve = <Ctx>(
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
   const logger: Logger = options.logger ?? console;
   const hideSuggestions = plugins.some((plugin) => plugin.hideSuggestions === true);
-  // graphql's specified rules, plus every plugin's (incremental() rejects @defer on mutations).
-  const pluginRules = plugins.flatMap((plugin) => plugin.validationRules ?? []);
+  // graphql's specified rules, plus every plugin's. A schema that declares @defer or @stream also
+  // gets NoIncrementalMutationsRule, with or without incremental(): its queries run through
+  // legacyExecuteIncrementally, which would let a deferred mutation outlive drain().
+  const pluginRules = plugins
+    .flatMap((plugin) => plugin.validationRules ?? [])
+    .filter((rule) => rule !== NoIncrementalMutationsRule);
   const validationRules: ReadonlyArray<ValidationRule> | undefined =
     pluginRules.length === 0 ? undefined : [...specifiedRules, ...pluginRules];
+  const incrementalValidationRules: ReadonlyArray<ValidationRule> = [
+    ...specifiedRules,
+    ...pluginRules,
+    NoIncrementalMutationsRule,
+  ];
 
   // Hook lists are built once: a hook that no plugin defines costs nothing per request.
   const onServer = hooksOf(plugins, "onServer");
@@ -420,7 +426,10 @@ const serve = <Ctx>(
     }
     const validateStart = performance.now();
     reportPhase(run.request, "parse", parseStart, validateStart);
-    const errors = validate(run.schema, document, validationRules, { hideSuggestions });
+    const rules = hasIncrementalDirectives(run.schema)
+      ? incrementalValidationRules
+      : validationRules;
+    const errors = validate(run.schema, document, rules, { hideSuggestions });
     reportPhase(run.request, "validate", validateStart, performance.now());
     if (errors.length > 0) {
       return answer(respond(run, errorResult(errors)));

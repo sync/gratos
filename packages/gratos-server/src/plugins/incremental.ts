@@ -7,36 +7,27 @@
 // - It claims (returns an executor for) a query only when the selected operation, or a fragment it
 //   reaches, uses @defer or @stream: never because of another operation in the document, and
 //   never a subscription (subscriptions always run through graphql-js `subscribe()`).
-// - It rejects @defer and @stream on mutation operations with a validation error (400). graphql
-//   17.1 would return the initial result while deferred mutation work is still pending, and a
-//   `return()` would skip that work, so a write could outlive the shutdown drain or be dropped.
+// - @defer and @stream on mutation operations get a validation error (400): the core runs
+//   NoIncrementalMutationsRule on every schema that declares either directive, so the rule holds
+//   even for a schema that already had them without this plugin.
 // - List it before jit(): graphql-jit inlines @defer. jit() also declines every operation that
 //   uses @defer or @stream, so a deferred operation never reaches graphql-jit whatever the order.
 import {
   GraphQLDeferDirective,
-  GraphQLError,
   GraphQLSchema,
   GraphQLStreamDirective,
   Kind,
   legacyExecuteIncrementally,
-  visit,
 } from "graphql";
 import type {
-  DirectiveNode,
   DocumentNode,
   FragmentDefinitionNode,
   OperationDefinitionNode,
   SelectionSetNode,
-  ValidationRule,
 } from "graphql";
 
+import { isIncrementalDirective } from "../core/incremental.ts";
 import type { Plugin } from "../core/types.ts";
-
-const DEFER = GraphQLDeferDirective.name;
-const STREAM = GraphQLStreamDirective.name;
-
-const isIncrementalDirective = (directive: DirectiveNode): boolean =>
-  directive.name.value === DEFER || directive.name.value === STREAM;
 
 /**
  * True when the operation, or a fragment it reaches (through any depth of named fragments), uses
@@ -77,38 +68,6 @@ export const usesIncrementalDelivery = (
   return walk(operation.selectionSet);
 };
 
-/**
- * Rejects @defer and @stream on mutation operations, in the operation itself or in any fragment
- * it reaches (`getRecursivelyReferencedFragments`), whatever their `if` argument.
- */
-export const NoIncrementalMutationsRule: ValidationRule = (context) => ({
-  OperationDefinition: (operation) => {
-    if (operation.operation !== "mutation") {
-      return undefined;
-    }
-    const name = operation.name === undefined ? "" : ` "${operation.name.value}"`;
-    const check = (selectionSet: SelectionSetNode): void => {
-      visit(selectionSet, {
-        Directive: (directive) => {
-          if (isIncrementalDirective(directive)) {
-            context.reportError(
-              new GraphQLError(
-                `@${directive.name.value} is not supported on mutations: remove it from mutation${name}.`,
-                { nodes: [directive] },
-              ),
-            );
-          }
-        },
-      });
-    };
-    check(operation.selectionSet);
-    for (const fragment of context.getRecursivelyReferencedFragments(operation)) {
-      check(fragment.selectionSet);
-    }
-    return undefined;
-  },
-});
-
 /** The schema with @defer and @stream added (the same schema when it already has both). */
 export const withIncrementalDirectives = (schema: GraphQLSchema): GraphQLSchema => {
   const missing = [GraphQLDeferDirective, GraphQLStreamDirective].filter(
@@ -126,7 +85,6 @@ export const incremental = (): Plugin => {
   const uses = new WeakMap<object, boolean>();
   return {
     name: "incremental",
-    validationRules: [NoIncrementalMutationsRule],
     onServer: ({ schema, control }) => {
       const next = withIncrementalDirectives(schema);
       if (next !== schema) {
