@@ -18,6 +18,9 @@ export const TEXT_EVENT_STREAM = "text/event-stream";
 /** The `deferSpec` the multipart encoder speaks (the format Apollo Client reads). */
 export const DEFER_SPEC = "20220824";
 
+/** The multipart boundary the encoder uses. */
+export const MULTIPART_BOUNDARY = "-";
+
 export type MediaType = typeof GRAPHQL_RESPONSE_JSON | typeof APPLICATION_JSON;
 
 /** Every representation the core can send. */
@@ -89,9 +92,11 @@ interface MediaRange {
   readonly charset: string | undefined;
   /** The `deferSpec` parameter, unquoted, when the range names one. */
   readonly deferSpec: string | undefined;
+  /** The `boundary` parameter, unquoted, when the range names one. */
+  readonly boundary: string | undefined;
   /**
-   * A parameter other than `charset`, `deferSpec` and `q`, which no representation of the core
-   * carries.
+   * A parameter other than `charset`, `deferSpec`, `boundary` and `q`, which no representation of
+   * the core carries.
    */
   readonly hasOtherParameters: boolean;
   readonly quality: number;
@@ -103,6 +108,7 @@ const parseRange = (part: string): MediaRange => {
   );
   let charset: string | undefined;
   let deferSpec: string | undefined;
+  let boundary: string | undefined;
   let hasOtherParameters = false;
   let quality = 1;
   // Every parameter is read, wherever `q` sits: clients write `charset` after `q` too.
@@ -120,23 +126,26 @@ const parseRange = (part: string): MediaRange => {
       charset = value;
     } else if (name === "deferspec") {
       deferSpec = value;
+    } else if (name === "boundary") {
+      boundary = value;
     } else {
       hasOtherParameters = true;
     }
   }
-  return { range, charset, deferSpec, hasOtherParameters, quality };
+  return { range, charset, deferSpec, boundary, hasOtherParameters, quality };
 };
 
 /**
  * 0 when the range does not match the representation as the core sends it, else its specificity:
- * the rank, doubled, plus one when the range names a parameter the representation carries
- * (RFC 9110 §12.5.1: a more specific range takes precedence). The core sends its JSON and SSE
- * types with `charset=utf-8`, and multipart/mixed with `deferSpec=20220824`. A range with another
- * charset or deferSpec, or with any other parameter, does not match, so it can neither accept
+ * the rank, tripled, plus one for each parameter the range names that the representation carries
+ * (RFC 9110 §12.5.1: a more specific range takes precedence; a type always beats `type/*`,
+ * whatever their parameters). The core sends its JSON and SSE types with `charset=utf-8`, and
+ * multipart/mixed with `boundary="-"` and `deferSpec=20220824`. A range with another charset,
+ * boundary or deferSpec, or with any other parameter, does not match, so it can neither accept
  * nor, with q=0, refuse what the core sends.
  */
 const specificity = (
-  { range, charset, deferSpec, hasOtherParameters }: MediaRange,
+  { range, charset, deferSpec, boundary, hasOtherParameters }: MediaRange,
   representation: Representation,
 ): number => {
   const rank = rangeRank(range, representation);
@@ -144,15 +153,23 @@ const specificity = (
     return 0;
   }
   if (representation === MULTIPART_MIXED) {
-    if (charset !== undefined || (deferSpec !== undefined && deferSpec !== DEFER_SPEC)) {
+    if (
+      charset !== undefined ||
+      (deferSpec !== undefined && deferSpec !== DEFER_SPEC) ||
+      (boundary !== undefined && boundary !== MULTIPART_BOUNDARY)
+    ) {
       return 0;
     }
-    return rank * 2 + (deferSpec === undefined ? 0 : 1);
+    return rank * 3 + (deferSpec === undefined ? 0 : 1) + (boundary === undefined ? 0 : 1);
   }
-  if (deferSpec !== undefined || (charset !== undefined && !UTF8.test(charset))) {
+  if (
+    deferSpec !== undefined ||
+    boundary !== undefined ||
+    (charset !== undefined && !UTF8.test(charset))
+  ) {
     return 0;
   }
-  return rank * 2 + (charset === undefined ? 0 : 1);
+  return rank * 3 + (charset === undefined ? 0 : 1);
 };
 
 /** The quality the client gives a representation: that of its most specific matching range. */

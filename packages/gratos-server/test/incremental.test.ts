@@ -277,6 +277,45 @@ describe("multipart/mixed; deferSpec=20220824", () => {
     },
   );
 
+  it.each([
+    ["the emitted Content-Type itself", MULTIPART],
+    ["boundary=- unquoted", "multipart/mixed;boundary=-;deferSpec=20220824"],
+    [
+      "a refusal of the range without the boundary, outranked by one with it",
+      'multipart/mixed;deferSpec=20220824;q=0, multipart/mixed;boundary="-";deferSpec=20220824',
+    ],
+  ])("Accept with %s accepts it", async (_name, accept) => {
+    const { schema } = fixture();
+    const server = createServer({ schema, plugins: [incremental()] });
+    const response = await server.handle(
+      post({ query: "{ hello ... @defer { list } }" }, { accept }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(MULTIPART);
+    expect(readMultipart(await response.text())).toHaveLength(2);
+  });
+
+  it.each([
+    ["another boundary", 'multipart/mixed; boundary="graphql"; deferSpec=20220824'],
+    ["another parameter", 'multipart/mixed; boundary="-"; deferSpec=20220824; level=1'],
+    [
+      "multipart/mixed refused, even next to a multipart/* range with every parameter",
+      'multipart/*;boundary="-";deferSpec=20220824, multipart/mixed;q=0',
+    ],
+  ])("Accept with %s does not accept it", async (_name, accept) => {
+    const { schema } = fixture();
+    const server = createServer({ schema, plugins: [incremental()] });
+    const sent = await gql(server, "{ hello ... @defer { list } }", { accept });
+    expect(sent.status).toBe(406);
+  });
+
+  it("a JSON range with a boundary does not match", async () => {
+    const { schema } = fixture();
+    const server = createServer({ schema });
+    const sent = await gql(server, "{ hello }", { accept: 'application/json; boundary="-"' });
+    expect(sent.status).toBe(406);
+  });
+
   it("a multipart-only client gets a single result as one part", async () => {
     const { schema } = fixture();
     const server = createServer({ schema, plugins: [incremental()] });

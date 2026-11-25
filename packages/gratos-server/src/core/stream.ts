@@ -16,7 +16,7 @@
 //   awaits the iterator's `return()`: a `return()` alone can wait forever on a pending pull.
 import type { ExecutionResult, GraphQLError } from "graphql";
 
-import { DEFER_SPEC, MULTIPART_MIXED, TEXT_EVENT_STREAM } from "./http.ts";
+import { DEFER_SPEC, MULTIPART_BOUNDARY, MULTIPART_MIXED, TEXT_EVENT_STREAM } from "./http.ts";
 import type { Logger } from "./types.ts";
 
 /** A payload on its way out, with the `hasNext` the executor gave it (multipart only). */
@@ -68,7 +68,7 @@ interface Framing {
  * without a `hasNext: false` part still closes cleanly instead of sending an empty part.
  */
 const multipartFraming: Framing = {
-  contentType: `${MULTIPART_MIXED}; boundary="-"; deferSpec=${DEFER_SPEC}`,
+  contentType: `${MULTIPART_MIXED}; boundary="${MULTIPART_BOUNDARY}"; deferSpec=${DEFER_SPEC}`,
   start: "\r\n---",
   frame: ({ result, hasNext }) =>
     `\r\ncontent-type: application/json; charset=utf-8\r\n\r\n${JSON.stringify({ ...result, hasNext })}\r\n---`,
