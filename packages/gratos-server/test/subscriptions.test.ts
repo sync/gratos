@@ -1,8 +1,9 @@
 // Subscriptions (docs/plan.html M4b): always graphql-js subscribe(), encoded as GraphQL-over-SSE
 // "distinct connections"; errors from a failing source; disconnects over a standalone
 // handle(Request) and over real HTTP (node:http); and the plan's regression tests.
-import { on } from "node:events";
+import { on, once } from "node:events";
 import { EventEmitter } from "node:events";
+import { connect } from "node:net";
 
 import { GraphQLError, parse } from "graphql";
 import type { GraphQLResolveInfo } from "graphql";
@@ -862,6 +863,35 @@ describe("over real HTTP (node:http)", () => {
     listening = await listen(server);
     return listening.url;
   };
+
+  it("a client that leaves during its upload is a cancellation: handle() never runs", async () => {
+    const { schema } = fixture();
+    let handled = 0;
+    const url = await serve(
+      createServer({
+        schema,
+        plugins: [
+          {
+            onRequest: () => {
+              handled += 1;
+            },
+          },
+        ],
+      }),
+    );
+    const { hostname, port } = new URL(url);
+    const socket = connect(Number(port), hostname);
+    await once(socket, "connect");
+    // A body shorter than its Content-Length: the server is still reading it when the client goes.
+    socket.write(
+      'POST /graphql HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"query":',
+    );
+    await sleep(20);
+    socket.destroy();
+    await sleep(20);
+    expect(handled).toBe(0);
+    // afterEach's close() fails the test if the adapter itself failed.
+  });
 
   it("an SSE subscription delivers N events and then completes", async () => {
     const { schema } = fixture();

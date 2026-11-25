@@ -154,6 +154,7 @@ const toHeaders = (incoming: IncomingHttpHeaders): Headers => {
 /** A running node:http server and the URL of its GraphQL endpoint. */
 export interface Listening {
   readonly url: string;
+  /** Stops the server; rejects with what failed in the adapter itself, if anything did. */
   readonly close: () => Promise<void>;
 }
 
@@ -161,18 +162,23 @@ export interface Listening {
  * Serves `handle(Request)` over node:http. Like the Effect platform's server, a client that
  * leaves before the Response exists aborts the Request's signal; once the Response is being
  * written, a disconnect is visible only as a cancel of its body (the pipeline destroys the
- * readable, which cancels the web stream).
+ * readable, which cancels the web stream). A client that leaves during its upload is a
+ * cancellation: its request never reaches `handle`. Any other failure of the adapter (one that
+ * is not the client's socket going away) fails the test through `close()`.
  */
 export const listen = async (server: Server): Promise<Listening> => {
+  const failures: Array<unknown> = [];
   const http = createHttpServer((req, res) => {
-    void (async () => {
-      const controller = new AbortController();
-      let responded = false;
-      res.on("close", () => {
-        if (!responded) {
-          controller.abort();
-        }
-      });
+    /** The client's socket is gone (it left, or the pipeline destroyed it for a body error). */
+    const gone = (): boolean => req.socket.destroyed;
+    const controller = new AbortController();
+    let responded = false;
+    res.on("close", () => {
+      if (!responded) {
+        controller.abort();
+      }
+    });
+    const serve = async (): Promise<void> => {
       const bytes = await buffer(req);
       const method = req.method ?? "GET";
       const init: RequestInit = {
@@ -192,12 +198,16 @@ export const listen = async (server: Server): Promise<Listening> => {
         return;
       }
       res.flushHeaders();
-      try {
-        await pipeline(Readable.fromWeb(response.body), res);
-      } catch {
-        // The client left mid-body: the pipeline cancelled the body.
+      await pipeline(Readable.fromWeb(response.body), res);
+    };
+    serve().catch((error: unknown) => {
+      if (gone()) {
+        // A cancellation: the client left (during the upload, or mid-body).
+        return;
       }
-    })();
+      failures.push(error);
+      res.destroy();
+    });
   });
   await new Promise<void>((resolve) => {
     http.listen(0, "127.0.0.1", resolve);
@@ -208,13 +218,17 @@ export const listen = async (server: Server): Promise<Listening> => {
   }
   return {
     url: `http://127.0.0.1:${address.port}/graphql`,
-    close: () =>
-      new Promise<void>((resolve) => {
+    close: async () => {
+      await new Promise<void>((resolve) => {
         http.closeAllConnections();
         http.close(() => {
           resolve();
         });
-      }),
+      });
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "the node:http adapter failed");
+      }
+    },
   };
 };
 
