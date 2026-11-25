@@ -26,6 +26,25 @@ const row = (id: string): OrderRow => ({
   revision: 1,
 });
 
+/**
+ * A pending response that never comes on its own, counting the handlers attached to it: one per
+ * turn of the open loop would grow without bound.
+ */
+const countedPending = () => {
+  const late = Promise.withResolvers<Response>();
+  const counts = { subscribed: 0 };
+  const pending = late.promise;
+  const then = pending.then.bind(pending);
+  pending.then = <A = Response, B = never>(
+    onFulfilled?: ((value: Response) => A | PromiseLike<A>) | null,
+    onRejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
+  ): Promise<A | B> => {
+    counts.subscribed += 1;
+    return then(onFulfilled, onRejected);
+  };
+  return { late, pending, counts };
+};
+
 describe("bench:subscriptions", () => {
   it.each([
     ["effect", "burst"],
@@ -135,21 +154,40 @@ describe("bench:subscriptions", () => {
     await counter.close();
   });
 
+  it("attaches one handler to the pending response, however many turns it waits", async () => {
+    const { pending, counts } = countedPending();
+    let sent: Request | undefined;
+    let published = 0;
+    const stop = new Error("stop after 50 publishes");
+
+    // The deadline is far away: the run ends on the 50th publish, whatever the scheduler does.
+    const error = await openSubscription(
+      (request) => {
+        sent = request;
+        return pending;
+      },
+      () => {
+        published += 1;
+        if (published === 50) {
+          throw stop;
+        }
+      },
+      performance.now() + 60_000,
+    ).then(
+      () => undefined,
+      (error_: unknown) => error_,
+    );
+
+    expect(error).toBe(stop);
+    expect(published).toBe(50);
+    expect(counts.subscribed).toBe(1);
+    expect(sent?.signal.aborted).toBe(true);
+  });
+
   it("aborts the request when the subscription does not answer in time, and cancels a late body", async () => {
     let sent: Request | undefined;
-    const late = Promise.withResolvers<Response>();
+    const { late, pending } = countedPending();
     let published = 0;
-    // Counts the handlers attached to the pending response: one per turn would grow without bound.
-    let subscribed = 0;
-    const pending = late.promise;
-    const then = pending.then.bind(pending);
-    pending.then = <A = Response, B = never>(
-      onFulfilled?: ((value: Response) => A | PromiseLike<A>) | null,
-      onRejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
-    ): Promise<A | B> => {
-      subscribed += 1;
-      return then(onFulfilled, onRejected);
-    };
 
     const error = await openSubscription(
       (request) => {
@@ -166,8 +204,7 @@ describe("bench:subscriptions", () => {
     );
 
     expect(error).toMatchObject({ message: "timed out waiting for the subscription to answer" });
-    expect(published).toBeGreaterThan(10);
-    expect(subscribed).toBe(1);
+    expect(published).toBeGreaterThan(0);
     // The client left: the server sees the request aborted.
     expect(sent?.signal.aborted).toBe(true);
     // A response that comes anyway has its body cancelled: none of its events is read.
