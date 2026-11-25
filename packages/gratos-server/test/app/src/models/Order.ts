@@ -22,6 +22,23 @@ export class Order {
   label(): Effect.Effect<string> {
     return Effect.succeed(`${this.id}:${this.status}`);
   }
+
+  /** Never resolves: a deferred selection of it stays pending until it is interrupted. */
+  /** @gqlField */
+  slowNote(): Effect.Effect<string, never, JournalRef> {
+    const id = this.id;
+    return Effect.gen(function* () {
+      const journal = yield* JournalRef;
+      journal.entries.push(`note started ${id}`);
+      return yield* Effect.never.pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            journal.entries.push(`note interrupted ${id}`);
+          }),
+        ),
+      );
+    });
+  }
 }
 
 /** @gqlQueryField */
@@ -59,12 +76,15 @@ export function setStatus(
   id: string,
   status: string,
   ctx: Ctx,
-): Effect.Effect<Order, AppError, Api> {
+): Effect.Effect<Order, AppError, Api | Bus> {
   return ctx.guard({
     scopes: ["orders:write"],
     effect: Effect.gen(function* () {
       const api = yield* Api;
-      return new Order(yield* api.setStatus(id, status));
+      const row = yield* api.setStatus(id, status);
+      const bus = yield* Bus;
+      yield* bus.publish(row);
+      return new Order(row);
     }),
   });
 }
@@ -83,12 +103,21 @@ export function greetings(viewer: Viewer): Stream.Stream<string> {
 
 /** A guarded subscription whose setup is an Effect (guardStream bounds the setup only). */
 /** @gqlSubscriptionField */
-export function orderChanged(id: string, ctx: Ctx): Stream.Stream<Order, AppError, Bus | Api> {
+export function orderChanged(
+  id: string,
+  ctx: Ctx,
+): Stream.Stream<Order, AppError, Bus | Api | JournalRef> {
   return ctx.guardStream({
     scopes: ["orders:read"],
     stream: Effect.gen(function* () {
       const api = yield* Api;
       yield* api.order(id);
+      const journal = yield* JournalRef;
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          journal.entries.push(`orderChanged released ${id}`);
+        }),
+      );
       const bus = yield* Bus;
       return bus.changes.pipe(
         Stream.filter((row) => row.id === id),

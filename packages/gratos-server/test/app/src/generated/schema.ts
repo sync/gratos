@@ -31,6 +31,18 @@ export function getSchema(): GraphQLSchema {
                         return source.label();
                     }
                 },
+                slowNote: {
+                    name: "slowNote",
+                    type: GraphQLString,
+                    extensions: {
+                        gratos: {
+                            semanticNonNull: true
+                        }
+                    },
+                    resolve(source) {
+                        return source.slowNote();
+                    }
+                },
                 status: {
                     name: "status",
                     type: GraphQLString,

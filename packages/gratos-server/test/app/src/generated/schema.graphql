@@ -38,6 +38,7 @@ type Mutation {
 type Order {
   id: String @semanticNonNull
   label: String @semanticNonNull
+  slowNote: String @semanticNonNull
   status: String @semanticNonNull
 }
 

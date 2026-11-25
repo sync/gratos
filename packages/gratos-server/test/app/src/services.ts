@@ -13,11 +13,11 @@ export interface OrderRow {
 /** What the services saw, in order: writes, releases, events. */
 export interface Journal {
   readonly entries: Array<string>;
-  /** Held before a write commits, when set (a test opens it). */
-  hold: Promise<void> | undefined;
+  /** Holds the write of an order id before it commits (a test opens it). */
+  readonly holds: Map<string, Promise<void>>;
 }
 
-export const makeJournal = (): Journal => ({ entries: [], hold: undefined });
+export const makeJournal = (): Journal => ({ entries: [], holds: new Map() });
 
 export class JournalRef extends Context.Service<JournalRef, Journal>()("test/app/JournalRef") {}
 
@@ -54,8 +54,9 @@ export class Api extends Context.Service<
         setStatus: (id, status) =>
           Effect.gen(function* () {
             yield* find(id);
-            const hold = journal.hold;
+            const hold = journal.holds.get(id);
             if (hold !== undefined) {
+              journal.entries.push(`held ${id}`);
               yield* Effect.promise(() => hold);
             }
             const row = { id, status };
