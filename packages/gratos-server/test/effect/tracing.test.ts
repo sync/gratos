@@ -102,6 +102,25 @@ const operations = (tracer: RecordingTracer) =>
 const childrenOf = (tracer: RecordingTracer, parent: RecordedSpan | undefined) =>
   tracer.spans.filter((span) => span.parentId === parent?.spanId);
 
+/** Reads an SSE body to its end, calling `onEvent` with the text read so far. */
+const readBody = async (response: Response, onEvent: (text: string) => void = () => {}) => {
+  const body = response.body;
+  if (body === null) {
+    throw new Error("no body");
+  }
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      return text;
+    }
+    text += decoder.decode(value, { stream: true });
+    onEvent(text);
+  }
+};
+
 describe.each(executors)("effect() tracing ($name executor)", (executor) => {
   const warm = async (server: Server, query: string) => {
     for (let index = 0; index < executor.warmUp; index += 1) {
@@ -232,6 +251,53 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     expect(built.ended).toEqual([operation]);
     expect((operation?.endedAtPerf ?? 0) >= lastPayloadAt).toBe(true);
     expect(operation?.outcome).toBe("ok");
+  });
+
+  it("ends an SSE subscription aborted through its request's signal with cancel, once", async () => {
+    const built = build(executor.plugins(), {
+      Subscription: { events: () => Stream.make("a").pipe(Stream.concat(Stream.never)) },
+    });
+    const controller = new AbortController();
+    const response = await built.server.handle(
+      post(
+        { query: "subscription Aborted { events }" },
+        { accept: "text/event-stream", signal: controller.signal },
+      ),
+    );
+    // The core ends the body (EOF) once the client's signal aborts.
+    const text = await readBody(response, (sofar) => {
+      if (sofar.includes('"events":"a"')) {
+        controller.abort();
+      }
+    });
+    expect(readSse(text).names).toEqual(["next"]);
+    const [operation] = operations(built.tracer);
+    expect(operation?.name).toBe("graphql Aborted");
+    expect(operation?.outcome).toBe("cancel");
+    expect(operation?.endCalls).toBe(1);
+    expect(built.ended).toEqual([operation]);
+    expect(built.tracer.open()).toEqual([]);
+  });
+
+  it("ends an SSE subscription whose source failed with error, not cancel", async () => {
+    const built = build(
+      executor.plugins(),
+      {
+        Subscription: {
+          events: () => Stream.make("a").pipe(Stream.concat(Stream.die(new Error("boom")))),
+        },
+      },
+      { quiet: true },
+    );
+    const response = await built.server.handle(
+      post({ query: "subscription Failing { events }" }, { accept: "text/event-stream" }),
+    );
+    // The core stops the stream (and aborts its own signal) after the source's error payload.
+    const events = readSse(await readBody(response));
+    expect(events.names).toEqual(["next", "next", "complete"]);
+    const [operation] = operations(built.tracer);
+    expect(operation?.outcome).toBe("error");
+    expect(operation?.endCalls).toBe(1);
   });
 
   it("ends a mutation whose client left after its first resolver started after its last resolver, ok", async () => {

@@ -13,7 +13,8 @@
 //   answer) creates a `graphql anonymous` span in onResponse, an error only for a status >= 400;
 // - counts errors in onResult, skipping cancelled() ones;
 // - ends the span once, from one idempotent finalizer with three triggers: the response body (a
-//   pass-through wrapper that sees done, a read error or a cancel), a null body (ended in
+//   pass-through wrapper that sees done, a read error or a cancel; done after the request's own
+//   signal aborted, the client leaving a stream, is a cancel), a null body (ended in
 //   onResponse), and effectRoute's request Scope (the closed flag: a span created later ends
 //   with cancel at once), plus, for a mutation, the request signal's abort (a standalone client
 //   that left, whose body nobody may read). A mutation the core reports as started defers its end
@@ -321,7 +322,10 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
           if (read.done) {
             done = true;
             controller.close();
-            requestEnd(state, "complete");
+            // The core ends the body at once when the client leaves (the incoming signal aborts
+            // the core one): that end is a cancel. A source failure also aborts the core signal,
+            // never the incoming one, and keeps its error outcome (its error payload).
+            requestEnd(state, state.request.signal.aborted ? "cancel" : "complete");
             return;
           }
           controller.enqueue(read.value);
