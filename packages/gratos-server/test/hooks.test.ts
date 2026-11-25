@@ -1045,17 +1045,19 @@ const heldServer = (holds: ReadonlyArray<PromiseWithResolvers<void>>) => {
 describe("a Request passed to handle() again", () => {
   it("warns, without blocking, when an earlier call on it is still in flight", async () => {
     const hold = gate();
-    const warn = vi.fn();
-    const server = createServer({
-      schema: basicSchema(),
-      logger: { warn, error: () => {} },
-      context: () => hold.promise.then(() => ({})),
-    });
-    const request = post({ query: "{ count }" });
+    const { server, warn, calls } = heldServer([hold]);
+    // No body: both calls get as far as they can (a 405) on the same Request.
+    const request = new Request(URL_, { method: "GET" });
     const first = server.handle(request);
-    const second = server.handle(request);
-    hold.resolve();
-    await Promise.all([first, second]);
+    try {
+      const second = server.handle(request);
+      // The second call runs, and answers, while the first is still held.
+      await waitFor(() => calls.entered === 2, "the second call's onRequest");
+      expect((await second).status).toBe(405);
+    } finally {
+      hold.resolve();
+    }
+    expect((await first).status).toBe(405);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain("request.clone()");
   });
