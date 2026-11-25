@@ -20,7 +20,7 @@ import {
 } from "../src/index.ts";
 import type { JsonObject, Plugin, Server } from "../src/index.ts";
 import { subscribeOnce } from "../src/core/subscribe.ts";
-import { flush, gate, gql, post, sleep } from "./support/http.ts";
+import { flush, gate, gql, post, send, sleep } from "./support/http.ts";
 import { makeSchema } from "./support/schema.ts";
 import { fetchGraphQL, listen, readSse, readUntil } from "./support/stream.ts";
 import type { Listening } from "./support/stream.ts";
@@ -359,7 +359,12 @@ describe("GraphQL-over-SSE", () => {
   it.each([
     ["a validation error", { query: "subscription { nope }" }, /Cannot query field "nope"/, []],
     ["a syntax error", { query: "subscription {" }, /^Syntax Error/, []],
-    ["a body error", { query: "{ hello }", variables: [] }, /^`variables` must be an object/, []],
+    [
+      "a variable error",
+      { query: "subscription S($n: Int!) { tick(n: $n) }", variables: { n: "x" } },
+      /^Variable "\$n" has invalid value/,
+      [],
+    ],
     [
       "an unknown operation",
       { query: "subscription A { tick(n: 1) }", operationName: "B" },
@@ -393,6 +398,61 @@ describe("GraphQL-over-SSE", () => {
       expect(payloads[0]?.errors?.[0]?.message).toMatch(message);
     },
   );
+
+  it.each([
+    [
+      "an unsupported Content-Type",
+      post({ query: "{ hello }" }, { accept: "text/event-stream", contentType: "text/plain" }),
+      415,
+      "Content-Type must be application/json.",
+    ],
+    [
+      "a body that is not JSON",
+      post("{", { accept: "text/event-stream" }),
+      400,
+      "The request body is not valid JSON.",
+    ],
+    [
+      "a body that is not a GraphQL-over-HTTP request",
+      post({ query: "{ hello }", variables: [] }, { accept: "text/event-stream" }),
+      400,
+      "`variables` must be an object.",
+    ],
+    [
+      "a body without a query",
+      post({}, { accept: "text/event-stream" }),
+      400,
+      "Must provide a query string.",
+    ],
+  ])(
+    "an SSE-only client gets %s as a transport failure: JSON with its status",
+    async (_name, request, status, message) => {
+      const { schema } = fixture();
+      const server = createServer({ schema });
+      const sent = await send(server, request);
+      expect(sent.status).toBe(status);
+      expect(sent.headers.get("content-type")).toBe(
+        "application/graphql-response+json; charset=utf-8",
+      );
+      expect(sent.body).toEqual({ errors: [{ message }] });
+    },
+  );
+
+  it("an SSE-only client gets a 406 for an incremental response it cannot accept", async () => {
+    const { schema } = fixture();
+    const server = createServer({ schema, plugins: [incremental()] });
+    const sent = await send(
+      server,
+      post({ query: "{ hello ... @defer { later } }" }, { accept: "text/event-stream" }),
+    );
+    expect(sent.status).toBe(406);
+    expect(sent.headers.get("content-type")).toBe(
+      "application/graphql-response+json; charset=utf-8",
+    );
+    expect(sent.error?.message).toBe(
+      "This operation uses @defer or @stream, which needs Accept: multipart/mixed.",
+    );
+  });
 
   it("a client that accepts JSON too still gets request errors as JSON", async () => {
     const { schema } = fixture();

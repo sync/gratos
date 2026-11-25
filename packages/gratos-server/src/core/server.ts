@@ -333,8 +333,8 @@ const serve = <Ctx>(
     /** What the client accepts (the streamed types too). */
     accepted: Accepted;
     /**
-     * The client accepts text/event-stream and no JSON type: request errors go out as
-     * GraphQL-over-SSE events (see `respond`).
+     * The client accepts text/event-stream and no JSON type: GraphQL request errors go out as
+     * GraphQL-over-SSE events (see `respond`); transport failures stay JSON (`transportError`).
      */
     errorsAsEvents: boolean;
     ctx: Ctx | undefined;
@@ -342,7 +342,8 @@ const serve = <Ctx>(
   }
 
   /**
-   * A single result, or a request error, as JSON with its status. A client that accepts
+   * A single result, or a GraphQL request error (a syntax, validation, unknown-operation or
+   * variable error, a refusal, the drain), as JSON with its status. A client that accepts
    * text/event-stream and no JSON type gets it as GraphQL-over-SSE instead: one `next` event with
    * the result, then `complete`, always with a 200. graphql-sse's protocol (distinct connections
    * mode) has errors found before execution reported through an accepted SSE connection, since a
@@ -384,8 +385,16 @@ const serve = <Ctx>(
     return respond(run, errorResult([error instanceof GraphQLError ? error : unexpected(error)]));
   };
 
-  const requestError = (run: Run, message: string, status: number): Response =>
-    respond(run, errorResult([new GraphQLError(message)]), status);
+  /**
+   * A failure of the HTTP exchange itself, not of the GraphQL request: an unsupported Accept or
+   * Content-Type, a body that is not a GraphQL-over-HTTP request, or a streamed response the
+   * client does not accept. It is JSON with its status (the M4a HTTP matrix) for every client,
+   * an SSE-only one included: only GraphQL request errors go out as GraphQL-over-SSE events.
+   */
+  const transportError = (run: Run, message: string, status: number): Response =>
+    jsonResponse(errorResult([new GraphQLError(message)]), status, run.mediaType, () => {
+      run.controller.abort();
+    });
 
   /** read: method, Accept, Content-Type, body, onParams, the "no query" check. */
   const read = async (run: Run): Promise<Answer | Params> => {
@@ -397,7 +406,7 @@ const serve = <Ctx>(
     if (accepted === undefined) {
       run.mediaType = APPLICATION_JSON;
       return answer(
-        requestError(
+        transportError(
           run,
           `Accept must allow ${GRAPHQL_RESPONSE_JSON}, ${APPLICATION_JSON}, ${MULTIPART_MIXED} or ${TEXT_EVENT_STREAM}.`,
           406,
@@ -405,16 +414,17 @@ const serve = <Ctx>(
       );
     }
     run.accepted = accepted;
-    // A client that accepts no JSON type gets request errors as GraphQL-over-SSE when it accepts
-    // text/event-stream, else (multipart/mixed only) as JSON, the default.
+    // A client that accepts no JSON type gets GraphQL request errors as GraphQL-over-SSE when it
+    // accepts text/event-stream, else (multipart/mixed only) as JSON, the default. Transport
+    // failures (below: 415, 400 for the body) are JSON for every client.
     run.mediaType = accepted.json ?? GRAPHQL_RESPONSE_JSON;
     run.errorsAsEvents = accepted.json === undefined && accepted.eventStream;
     if (!isJsonContentType(request.headers.get("content-type"))) {
-      return answer(requestError(run, `Content-Type must be ${APPLICATION_JSON}.`, 415));
+      return answer(transportError(run, `Content-Type must be ${APPLICATION_JSON}.`, 415));
     }
     const read = await readParams(request);
     if (read._tag === "bad") {
-      return answer(requestError(run, read.message, 400));
+      return answer(transportError(run, read.message, 400));
     }
     let params = read.params;
     for (const hook of onParams) {
@@ -431,7 +441,7 @@ const serve = <Ctx>(
       }
     }
     if (params.query === undefined || params.query === "") {
-      return answer(requestError(run, "Must provide a query string.", 400));
+      return answer(transportError(run, "Must provide a query string.", 400));
     }
     return params;
   };
@@ -639,14 +649,14 @@ const serve = <Ctx>(
       // A subscription (process() refused one whose client does not accept text/event-stream).
       if (!run.accepted.eventStream) {
         await closeStreamed(result);
-        return requestError(run, `A subscription needs Accept: ${TEXT_EVENT_STREAM}.`, 406);
+        return transportError(run, `A subscription needs Accept: ${TEXT_EVENT_STREAM}.`, 406);
       }
       return sseResponse(streamOptions(run, ctx, undefined, subscriptionSource(result)));
     }
     if ("initialResult" in result) {
       if (!run.accepted.multipart) {
         await closeStreamed(result);
-        return requestError(
+        return transportError(
           run,
           `This operation uses @defer or @stream, which needs Accept: ${MULTIPART_MIXED}.`,
           406,
@@ -708,7 +718,7 @@ const serve = <Ctx>(
     }
     if (operation.operation === "subscription" && !run.accepted.eventStream) {
       // Refused before the source starts: its events can only go out as GraphQL-over-SSE.
-      return requestError(run, `A subscription needs Accept: ${TEXT_EVENT_STREAM}.`, 406);
+      return transportError(run, `A subscription needs Accept: ${TEXT_EVENT_STREAM}.`, 406);
     }
     const isMutation = operation.operation === "mutation";
     if (isMutation) {
