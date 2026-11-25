@@ -15,7 +15,7 @@ import {
   signalOf,
   startOf,
 } from "../src/index.ts";
-import type { ExecuteInput, Plugin } from "../src/index.ts";
+import type { ExecuteInput, ExecutorResult, Plugin } from "../src/index.ts";
 import { flush, gate, gql, post, send, sleep } from "./support/http.ts";
 import { basicSchema } from "./support/schema.ts";
 
@@ -456,6 +456,85 @@ describe("an onExecute refusal after the client left", () => {
     expect(sent.status).toBe(503);
     expect(sent.error?.extensions?.["code"]).toBe("SERVER_DRAINING");
     expect(await mutationOf(request)?.started).toBe(false);
+  });
+});
+
+/** An iterator whose pulls do a mutation's write: only a pull runs it, and return() is recorded. */
+const writingIterator = <T>(events: Array<string>, value: T): AsyncGenerator<T, void, void> => {
+  const iterator: AsyncGenerator<T, void, void> = {
+    next: async () => {
+      events.push("write");
+      return { done: false, value };
+    },
+    return: async () => {
+      events.push("closed");
+      return { done: true, value: undefined };
+    },
+    throw: (error: unknown) => Promise.reject(error),
+    [Symbol.asyncIterator]: () => iterator,
+    [Symbol.asyncDispose]: async () => undefined,
+  };
+  return iterator;
+};
+
+describe("a custom executor that streams a mutation's result", () => {
+  it.each([
+    [
+      "events",
+      "text/event-stream, application/json",
+      (events: Array<string>): ExecutorResult => writingIterator(events, { data: { bump: 1 } }),
+    ],
+    [
+      "an incremental result",
+      "multipart/mixed, application/json",
+      (events: Array<string>): ExecutorResult => ({
+        initialResult: { data: { bump: 1 }, hasNext: true },
+        subsequentResults: writingIterator(events, { hasNext: false }),
+      }),
+    ],
+  ])(
+    "(%s) is closed before drain() resolves, never pulled, and the request fails",
+    async (_name, accept, streamed) => {
+      const events: Array<string> = [];
+      const logged: Array<string> = [];
+      const server = createServer({
+        schema: basicSchema(),
+        logger: { warn: () => {}, error: (message) => logged.push(message) },
+        plugins: [{ onExecute: () => () => streamed(events) }],
+      });
+      const request = post({ query: "mutation { bump }" }, { accept });
+      const response = await server.handle(request);
+      expect(await mutationOf(request)?.started).toBe(true);
+      await server.control.drain();
+      expect(events).toEqual(["closed"]);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        errors: [{ message: "Unexpected error.", extensions: { http: { status: 500 } } }],
+      });
+      expect(events).toEqual(["closed"]);
+      expect(logged).toEqual(["gratos-server: an executor streamed the result of a mutation."]);
+    },
+  );
+
+  it("a streamed query is still served", async () => {
+    const events: Array<string> = [];
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        {
+          onExecute: () => () => ({
+            initialResult: { data: { count: 1 }, hasNext: true },
+            subsequentResults: writingIterator(events, { hasNext: false }),
+          }),
+        },
+      ],
+    });
+    const response = await server.handle(
+      post({ query: "{ count }" }, { accept: "multipart/mixed, application/json" }),
+    );
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(events).toEqual(["write", "closed"]);
   });
 });
 

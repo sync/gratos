@@ -673,6 +673,19 @@ const serve = <Ctx>(
       result = errorResult([unexpected(error)]);
     }
     const streamed = Symbol.asyncIterator in result || "initialResult" in result;
+    if (streamed && operation.operation === "mutation") {
+      // Only a custom executor streams a mutation's result (the default one never does:
+      // NoIncrementalMutationsRule). No encoder may pull it: its work would run after
+      // mutationOf(req).settled and drain() have resolved. It is closed here, before the
+      // mutation's completion is published, without the core signal (a started mutation never
+      // gets it), and the request fails.
+      logger.error("gratos-server: an executor streamed the result of a mutation.");
+      await closeStreamed(result);
+      if (run.controller.signal.aborted) {
+        return new Response(null, { status: CLIENT_CLOSED_REQUEST });
+      }
+      return respond(run, errorResult([unexpected(undefined)]), 500);
+    }
     if ((streamed || operation.operation === "subscription") && run.controller.signal.aborted) {
       // The client left before the stream started: a cancellation, with nothing reported or
       // sent. A subscription source that was still being set up comes back from subscribe() as
