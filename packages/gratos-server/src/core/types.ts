@@ -59,6 +59,9 @@ export type NextExecutor = () => PromiseOrValue<ExecutorResult>;
  * calls, a signal of its own, linked to the calling entry's, for one a `next()` runs. The core
  * aborts that one when a wrapper around the `next()` throws after running it, so an executor
  * that watches it (rather than `args.abortSignal`, the core signal) stops its abandoned work.
+ * An executor reports failure through its result or a rejected Promise, never by throwing after
+ * it has called `next()`: like a throwing `wrapExecution` wrapper, that breaks the contract and
+ * is handled on a best-effort basis only (logged, a 500, the core signal aborted).
  */
 export type Executor = (next: NextExecutor, signal?: AbortSignal) => PromiseOrValue<ExecutorResult>;
 
@@ -210,7 +213,12 @@ export interface Plugin<Ctx = unknown> {
    * run in another async context by then (a listener an `EventEmitterAsyncResource` calls in the
    * context it was created in), so a wrapper must be reentrant, and may run `run` directly when
    * its own state is in effect already. It calls `run` once, synchronously, and returns what it
-   * returns. A wrapper that throws after calling `run` around an executor (the executor call, a
+   * returns, and it must not throw. A wrapper (or an executor) that throws breaks this contract,
+   * and the core handles it on a best-effort basis only: the error is logged, the request fails
+   * with a 500, the core signal is aborted, and the work it can see is waited for as described
+   * below; work started in the instant before the throw (a resolver, a source iterator, a
+   * subscription event's execution) is not guaranteed to be stopped, closed or tracked.
+   * A wrapper that throws after calling `run` around an executor (the executor call, a
    * `next()`) leaves that execution running, with nobody to read its result. The core keeps every
    * such execution until it settles (a stream it gives is then closed) and stops a query's or
    * subscription's: the one a `next()` started at once, on that entry's own signal (each `next()`
