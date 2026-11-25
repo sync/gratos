@@ -194,18 +194,38 @@ the route's finalizer waits for in-flight mutations before the services are rele
 ## Apollo Client
 
 `@defer` and `@stream` go out as `multipart/mixed; deferSpec=20220824`. Give Apollo Client (4.1 or
-later; this repo pins 4.3.8) the matching handler explicitly:
+later; this repo pins 4.3.8) the matching handler explicitly, and the session's bearer token (the
+demo's: a seed user id), or every guarded field answers `Forbidden`:
 
 ```ts
-import { ApolloClient, HttpLink, InMemoryCache } from "@apollo/client";
+import { ApolloClient, gql, HttpLink, InMemoryCache } from "@apollo/client";
 import { Defer20220824Handler } from "@apollo/client/incremental";
 
+const uri = "http://127.0.0.1:4000/graphql";
+const userId = "u-1";
+```
+
+```ts file=examples/orders/test/e2e.test.ts
 const client = new ApolloClient({
-  link: new HttpLink({ uri: "http://127.0.0.1:4000/graphql" }),
+  link: new HttpLink({ uri, headers: { authorization: `Bearer ${userId}` } }),
   cache: new InMemoryCache(),
   incrementalHandler: new Defer20220824Handler(),
 });
+const result = await client.query({
+  query: gql`
+    query StreamedOrders($userId: ID!) {
+      orders(userId: $userId) @stream(initialCount: 1) {
+        id
+        total
+      }
+    }
+  `,
+  variables: { userId },
+  fetchPolicy: "no-cache",
+});
 ```
+
+`test/e2e.test.ts` runs this very code against the app.
 
 Run `@stream` queries with `fetchPolicy: "no-cache"`: Apollo 4.1.0's changelog (#13078) says that
 with this handler the cache's default merge truncates a streamed list to its first chunk. On the

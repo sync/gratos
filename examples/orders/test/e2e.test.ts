@@ -9,7 +9,7 @@ import { Defer20220824Handler } from "@apollo/client/incremental";
 import { CombinedGraphQLErrors } from "@apollo/client/errors";
 import { PersistedQueryLink } from "@apollo/client/link/persisted-queries";
 import { Schema } from "effect";
-import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import type { OrderRow } from "../src/services/Api.ts";
 import { AUTHORIZATION } from "./support/app.ts";
@@ -348,6 +348,45 @@ describe("the orders app over HTTP, with Apollo Client", () => {
       hasNext: true,
     });
     expect(parts.length).toBeGreaterThan(1);
+  });
+
+  it("the README's client signs in, and reads its @stream query whole", async () => {
+    const uri = served.url;
+    const userId = "u-1";
+    // The README's code has no deadline of its own: give its fetch the tests' one.
+    vi.stubGlobal("fetch", boundedFetch);
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    // From here to the query's end, the README's code (its `file=` block quotes it).
+    const client = new ApolloClient({
+      link: new HttpLink({ uri, headers: { authorization: `Bearer ${userId}` } }),
+      cache: new InMemoryCache(),
+      incrementalHandler: new Defer20220824Handler(),
+    });
+    const result = await client.query({
+      query: gql`
+        query StreamedOrders($userId: ID!) {
+          orders(userId: $userId) @stream(initialCount: 1) {
+            id
+            total
+          }
+        }
+      `,
+      variables: { userId },
+      fetchPolicy: "no-cache",
+    });
+    client.stop();
+
+    // Signed in (a guest gets Forbidden and no data), the whole streamed list.
+    expect(result.error).toBeUndefined();
+    expect(result.data).toEqual({
+      orders: [
+        { __typename: "Order", id: "o-3", total: 7.25 },
+        { __typename: "Order", id: "o-2", total: 18 },
+        { __typename: "Order", id: "o-1", total: 42.5 },
+      ],
+    });
   });
 
   it("with the cache (the default policy), the pinned Apollo also keeps the whole list", async () => {
