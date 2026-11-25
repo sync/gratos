@@ -6,32 +6,33 @@
     "memoryGb": 32,
     "node": "v26.13.0"
   },
+  "compares": "complete source paths, publish to SSE event: effect = Bus (PubSub) + topic filter + guardStream + Stream.toAsyncIterableWith; plain = a hand-written async iterator over an indexed FIFO",
   "events": 20000,
   "runs": 5,
   "burst": {
     "effect": {
-      "eventsPerSecond": 74606,
-      "microsPerEvent": 13.4,
-      "runs": [71748, 72590, 81656, 82150, 74606]
+      "eventsPerSecond": 78443,
+      "microsPerEvent": 12.7,
+      "runs": [73536, 70749, 78443, 78497, 80971]
     },
     "plain": {
-      "eventsPerSecond": 50350,
-      "microsPerEvent": 19.9,
-      "runs": [51468, 51514, 47421, 44187, 50350]
+      "eventsPerSecond": 82911,
+      "microsPerEvent": 12.1,
+      "runs": [87811, 82911, 80823, 35243, 86337]
     },
-    "effectVersusPlain": 1.48
+    "effectVersusPlain": 0.95
   },
   "paced": {
     "effect": {
-      "eventsPerSecond": 28867,
-      "microsPerEvent": 34.6,
-      "runs": [28515, 29004, 29772, 28551, 28867]
+      "eventsPerSecond": 28847,
+      "microsPerEvent": 34.7,
+      "runs": [28612, 28792, 29511, 28847, 29626]
     },
     "plain": {
-      "eventsPerSecond": 34677,
-      "microsPerEvent": 28.8,
-      "runs": [34914, 33948, 33567, 34713, 34677]
+      "eventsPerSecond": 34035,
+      "microsPerEvent": 29.4,
+      "runs": [34563, 33870, 32182, 34165, 34035]
     },
-    "effectVersusPlain": 0.83
+    "effectVersusPlain": 0.85
   }
 }
