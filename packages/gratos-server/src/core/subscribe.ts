@@ -144,9 +144,14 @@ const responseStream = (
     pending.add(closed.resolve);
     try {
       let pulled: IteratorResult<unknown> | typeof CLOSED;
+      let started: Promise<IteratorResult<unknown>> | undefined;
       try {
-        pulled = await Promise.race([enter(() => iterator.next()), closed.promise]);
+        pulled = await Promise.race([enter(() => (started = iterator.next())), closed.promise]);
       } catch (error) {
+        // A wrapper that threw after starting the pull leaves it pending until the stream stops
+        // the source: its rejection then (an abort) is observed here, never unhandled, and the
+        // wrapper's error stays the failure.
+        void Promise.resolve(started).catch(() => {});
         // The stream was closed while the pull was pending, and the source's rejection came
         // first: the read is settled as closed, like any read a close interrupts.
         if (finished) {

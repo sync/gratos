@@ -1102,6 +1102,28 @@ describe("a wrapper that throws on the core's own entries", () => {
       expect.any(Error),
     );
   });
+
+  it("observes a subscription pull that a wrapper started before it threw", async () => {
+    const unhandled: Array<unknown> = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    onTestFinished(() => {
+      process.off("unhandledRejection", onUnhandled);
+    });
+    // The entry around the first pull starts it, then fails, and so does every later entry.
+    const { server, probe } = throwingSubscriptionServer("after", true);
+    const response = await server.handle(
+      post({ query: "subscription { held }" }, { accept: "text/event-stream" }),
+    );
+    // The wrapper's error is the stream's last payload; the pull rejects once the source stops.
+    expect(await response.text()).toContain('"message":"wrapper failed"');
+    expect(probe.pulls).toBe(1);
+    await flush();
+    await flush();
+    expect(unhandled).toEqual([]);
+  });
 });
 
 /** A server whose onRequest holds call `n` (from 1) on `holds[n - 1]`, counting the calls. */
