@@ -6,7 +6,13 @@ import { createSourceEventStream, execute, parse, validateSubscriptionArgs } fro
 import type { GraphQLError, GraphQLFieldResolver, GraphQLSchema } from "graphql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createServer, gqlError, maskErrors, reportErrors } from "../../src/index.ts";
+import {
+  createServer,
+  gqlError,
+  maskErrors,
+  reportErrors,
+  withIncrementalDirectives,
+} from "../../src/index.ts";
 import type { Plugin, Server } from "../../src/index.ts";
 import {
   effect,
@@ -769,6 +775,22 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       });
       expect(mapper).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("effectSchema", () => {
+  it("wraps a field once, also through another schema that shares it (incremental())", () => {
+    const schema = makeSchema(SDL, resolvers({}));
+    const wrapped = effectSchema(schema, { failure });
+    const field = wrapped.getQueryType()?.getFields()["value"];
+    const once = field?.resolve;
+    expect(effectSchema(wrapped, { failure })).toBe(wrapped);
+    expect(field?.resolve).toBe(once);
+    const shared = withIncrementalDirectives(wrapped);
+    expect(shared).not.toBe(wrapped);
+    expect(shared.getQueryType()?.getFields()["value"]).toBe(field);
+    effectSchema(shared, { failure });
+    expect(field?.resolve).toBe(once);
   });
 });
 

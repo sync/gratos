@@ -188,20 +188,28 @@ export const wrapSubscribe = <TSource, TContext, TArgs, E>(
   return (source, args, ctx, info) => sourceValue(subscribe(source, args, ctx, info));
 };
 
-const wrappedSchemas = new WeakSet<GraphQLSchema>();
+/**
+ * The resolve and subscribe functions effectSchema made. Tracked by identity, not per schema:
+ * two schemas can share their field objects (incremental()'s schema is rebuilt from the app's
+ * config, with the same types), and a function already wrapped is never wrapped again.
+ */
+const wrappedFunctions = new WeakSet<object>();
+
+/** Marks a wrapper effectSchema made, and returns it. */
+const wrapped = <F extends object>(fn: F): F => {
+  wrappedFunctions.add(fn);
+  return fn;
+};
 
 /**
- * Wraps every field's `resolve` and `subscribe` in place, once (a second call on the same schema
- * does nothing), and returns the schema. `failure` maps typed failures (see `FailureMapper`).
+ * Wraps every field's `resolve` and `subscribe` in place, once (a function it already wrapped,
+ * through this schema or another one that shares the field, is left as it is), and returns the
+ * schema. `failure` maps typed failures (see `FailureMapper`).
  */
 export const effectSchema = <E>(
   schema: GraphQLSchema,
   options: EffectSchemaOptions<E>,
 ): GraphQLSchema => {
-  if (wrappedSchemas.has(schema)) {
-    return schema;
-  }
-  wrappedSchemas.add(schema);
   for (const type of Object.values(schema.getTypeMap())) {
     if (!isObjectType(type) || type.name.startsWith("__")) {
       continue;
@@ -212,13 +220,15 @@ export const effectSchema = <E>(
       // A source's Effect is not checked for null: the marker is about the field's values.
       const sources = makeRunner(options, `subscribe ${type.name}.${field.name}`, false);
       const { resolve, subscribe } = field;
-      if (resolve !== undefined) {
-        field.resolve = (source, args, ctx, info) =>
-          runner.resolveValue(resolve(source, args, ctx, info));
+      if (resolve !== undefined && !wrappedFunctions.has(resolve)) {
+        field.resolve = wrapped<GraphQLFieldResolver<unknown, unknown>>((source, args, ctx, info) =>
+          runner.resolveValue(resolve(source, args, ctx, info)),
+        );
       }
-      if (subscribe !== undefined) {
-        field.subscribe = (source, args, ctx, info) =>
-          sources.sourceValue(subscribe(source, args, ctx, info));
+      if (subscribe !== undefined && !wrappedFunctions.has(subscribe)) {
+        field.subscribe = wrapped<GraphQLFieldResolver<unknown, unknown>>(
+          (source, args, ctx, info) => sources.sourceValue(subscribe(source, args, ctx, info)),
+        );
       }
     }
   }
