@@ -3,8 +3,9 @@
  *
  * It fetches the upstream git tree for the pinned commit from the GitHub API, maps every
  * vendored upstream path to its location in this package, and compares git blob hashes.
- * Any missing, changed or extra file fails the run. Set GITHUB_TOKEN to avoid the
- * unauthenticated API rate limit.
+ * Any missing, changed or extra file fails the run, except inside Gratos' own folders
+ * (LOCAL_PREFIXES, such as llm-docs/gratos/), which upstream must not have. Set GITHUB_TOKEN to
+ * avoid the unauthenticated API rate limit.
  */
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -30,6 +31,14 @@ const SINGLE_FILES: ReadonlyArray<readonly [upstream: string, local: string]> = 
 ];
 /** Upstream directories under a mapped prefix that are deliberately not vendored. */
 const EXCLUDED_PREFIXES = ["src/tests/"];
+/**
+ * Gratos' own folders inside a vendored root (local paths): their files are never compared with
+ * upstream, and upstream must have nothing there, or the run fails. `llm-docs/gratos/` holds the
+ * Effect chapter beside the vendored Grats docs (docs/plan.html M7).
+ */
+const LOCAL_PREFIXES = ["llm-docs/gratos/"];
+const isLocalPath = (local: string): boolean =>
+  LOCAL_PREFIXES.some((prefix) => local.startsWith(prefix));
 
 const TreeResponse = Schema.Struct({
   truncated: Schema.Boolean,
@@ -150,6 +159,7 @@ const main = async (): Promise<number> => {
       expected.set(local, entry.sha);
     }
   }
+  const collisions = [...expected.keys()].filter(isLocalPath);
 
   const ledger = readLedger();
   if (ledger.upstream !== UPSTREAM_REF) {
@@ -159,7 +169,9 @@ const main = async (): Promise<number> => {
     return 1;
   }
   const changes = { ...ledger.changes };
-  const problems: Array<string> = [];
+  const problems: Array<string> = collisions.map(
+    (local) => `collision: upstream has ${local}, inside a folder of Gratos' own`,
+  );
   for (const [local, upstreamSha] of expected) {
     const state = localStateOf(local);
     const recorded = changes[local];
@@ -211,7 +223,7 @@ const main = async (): Promise<number> => {
   });
   for (const absolute of present) {
     const local = relative(packageRoot, absolute).split(sep).join("/");
-    if (!expected.has(local)) {
+    if (!expected.has(local) && !isLocalPath(local)) {
       problems.push(`extra: ${local}`);
     }
   }
@@ -232,8 +244,11 @@ const main = async (): Promise<number> => {
     return 1;
   }
   const changed = Object.keys(changes).length;
+  const own = present.filter((absolute) =>
+    isLocalPath(relative(packageRoot, absolute).split(sep).join("/")),
+  ).length;
   process.stdout.write(
-    `verify-vendor: ${expected.size - changed} vendored files are byte-identical to ${UPSTREAM_REF}; ${changed} differ exactly as recorded in vendor-changes.json\n`,
+    `verify-vendor: ${expected.size - changed} vendored files are byte-identical to ${UPSTREAM_REF}; ${changed} differ exactly as recorded in vendor-changes.json; ${own} of Gratos' own (${LOCAL_PREFIXES.join(", ")}) are not compared\n`,
   );
   return 0;
 };

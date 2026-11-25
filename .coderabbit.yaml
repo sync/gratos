@@ -6,7 +6,18 @@ reviews:
     drafts: false
   path_filters:
     - "!**/src/generated/**"
-    - "!packages/gratos/llm-docs/**"
+    # The vendored upstream Grats docs, listed one by one so llm-docs/gratos/ (Gratos' own) is reviewed.
+    - "!packages/gratos/llm-docs/changelog.md"
+    - "!packages/gratos/llm-docs/docblock-tags/**"
+    - "!packages/gratos/llm-docs/docblock-tags.md"
+    - "!packages/gratos/llm-docs/examples/**"
+    - "!packages/gratos/llm-docs/examples.md"
+    - "!packages/gratos/llm-docs/faq/**"
+    - "!packages/gratos/llm-docs/getting-started/**"
+    - "!packages/gratos/llm-docs/getting-started.md"
+    - "!packages/gratos/llm-docs/guides/**"
+    - "!packages/gratos/llm-docs/resolvers/**"
+    - "!packages/gratos/llm-docs/resolvers.md"
     - "!packages/gratos/src/upstream/**"
     - "!packages/gratos/test/fixtures/**"
     - "!packages/gratos/test/integrationFixtures/**"

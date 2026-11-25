@@ -1,13 +1,17 @@
-// The app's typed failures: the error union every resolver's Effect may fail with.
+// The app's typed failures: the error union every resolver's Effect may fail with. A new tag
+// added here fails the type check of graphql.ts's exhaustive `failure` mapper until it is mapped.
 import { Schema } from "effect";
 
+/** Something the request names does not exist: `what` is the kind ("order", "user"). */
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
-  id: Schema.String,
+  what: Schema.String,
 }) {}
 
-export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
-  scopes: Schema.Array(Schema.String),
-}) {}
+/**
+ * The session may not do this: a guest, missing scopes, or a change the order's state does not
+ * allow (cancelling an order that has shipped).
+ */
+export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {}) {}
 
 export type AppError = NotFound | Forbidden;
 

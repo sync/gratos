@@ -1,80 +1,105 @@
-// The app's wiring: the GraphQL server (the generated schema wrapped by effectSchema, a context
-// factory that reads the session with runInRequest and builds the guard, and the plugins; APQ and
-// JIT keep their caches in this process's memory only, so each dev restart starts them over),
-// served on an HttpServer with the app's services.
+// The app's wiring (the spec's "wire it up" and "Effect in the context factory"): the generated
+// schema wrapped once by effectSchema, a context factory that reads the session with
+// runInRequest (its span joins the request's trace) and builds the guard, and the plugins, served
+// by the Effect HTTP router (effectRouteLayer) with the app's services.
+//
+// Plugin order: apq() first (it must see the query before any executor); incremental() before
+// jit() (graphql-jit would inline @defer); reportErrors() before maskErrors() (the report sees the
+// unmasked errors). effect() and serverTiming() only observe, so their place is free. APQ and JIT
+// keep their caches in this process's memory only, so each dev restart starts them over.
 //
 // The server imports this module dynamically, with the generated schema: in dev, inside the boot
 // step's error boundary, so a service that does not load answers GRATS_ERROR like a broken model.
-import { apq, createServer, gqlError, jit } from "@dblechoc/gratos-server";
+import {
+  apq,
+  createServer,
+  gqlError,
+  incremental,
+  jit,
+  maskErrors,
+  reportErrors,
+  serverTiming,
+} from "@dblechoc/gratos-server";
 import type { Server } from "@dblechoc/gratos-server";
 import {
   effect,
   effectRouteLayer,
   effectSchema,
-  makeGuard,
   runInRequest,
 } from "@dblechoc/gratos-server/effect";
 import { Effect, Layer, Match } from "effect";
 import type { Context } from "effect";
 import { HttpRouter } from "effect/http";
-import type { GraphQLSchema } from "graphql";
+import type { GraphQLError, GraphQLSchema } from "graphql";
 
-import type { Ctx } from "./models/context.ts";
-import type { Api } from "./services/Api.ts";
-import { Bus } from "./services/Bus.ts";
-import { Forbidden, isAppError } from "./services/errors.ts";
-import { FakeApi } from "./services/FakeApi.ts";
+import { contextFor } from "./models/context.ts";
+import type { Ctx, Services } from "./models/context.ts";
+import { isAppError } from "./services/errors.ts";
 import type { AppError } from "./services/errors.ts";
+import { FakeApi } from "./services/FakeApi.ts";
+import { Session } from "./services/Session.ts";
 
-export type Services = Api | Bus;
-
-/** The app's failure mapper: exhaustive over AppError's tags. */
+/** One error union, mapped with Match: a new tag fails this type check until it is mapped. */
 export const failure = Match.type<AppError>().pipe(
   Match.tagsExhaustive({
-    NotFound: (error) => gqlError(`Order ${error.id} not found.`, 404, { code: "NOT_FOUND" }),
-    Forbidden: () => gqlError("Forbidden.", 403, { code: "FORBIDDEN" }),
+    NotFound: (error) => gqlError(`${error.what} not found`, 404, { code: "NOT_FOUND" }),
+    Forbidden: () => gqlError("Forbidden", 403, { code: "FORBIDDEN" }),
   }),
 );
 
-/** A stand-in session: the viewer and scopes come from headers until M7 brings real auth. */
-const readSession = (request: Request) =>
-  Effect.sync(() => {
-    const scopes = (request.headers.get("x-scopes") ?? "orders:read orders:write")
-      .split(" ")
-      .filter((scope) => scope !== "");
-    return { viewer: request.headers.get("x-viewer") ?? "ada", scopes: new Set(scopes) };
-  }).pipe(Effect.withSpan("session.read"));
+export interface AppOptions {
+  /** Receives every error of every result, unmasked. Default: the Effect logger. */
+  readonly report?: ((error: GraphQLError) => void) | undefined;
+  /** No request log and no "Listening on" line (tests). Default false. */
+  readonly quiet?: boolean | undefined;
+  /** The services the app runs on. Default: FakeApi.layer (a test builds its own, to reach the Bus). */
+  readonly backend?: Layer.Layer<Services> | undefined;
+}
 
-export const makeServer = (schema: GraphQLSchema, services: Context.Context<Services>): Server =>
-  createServer<Ctx>({
+export const makeServer = (
+  schema: GraphQLSchema,
+  services: Context.Context<Services>,
+  options: AppOptions = {},
+): Server => {
+  const report =
+    options.report ??
+    ((error: GraphQLError) => {
+      Effect.runForkWith(services)(Effect.logError("graphql error", error));
+    });
+  return createServer<Ctx>({
     schema: effectSchema(schema, { failure, isFailure: isAppError }),
-    context: (request) =>
-      runInRequest(
-        request,
-        Effect.map(readSession(request), (session): Ctx => {
-          const guard = makeGuard<AppError>({
-            authorize: ({ scopes }) => scopes.every((scope) => session.scopes.has(scope)),
-            refuse: ({ scopes }) => new Forbidden({ scopes }),
-            headers: request.headers,
-          });
-          return { viewer: session.viewer, guard: guard.guard, guardStream: guard.guardStream };
-        }),
-        services,
-      ),
-    // `context`: resolvers find the app's services also when the server is used without a route
-    // (makeServer(...).handle(request) in a test); a route still forks with its own context.
-    plugins: [apq(), jit(), effect({ context: services })],
+    context: async (request) => {
+      // Same fiber context and span as the route.
+      const session = await runInRequest(request, Session.read(request), services);
+      return contextFor(session, request.headers);
+    },
+    plugins: [
+      apq(),
+      incremental(),
+      jit({ after: 3 }),
+      // `context`: resolvers find the app's services also when the server is used without a
+      // route (makeServer(...).handle(request) in a test); a route forks with its own context.
+      effect({ context: services }),
+      serverTiming(),
+      reportErrors((error) => {
+        report(error);
+      }),
+      maskErrors(),
+    ],
   });
+};
 
 /**
- * The app on an HttpServer: POST /graphql (and the core's answers to other methods) for `schema`,
- * served with the app's services (provided outside the router, so resolvers fork with them).
+ * The app on an HttpServer: one route, /graphql (every method, so the core answers GET with its
+ * 405), served with the app's services (`backend`). They are provided to the route layer, whose
+ * finalizer drains the in-flight mutations on shutdown before the services are released.
  */
-export const appLayer = (schema: GraphQLSchema) =>
+export const appLayer = (schema: GraphQLSchema, options: AppOptions = {}) =>
   HttpRouter.serve(
     Layer.unwrap(
       Effect.map(Effect.context<Services>(), (services) =>
-        effectRouteLayer(makeServer(schema, services)),
+        effectRouteLayer(makeServer(schema, services, options)),
       ),
     ),
-  ).pipe(Layer.provide([FakeApi.layer, Bus.layer]));
+    { disableLogger: options.quiet === true, disableListenLog: options.quiet === true },
+  ).pipe(Layer.provide(options.backend ?? FakeApi.layer));

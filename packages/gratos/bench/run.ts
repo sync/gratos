@@ -13,10 +13,15 @@
 //   sample: one whose `ps` succeeded and held the CLI process.
 //
 // `--record` writes the result as the new baseline, with the runner class it was measured on.
+//
+// `--project <tsconfig>` measures an existing project instead of the synthetic fixture (M7:
+// `pnpm --filter orders-example bench:compiler` for examples/orders), against the same spec
+// targets, with its own baseline file (`--baseline <path>`, relative to the working directory).
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { parseArgs } from "node:util";
 
 import { Schema } from "effect";
 
@@ -32,10 +37,24 @@ const TARGETS = { filesLoaded: 530, coldBuildMs: 900, peakRssMb: 380 } as const;
 const CI_TOLERANCE = 1.2;
 const SAMPLE_INTERVAL_MS = 5;
 
+const { values: flags } = parseArgs({
+  options: {
+    record: { type: "boolean", default: false },
+    project: { type: "string" },
+    baseline: { type: "string" },
+  },
+});
+
 const packageDir = join(import.meta.dirname, "..");
-const baselinePath = join(packageDir, "..", "..", "bench", "baseline.json");
+const baselinePath =
+  flags.baseline === undefined
+    ? join(packageDir, "..", "..", "bench", "baseline.json")
+    : resolve(flags.baseline);
 const fixtureDir = join(import.meta.dirname, ".fixture");
 const modelsDir = join(fixtureDir, "models");
+/** The tsconfig measured: the project's, or the synthetic fixture's. */
+const tsconfigPath =
+  flags.project === undefined ? join(fixtureDir, "tsconfig.json") : resolve(flags.project);
 
 const model = (index: number): string => {
   const next = index + 1 < MODEL_COUNT ? `Model${index + 1}` : null;
@@ -129,7 +148,7 @@ const coldBuild = async (): Promise<{
   const start = performance.now();
   const child = spawn(
     process.execPath,
-    [join(packageDir, "src", "cli.ts"), "--tsconfig", join(fixtureDir, "tsconfig.json")],
+    [join(packageDir, "src", "cli.ts"), "--tsconfig", tsconfigPath],
     { cwd: packageDir, stdio: ["ignore", "ignore", "pipe"] },
   );
   let stderr = "";
@@ -145,7 +164,7 @@ const coldBuild = async (): Promise<{
   const peak = await samplePeakRss(child.pid, exited, { intervalMs: SAMPLE_INTERVAL_MS });
   const { code, ms } = await exited;
   if (code !== 0) {
-    throw new Error(`gratos failed on the bench fixture:\n${stderr}`);
+    throw new Error(`gratos failed on ${tsconfigPath}:\n${stderr}`);
   }
   return {
     ms,
@@ -156,7 +175,7 @@ const coldBuild = async (): Promise<{
 };
 
 const fileStats = () => {
-  const parsed = getParsedCommandLineOfConfigFile(join(fixtureDir, "tsconfig.json"));
+  const parsed = getParsedCommandLineOfConfigFile(tsconfigPath);
   const { session, project } = parsed.program;
   const programFiles = project.program.getSourceFileNames();
   const stats = {
@@ -197,7 +216,9 @@ const runner = {
   node: process.version,
 };
 
-writeFixture();
+if (flags.project === undefined) {
+  writeFixture();
+}
 // One warm-up run (OS file cache, Node compile cache), not counted.
 await coldBuild();
 const builds: Array<Awaited<ReturnType<typeof coldBuild>>> = [];
@@ -222,7 +243,7 @@ const versus = (key: keyof typeof measured) =>
   baseline === null ? null : `${Math.round((measured[key] / baseline[key] - 1) * 100)}%`;
 
 const result = {
-  models: MODEL_COUNT,
+  project: flags.project === undefined ? `synthetic (${MODEL_COUNT} models)` : tsconfigPath,
   measured,
   targets: TARGETS,
   bounds,
@@ -251,7 +272,7 @@ const result = {
 };
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 
-if (process.argv.includes("--record")) {
+if (flags.record) {
   writeFileSync(baselinePath, `${JSON.stringify({ runner, ...measured }, null, 2)}\n`);
   process.stderr.write(`bench: recorded ${baselinePath}\n`);
 }

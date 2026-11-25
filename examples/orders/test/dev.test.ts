@@ -8,7 +8,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { copyApp, devCommand, post, start, until } from "./support/app.ts";
+import { AUTHORIZATION, copyApp, devCommand, post, start, until } from "./support/app.ts";
 import type { AppCopy, Answer, Payload, Running } from "./support/app.ts";
 
 const BUDGET_MS = process.env["CI"] === undefined ? 2000 : 3000;
@@ -73,6 +73,10 @@ const LABEL_FIELD = `
 const addLabel = (source: string) =>
   source.replace("\n  constructor(row: OrderRow) {", LABEL_FIELD);
 
+/** The 1-based line of the first line of `source` that contains `text`. */
+const lineOf = (source: string, text: string): number =>
+  source.split("\n").findIndex((line) => line.includes(text)) + 1;
+
 const timings: Array<string> = [];
 
 describe("pnpm dev", () => {
@@ -122,7 +126,7 @@ describe("pnpm dev", () => {
               {
                 message: expect.stringContaining("Unable to resolve type reference."),
                 file: "src/models/Order.ts",
-                line: 14,
+                line: lineOf(app.read(MODEL), "  status: Map<string, number>;"),
                 column: 11,
               },
             ],
@@ -183,7 +187,7 @@ describe("pnpm dev", () => {
 
     // A syntax error in a service the models import.
     save(app, "src/services/Bus.ts", (source) =>
-      source.replace("PubSub.unbounded<OrderRow>();", "PubSub.unbounded<OrderRow>(;"),
+      source.replace("PubSub.unbounded<Event>();", "PubSub.unbounded<Event>(;"),
     );
     const syntax = await gratsError("Expression expected");
     expect(syntax.body).toEqual({
@@ -197,7 +201,7 @@ describe("pnpm dev", () => {
               {
                 message: "SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expression expected",
                 file: "src/services/Bus.ts",
-                line: 18,
+                line: lineOf(app.read("src/services/Bus.ts"), "PubSub.unbounded<Event>(;"),
               },
             ],
           },
@@ -205,7 +209,7 @@ describe("pnpm dev", () => {
       ],
     });
     // The terminal shows Node's report, with the source line.
-    expect(dev.output()).toContain("PubSub.unbounded<OrderRow>(;");
+    expect(dev.output()).toContain("PubSub.unbounded<Event>(;");
 
     // Every request answers it, on any path, not only /graphql.
     const other = await fetch(new URL("/health", dev.url));
@@ -222,7 +226,7 @@ describe("pnpm dev", () => {
 
     // A service only the app's wiring imports, which builds but throws when it is loaded.
     save(app, "src/services/Bus.ts", (source) =>
-      source.replace("PubSub.unbounded<OrderRow>(;", "PubSub.unbounded<OrderRow>();"),
+      source.replace("PubSub.unbounded<Event>(;", "PubSub.unbounded<Event>();"),
     );
     save(
       app,
@@ -270,23 +274,18 @@ describe("pnpm dev", () => {
       dataOf(await post(dev.url, persisted), { order: { id: "o-1", status: "open" } }),
     ).toBeDefined();
 
-    // An open subscription, which has received an event (the core answers with the first one).
-    const subscription = fetch(dev.url, {
+    // An open subscription, which has received an event: the core answers with the first one,
+    // the order as it is.
+    const opened = await fetch(dev.url, {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "text/event-stream" },
+      headers: {
+        "content-type": "application/json",
+        accept: "text/event-stream",
+        authorization: AUTHORIZATION,
+      },
       body: JSON.stringify({ query: 'subscription { orderChanged(id: "o-2") { status } }' }),
       signal: AbortSignal.timeout(BOOT_MS),
     });
-    const cancelled = { cancelOrder: { status: "cancelled" } };
-    const cancel = { query: 'mutation { cancelOrder(id: "o-2") { status } }' };
-    // Cancel until the subscription has started (its setup runs after the request is sent).
-    const opened = await until(
-      async () => {
-        expect(dataOf(await post(dev.url, cancel), cancelled)).toBeDefined();
-        return Promise.race([subscription, sleep(50, undefined)]);
-      },
-      { timeoutMs: BOOT_MS, message: "the subscription never answered", app: dev },
-    );
     expect(opened.status).toBe(200);
     expect(opened.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
     const reader = opened.body?.getReader();
@@ -295,7 +294,7 @@ describe("pnpm dev", () => {
     }
     const decoder = new TextDecoder();
     const first = await reader.read();
-    expect(decoder.decode(first.value)).toContain('"status":"cancelled"');
+    expect(decoder.decode(first.value)).toContain('"status":"shipped"');
     const ended = (async () => {
       try {
         while (!(await reader.read()).done) {
@@ -307,11 +306,22 @@ describe("pnpm dev", () => {
       return performance.now();
     })();
 
+    // A change to the fake backend's in-memory rows, which the restart must undo.
+    expect(
+      dataOf(await post(dev.url, { query: 'mutation { cancelOrder(id: "o-1") { status } }' }), {
+        cancelOrder: { status: "cancelled" },
+      }),
+    ).toBeDefined();
+    expect(
+      dataOf(await post(dev.url, ORDER), { order: { id: "o-1", status: "cancelled" } }),
+    ).toBeDefined();
+
     // A save that changes no schema: the restart alone starts everything over.
     const savedAt = save(app, MODEL, (source) => `${source}\n// saved\n`);
     // The subscription is dropped promptly (not after the 20 s graceful-shutdown default), and
     // the new process answers within the budget although a subscription was open. The old
-    // process answers this query too until it stops: wait for the new one to listen.
+    // process answers this query too until it stops (o-1 cancelled): wait for the new one to
+    // listen, and to answer with o-1 open.
     await until(async () => (dev.boots() === 2 ? true : undefined), {
       timeoutMs: BOOT_MS,
       message: "the server never restarted",
@@ -329,7 +339,11 @@ describe("pnpm dev", () => {
     expect(await post(dev.url, persisted)).toMatchObject({
       body: { errors: [{ extensions: { code: "PERSISTED_QUERY_NOT_FOUND" } }] },
     });
-    // The new process starts from the fake API's initial rows.
+    // The new process starts from the fake API's initial rows: the order cancelled before the
+    // save is open again, and the shipped one is still shipped.
+    expect(
+      dataOf(await post(dev.url, ORDER), { order: { id: "o-1", status: "open" } }),
+    ).toBeDefined();
     expect(
       dataOf(await post(dev.url, { query: '{ order(id: "o-2") { status } }' }), {
         order: { status: "shipped" },

@@ -1,5 +1,6 @@
-import { GraphQLSchema, GraphQLDirective, DirectiveLocation, GraphQLList, GraphQLInt, specifiedDirectives, GraphQLObjectType, GraphQLString, defaultFieldResolver, GraphQLNonNull } from "graphql";
-import { order as queryOrderResolver, cancelOrder as mutationCancelOrderResolver, orderChanged as subscriptionOrderChangedResolver } from "./../models/Order.ts";
+import { GraphQLSchema, GraphQLDirective, DirectiveLocation, GraphQLList, GraphQLInt, specifiedDirectives, GraphQLObjectType, GraphQLID, defaultFieldResolver, GraphQLString, GraphQLFloat, GraphQLNonNull } from "graphql";
+import { order as queryOrderResolver, orders as queryOrdersResolver, cancelOrder as mutationCancelOrderResolver, orderChanged as subscriptionOrderChangedResolver } from "./../models/Order.ts";
+import { user as queryUserResolver } from "./../models/User.ts";
 async function assertNonNull<T>(value: T | Promise<T>): Promise<T> {
     const awaited = await value;
     if (awaited == null)
@@ -7,13 +8,49 @@ async function assertNonNull<T>(value: T | Promise<T>): Promise<T> {
     return awaited;
 }
 export function getSchema(): GraphQLSchema {
-    const OrderType: GraphQLObjectType = new GraphQLObjectType({
-        name: "Order",
+    const UserType: GraphQLObjectType = new GraphQLObjectType({
+        name: "User",
+        description: "A user who places orders.",
         fields() {
             return {
                 id: {
                     name: "id",
+                    type: GraphQLID,
+                    resolve(source, args, context, info) {
+                        return assertNonNull(defaultFieldResolver(source, args, context, info));
+                    }
+                },
+                name: {
+                    name: "name",
                     type: GraphQLString,
+                    resolve(source, args, context, info) {
+                        return assertNonNull(defaultFieldResolver(source, args, context, info));
+                    }
+                }
+            };
+        }
+    });
+    const OrderType: GraphQLObjectType = new GraphQLObjectType({
+        name: "Order",
+        description: "An order a user placed.",
+        fields() {
+            return {
+                customer: {
+                    description: "Who placed it.",
+                    name: "customer",
+                    type: UserType,
+                    extensions: {
+                        gratos: {
+                            semanticNonNull: true
+                        }
+                    },
+                    resolve(source, _args, context) {
+                        return source.customer(context);
+                    }
+                },
+                id: {
+                    name: "id",
+                    type: GraphQLID,
                     resolve(source, args, context, info) {
                         return assertNonNull(defaultFieldResolver(source, args, context, info));
                     }
@@ -21,6 +58,13 @@ export function getSchema(): GraphQLSchema {
                 status: {
                     name: "status",
                     type: GraphQLString,
+                    resolve(source, args, context, info) {
+                        return assertNonNull(defaultFieldResolver(source, args, context, info));
+                    }
+                },
+                total: {
+                    name: "total",
+                    type: GraphQLFloat,
                     resolve(source, args, context, info) {
                         return assertNonNull(defaultFieldResolver(source, args, context, info));
                     }
@@ -33,11 +77,12 @@ export function getSchema(): GraphQLSchema {
         fields() {
             return {
                 order: {
+                    description: "One order, by id.",
                     name: "order",
                     type: OrderType,
                     args: {
                         id: {
-                            type: new GraphQLNonNull(GraphQLString)
+                            type: new GraphQLNonNull(GraphQLID)
                         }
                     },
                     extensions: {
@@ -46,7 +91,46 @@ export function getSchema(): GraphQLSchema {
                         }
                     },
                     resolve(_source, args, context) {
-                        return queryOrderResolver(args.id, context);
+                        return queryOrderResolver(context, args.id);
+                    }
+                },
+                orders: {
+                    description: "A user's orders, newest first.",
+                    name: "orders",
+                    type: new GraphQLList(new GraphQLNonNull(OrderType)),
+                    args: {
+                        first: {
+                            type: GraphQLInt
+                        },
+                        userId: {
+                            type: new GraphQLNonNull(GraphQLID)
+                        }
+                    },
+                    extensions: {
+                        gratos: {
+                            semanticNonNull: true
+                        }
+                    },
+                    resolve(_source, args, context) {
+                        return queryOrdersResolver(context, args.userId, args.first);
+                    }
+                },
+                user: {
+                    description: "A user, by id.",
+                    name: "user",
+                    type: UserType,
+                    args: {
+                        id: {
+                            type: new GraphQLNonNull(GraphQLID)
+                        }
+                    },
+                    extensions: {
+                        gratos: {
+                            semanticNonNull: true
+                        }
+                    },
+                    resolve(_source, args, context) {
+                        return queryUserResolver(context, args.id);
                     }
                 }
             };
@@ -57,11 +141,12 @@ export function getSchema(): GraphQLSchema {
         fields() {
             return {
                 cancelOrder: {
+                    description: "Cancels an open order.",
                     name: "cancelOrder",
                     type: OrderType,
                     args: {
                         id: {
-                            type: new GraphQLNonNull(GraphQLString)
+                            type: new GraphQLNonNull(GraphQLID)
                         }
                     },
                     extensions: {
@@ -70,7 +155,7 @@ export function getSchema(): GraphQLSchema {
                         }
                     },
                     resolve(_source, args, context) {
-                        return mutationCancelOrderResolver(args.id, context);
+                        return mutationCancelOrderResolver(context, args.id);
                     }
                 }
             };
@@ -81,15 +166,16 @@ export function getSchema(): GraphQLSchema {
         fields() {
             return {
                 orderChanged: {
+                    description: "One order as it is now, then each change to it.",
                     name: "orderChanged",
                     type: OrderType,
                     args: {
                         id: {
-                            type: new GraphQLNonNull(GraphQLString)
+                            type: new GraphQLNonNull(GraphQLID)
                         }
                     },
                     subscribe(_source, args, context) {
-                        return subscriptionOrderChangedResolver(args.id, context);
+                        return subscriptionOrderChangedResolver(context, args.id);
                     },
                     resolve(payload) {
                         return assertNonNull(payload);
@@ -113,6 +199,6 @@ export function getSchema(): GraphQLSchema {
         query: QueryType,
         mutation: MutationType,
         subscription: SubscriptionType,
-        types: [MutationType, OrderType, QueryType, SubscriptionType]
+        types: [MutationType, OrderType, QueryType, SubscriptionType, UserType]
     });
 }

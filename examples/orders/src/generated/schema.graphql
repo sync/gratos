@@ -32,18 +32,35 @@ Passing a negative level or a level greater than the list dimension is an error.
 directive @semanticNonNull(levels: [Int] = [0]) on FIELD_DEFINITION
 
 type Mutation {
-  cancelOrder(id: String!): Order @semanticNonNull
+  """Cancels an open order."""
+  cancelOrder(id: ID!): Order @semanticNonNull
 }
 
+"""An order a user placed."""
 type Order {
-  id: String @semanticNonNull
+  """Who placed it."""
+  customer: User @semanticNonNull
+  id: ID @semanticNonNull
   status: String @semanticNonNull
+  total: Float @semanticNonNull
 }
 
 type Query {
-  order(id: String!): Order @semanticNonNull
+  """One order, by id."""
+  order(id: ID!): Order @semanticNonNull
+  """A user's orders, newest first."""
+  orders(first: Int, userId: ID!): [Order!] @semanticNonNull
+  """A user, by id."""
+  user(id: ID!): User @semanticNonNull
 }
 
 type Subscription {
-  orderChanged(id: String!): Order @semanticNonNull
+  """One order as it is now, then each change to it."""
+  orderChanged(id: ID!): Order @semanticNonNull
+}
+
+"""A user who places orders."""
+type User {
+  id: ID @semanticNonNull
+  name: String @semanticNonNull
 }
