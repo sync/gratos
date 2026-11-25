@@ -1167,9 +1167,10 @@ describe("the response stream of a subscription", () => {
 /**
  * A schema whose `probed` source is one hand-written iterator: it yields 1, 2, … unless `stuck`,
  * when every pull stays pending forever (return() still resolves); it has a throw() only when
- * `throws`. The probe records every call.
+ * `throws`, which ends the iterator unless `catches` (then it goes on). The probe records every
+ * call.
  */
-const probed = ({ stuck = false, throws = false } = {}) => {
+const probed = ({ stuck = false, throws = false, catches = false } = {}) => {
   const probe = { pulls: 0, returns: 0, throws: [] as Array<unknown> };
   const schema = makeSchema(
     `
@@ -1192,7 +1193,7 @@ const probed = ({ stuck = false, throws = false } = {}) => {
   if (throws) {
     iterator.throw = (error: unknown) => {
       probe.throws.push(error);
-      return Promise.resolve(done);
+      return Promise.resolve(catches ? { done: false, value: 0 } : done);
     };
   }
   Object.assign(schema.getSubscriptionType()?.getFields()["probed"] ?? {}, {
@@ -1201,7 +1202,9 @@ const probed = ({ stuck = false, throws = false } = {}) => {
   return { schema, probe };
 };
 
-const probedStream = async (options: { stuck?: boolean; throws?: boolean } = {}) => {
+const probedStream = async (
+  options: { stuck?: boolean; throws?: boolean; catches?: boolean } = {},
+) => {
   const { schema, probe } = probed(options);
   const result = await subscribeOnce({ schema, document: parse("subscription { probed }") });
   if (!(Symbol.asyncIterator in result)) {
@@ -1240,5 +1243,47 @@ describe("closing the response stream while a source pull never settles", () => 
     );
     expect(await read).toEqual({ done: true, value: undefined });
     expect(probe).toEqual({ pulls: 1, returns: 1, throws: [] });
+  });
+});
+
+describe("throw() on the response stream", () => {
+  const error = new Error("thrown by the consumer");
+
+  it.each([
+    ["before the first pull", 0],
+    ["between events", 1],
+  ])("%s, forwards to the source's throw(), once, and rejects", async (_name, events) => {
+    const { stream, probe } = await probedStream({ throws: true });
+    for (let index = 0; index < events; index += 1) {
+      expect((await stream.next()).done).toBe(false);
+    }
+    await expect(stream.throw(error)).rejects.toBe(error);
+    expect(probe).toEqual({ pulls: events, returns: 0, throws: [error] });
+    await expect(stream.throw(error)).rejects.toBe(error);
+    await stream.return();
+    expect(await stream.next()).toEqual({ done: true, value: undefined });
+    expect(probe).toEqual({ pulls: events, returns: 0, throws: [error] });
+  });
+
+  it("closes a source whose throw() catches the error and goes on through return(), once", async () => {
+    const { stream, probe } = await probedStream({ throws: true, catches: true });
+    await expect(stream.throw(error)).rejects.toBe(error);
+    await stream.return();
+    expect(probe).toEqual({ pulls: 0, returns: 1, throws: [error] });
+  });
+
+  it.each([
+    ["before the first pull", 0],
+    ["between events", 1],
+  ])("%s, closes a source without throw() through return(), once", async (_name, events) => {
+    const { stream, probe } = await probedStream();
+    for (let index = 0; index < events; index += 1) {
+      expect((await stream.next()).done).toBe(false);
+    }
+    await expect(stream.throw(error)).rejects.toBe(error);
+    expect(probe).toEqual({ pulls: events, returns: 1, throws: [] });
+    await stream.return();
+    expect(await stream.next()).toEqual({ done: true, value: undefined });
+    expect(probe).toEqual({ pulls: events, returns: 1, throws: [] });
   });
 });

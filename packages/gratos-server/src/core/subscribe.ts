@@ -58,8 +58,8 @@ const CLOSED: unique symbol = Symbol("closed");
 /**
  * The response stream of one source: each event executed as subscribe() executes it. It is an
  * explicit iterator, not an async generator, whose calls a generator would queue behind a pending
- * pull (or skip its `finally` before the first one). Closing it (`return()`, an event that
- * fails to execute) reaches the source's iterator once and at once, even while a pull is
+ * pull (or skip its `finally` before the first one). Closing it (`return()`, `throw()`, an event
+ * that fails to execute) reaches the source's iterator once and at once, even while a pull is
  * pending or before the first pull, and settles a pending pull as done even when the source's
  * own `next()` never settles. As in graphql's mapAsyncIterable, pulls are not queued.
  */
@@ -80,8 +80,12 @@ const responseStream = (
    */
   const pending = new Set<(closed: typeof CLOSED) => void>();
 
-  /** Closes the source once; its own failure to close concerns no one (as in subscribe()). */
-  const close = (): Promise<void> => {
+  /**
+   * Closes the source once; its own failure to close concerns no one (as in subscribe()). With
+   * `thrown`, the source gets it through its `throw()` when it has one (as graphql-js forwards
+   * it), else `return()`; a source that catches it and goes on is closed with `return()`.
+   */
+  const close = (thrown?: { readonly error: unknown }): Promise<void> => {
     finished = true;
     for (const settle of pending) {
       settle(CLOSED);
@@ -91,7 +95,14 @@ const responseStream = (
       ? Promise.resolve()
       : (async () => {
           try {
-            await iterator.return?.();
+            if (thrown !== undefined && iterator.throw !== undefined) {
+              const after = await iterator.throw(thrown.error);
+              if (after.done !== true) {
+                await iterator.return?.();
+              }
+            } else {
+              await iterator.return?.();
+            }
           } catch {
             // Ignored, as subscribe() ignores it.
           }
@@ -141,7 +152,10 @@ const responseStream = (
       await close();
       return DONE;
     },
-    throw: (error: unknown) => Promise.reject(error),
+    throw: async (error: unknown) => {
+      await close({ error });
+      throw error;
+    },
     [Symbol.asyncIterator]: () => stream,
     [Symbol.asyncDispose]: async () => {
       await close();
