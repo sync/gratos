@@ -12,7 +12,7 @@ export {
   TEXT_EVENT_STREAM,
 } from "./core/http.ts";
 export { isIncrementalPayload, mapPayloadErrors, payloadErrors } from "./core/payload.ts";
-export type { IncrementalPayload } from "./core/payload.ts";
+export type { IncrementalPayload, MappedPayload } from "./core/payload.ts";
 export type {
   BaseServerOptions,
   ContextFactory,
