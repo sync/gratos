@@ -94,7 +94,9 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     }
     span.attribute("graphql.errors", state.errors);
     span.attribute("http.response.status_code", state.status);
-    span.end(state.clock.currentTimeNanosUnsafe(), exit);
+    // On the anchored timeline, as every phase: a coarse Clock read here could end the
+    // operation before a phase reported after onContext (a jit compile).
+    span.end(nanosOf(state, performance.now()), exit);
     options.onSpanEnd?.(span, state.request);
   };
 

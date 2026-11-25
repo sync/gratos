@@ -2,7 +2,7 @@
 // when", Tracing): phase spans inside the operation span, cache hits, the early-exit span, the one
 // idempotent end (body wrapper, null body), streamed responses, mutations that outlive their
 // client, the jit phase, and plugin order with serverTiming.
-import { Effect, Stream } from "effect";
+import { Clock, Context, Duration, Effect, Stream } from "effect";
 import type { GraphQLFieldResolver, GraphQLSchema } from "graphql";
 import { describe, expect, it } from "vitest";
 
@@ -366,5 +366,50 @@ describe("effect() tracing of incremental delivery and jit", () => {
       }
     }
     expect(jitSpans).toEqual([3]);
+  });
+});
+
+describe("effect() tracing with a coarse Clock", () => {
+  /** A Clock that never moves: the coarsest one, as a millisecond Clock is within a millisecond. */
+  const fixed = 1_000_000_000n;
+  const clock: Clock.Clock = {
+    currentTimeMillisUnsafe: () => 1000,
+    currentTimeMillis: Effect.succeed(1000),
+    currentTimeNanosUnsafe: () => fixed,
+    currentTimeNanos: Effect.succeed(fixed),
+    monotonicTimeNanosUnsafe: () => fixed,
+    monotonicTimeNanos: Effect.succeed(fixed),
+    sleep: (duration) =>
+      Effect.promise(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(resolve, Duration.toMillis(duration));
+          }),
+      ),
+  };
+
+  it("ends the operation span after a phase reported after onContext (a jit compile)", async () => {
+    const tracer = recordingTracer();
+    const server = createServer({
+      schema: effectSchema(
+        makeSchema("type Query { value: String }", {
+          Query: { value: () => Effect.succeed("v").pipe(Effect.delay("2 millis")) },
+        }),
+        { failure },
+      ),
+      plugins: [
+        jit({ after: 2 }),
+        effect({ context: Context.add(tracer.context, Clock.Clock, clock) }),
+      ],
+    });
+    await gql(server, "{ value }");
+    tracer.clear();
+    // The second use compiles, after onContext: its jit phase is emitted at once.
+    expect((await gql(server, "{ value }")).body).toEqual({ data: { value: "v" } });
+    const [operation] = operations(tracer);
+    const [compile] = tracer.named("jit");
+    expect(compile?.parentId).toBe(operation?.spanId);
+    expect((compile?.startTime ?? -1n) >= (operation?.startTime ?? 0n)).toBe(true);
+    expect((compile?.endTime ?? 0n) <= (operation?.endTime ?? -1n)).toBe(true);
   });
 });
