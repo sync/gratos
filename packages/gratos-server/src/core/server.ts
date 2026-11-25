@@ -118,12 +118,20 @@ const unexpected = (originalError: unknown): GraphQLError =>
  * on such a schema, even for an operation that uses neither.
  */
 const defaultExecutor =
-  (operation: OperationDefinitionNode, args: ExecutionArgs, enter: Enter): NextExecutor =>
+  (
+    operation: OperationDefinitionNode,
+    args: ExecutionArgs,
+    enter: Enter,
+    entrySignal: () => AbortSignal | undefined,
+  ): NextExecutor =>
   () => {
     if (operation.operation === "subscription") {
       return subscribeOnce(args, enter);
     }
-    return hasIncrementalDirectives(args.schema) ? legacyExecuteIncrementally(args) : execute(args);
+    // In a claim's `next()`, the signal of that entry (see Abandoned), else the core's.
+    const signal = entrySignal();
+    const run = signal === undefined ? args : { ...args, abortSignal: signal };
+    return hasIncrementalDirectives(run.schema) ? legacyExecuteIncrementally(run) : execute(run);
   };
 
 /** A rejected pull (a failed subscription source) as the GraphQL error the client gets. */
@@ -245,6 +253,17 @@ type Outcome =
   | { readonly ok: true; readonly result: PromiseOrValue<ExecutorResult> }
   | { readonly ok: false; readonly error: unknown };
 
+/**
+ * An execution a wrapper left running (see Dispatched), with the controller of the entry it ran
+ * in: a claim's `next()` runs a query with a signal of its own, linked to the core signal (or to
+ * the entry's it runs in), so the request can stop it without stopping the answer an executor
+ * that caught the wrapper's error gives instead. The core's own entry has none.
+ */
+interface Abandoned {
+  readonly result: PromiseOrValue<ExecutorResult>;
+  readonly controller: AbortController | undefined;
+}
+
 /** An execution that went past the gate (or failed before it), with its completion. */
 interface Dispatched {
   readonly _tag: "dispatched";
@@ -256,7 +275,7 @@ interface Dispatched {
    * them (a started mutation stays tracked until its work settles). An executor may call
    * `next()` later, so the list is read once the outcome has settled.
    */
-  readonly abandoned: ReadonlyArray<PromiseOrValue<ExecutorResult>>;
+  readonly abandoned: ReadonlyArray<Abandoned>;
   /** Whether a mutation's executor was called (false when it failed before dispatch). */
   readonly mutationStarted: boolean;
   /**
@@ -705,19 +724,31 @@ const serve = <Ctx>(
     // claim cannot answer it (an executor such as legacyExecuteIncrementally would return a
     // one-shot result), so its claims are ignored once every hook has had its say.
     const { enter } = run;
-    const abandoned: Array<PromiseOrValue<ExecutorResult>> = [];
+    const abandoned: Array<Abandoned> = [];
+    /** The controller of the claim's `next()` entry running now (see Abandoned). */
+    let current: AbortController | undefined;
     /**
      * Enters the wrappers to run `next`, keeping what it returned from inside the entry: a
      * wrapper that throws after running it leaves that execution running (see `abandoned`). A
-     * successful entry's result is returned as is.
+     * successful entry's result is returned as is. A claim's `next()` (`nested`) of a query runs
+     * with a signal of its own (see Abandoned).
      */
-    const enterKeeping = (next: NextExecutor): PromiseOrValue<ExecutorResult> => {
+    const enterKeeping = (next: NextExecutor, nested: boolean): PromiseOrValue<ExecutorResult> => {
+      const parent = current;
+      const core = args.abortSignal ?? undefined;
+      const controller =
+        nested && core !== undefined ? linkedController(parent?.signal ?? core) : undefined;
       let ran: { readonly result: PromiseOrValue<ExecutorResult> } | undefined;
       try {
         return enter(() => {
-          const result = next();
-          ran = { result };
-          return result;
+          current = controller ?? parent;
+          try {
+            const result = next();
+            ran = { result };
+            return result;
+          } finally {
+            current = parent;
+          }
         });
       } catch (error) {
         if (ran !== undefined) {
@@ -727,18 +758,23 @@ const serve = <Ctx>(
           if (isPromiseLike(ran.result)) {
             void ran.result.then(undefined, () => {});
           }
-          abandoned.push(ran.result);
+          abandoned.push({ result: ran.result, controller });
         }
         throw error;
       }
     };
-    let execute: NextExecutor = defaultExecutor(input.operation, args, enter);
+    let execute: NextExecutor = defaultExecutor(
+      input.operation,
+      args,
+      enter,
+      () => current?.signal,
+    );
     const chosen = input.operation.operation === "subscription" ? undefined : claims;
     for (const claim of chosen?.toReversed() ?? []) {
       const next = execute;
       // Bound to the request: an executor may call `next()` later, from outside the executor
       // call (an event emitter's callback, a queue), and the work still runs in the wrappers.
-      execute = () => claim(() => enterKeeping(next));
+      execute = () => claim(() => enterKeeping(next, true));
     }
     const { mutation } = run;
     if (mutation !== undefined && draining) {
@@ -769,7 +805,7 @@ const serve = <Ctx>(
         _tag: "dispatched",
         // Inside the execution wrappers (`wrapExecution`), which carry request-local state
         // into the resolvers.
-        outcome: { ok: true, result: enterKeeping(execute) },
+        outcome: { ok: true, result: enterKeeping(execute, false) },
         abandoned,
         mutationStarted,
         finish,
@@ -824,7 +860,7 @@ const serve = <Ctx>(
    */
   const settleAbandoned = async (
     run: Run,
-    abandoned: ReadonlyArray<PromiseOrValue<ExecutorResult>>,
+    abandoned: ReadonlyArray<Abandoned>,
     mutationStarted: boolean,
   ): Promise<void> => {
     if (abandoned.length === 0) {
@@ -834,8 +870,16 @@ const serve = <Ctx>(
       abortInside(run);
       run.controller = linkedController(run.request.signal);
     }
+    await closeAbandoned(run, abandoned);
+  };
+
+  /**
+   * Waits for the executions a throwing wrapper left running, and closes a streamed result, as
+   * any unsent one (inside the execution wrappers). A rejection concerns no one.
+   */
+  const closeAbandoned = async (run: Run, abandoned: ReadonlyArray<Abandoned>): Promise<void> => {
     await Promise.all(
-      abandoned.map(async (pending) => {
+      abandoned.map(async ({ result: pending }) => {
         let result: ExecutorResult;
         try {
           result = await settle(pending);
@@ -847,6 +891,26 @@ const serve = <Ctx>(
         }
       }),
     );
+  };
+
+  /**
+   * Stops the queries a throwing wrapper around a claim's `next()` left running, once the
+   * executor has answered anyway (it caught the wrapper's error): each one's own signal aborts,
+   * inside the execution wrappers, never the core signal, which the answer (maybe a stream) still
+   * runs with. A streamed one is then closed; the answer does not wait for that.
+   */
+  const releaseAbandoned = (run: Run, abandoned: ReadonlyArray<Abandoned>): void => {
+    enterOrRun(
+      run.enter,
+      logger,
+      "gratos-server: a wrapExecution wrapper failed on an abort.",
+      () => {
+        for (const { controller } of abandoned) {
+          controller?.abort();
+        }
+      },
+    );
+    void closeAbandoned(run, abandoned);
   };
 
   /** execute (await the executor) and encode: the result hooks, then the Response. */
@@ -870,9 +934,12 @@ const serve = <Ctx>(
     }
     // What a throwing wrapper left running (see Dispatched): waited for when the request failed,
     // and for a started mutation whatever its executor answered (one that caught the wrapper's
-    // error and answered anyway), so the mutation stays tracked until that work settles.
+    // error and answered anyway), so the mutation stays tracked until that work settles. A query
+    // whose executor answered anyway is stopped on its own signal (see releaseAbandoned).
     if (failure !== undefined || mutationStarted) {
       await settleAbandoned(run, abandoned, mutationStarted);
+    } else if (abandoned.length > 0) {
+      releaseAbandoned(run, abandoned);
     }
     if (failure !== undefined || result === undefined) {
       const error = failure?.error;

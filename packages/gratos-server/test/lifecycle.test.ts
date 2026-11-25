@@ -18,6 +18,7 @@ import {
 import type { ExecuteInput, ExecutorResult, Plugin } from "../src/index.ts";
 import { flush, gate, gql, post, send, sleep } from "./support/http.ts";
 import { basicSchema } from "./support/schema.ts";
+import { readMultipart } from "./support/stream.ts";
 
 const silent = { warn: () => {}, error: () => {} };
 
@@ -892,6 +893,148 @@ describe("control.drain", () => {
     } finally {
       process.off("unhandledRejection", listener);
     }
+  });
+
+  it("stops a query a wrapper around next() left running when the executor answers with a fallback", async () => {
+    const started = gate();
+    let aborted = false;
+    let entries = 0;
+    const request = post({ query: "{ hello }" });
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          // Settles only once its abort signal aborts (the client stays connected).
+          hello: (_source, _args, _context, info: GraphQLResolveInfo) =>
+            new Promise<string>((resolve) => {
+              started.resolve();
+              info.getAbortSignal()?.addEventListener(
+                "abort",
+                () => {
+                  aborted = true;
+                  resolve("late");
+                },
+                { once: true },
+              );
+            }),
+        },
+      }),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              return { data: { hello: "fallback" } };
+            }
+          },
+        },
+        {
+          // The second entry is the one around next(): it starts the query, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await send(server, request);
+    await started.promise;
+    expect(response.error).toBeUndefined();
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: { hello: "fallback" } });
+    expect(aborted).toBe(true);
+    // Its own signal aborted: the core signal (the fallback's) is untouched.
+    expect(signalOf(request)?.aborted).toBe(false);
+  });
+
+  it("closes a stream a wrapper around next() left running, and sends the stream the executor answers with instead", async () => {
+    let returns = 0;
+    let calls = 0;
+    let entries = 0;
+    /** An incremental result with one deferred payload, sent after `delay` ms. */
+    const incrementalOf = (hello: string, delay: number): ExecutorResult => ({
+      initialResult: { data: { hello }, hasNext: true },
+      subsequentResults: {
+        next: async () => {
+          await sleep(delay);
+          return {
+            done: false,
+            value: { incremental: [{ data: { count: 1 }, path: [] }], hasNext: false },
+          };
+        },
+        return: async () => {
+          if (hello === "abandoned") {
+            returns += 1;
+          }
+          return { done: true, value: undefined };
+        },
+        throw: (error: unknown) => Promise.reject(error),
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+        [Symbol.asyncDispose]: () => Promise.resolve(),
+      },
+    });
+    const request = post({ query: "{ hello }" }, { accept: "multipart/mixed" });
+    const server = createServer({
+      schema: basicSchema(),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and delegates again.
+          onExecute: () => (next) => {
+            try {
+              return next();
+            } catch {
+              return next();
+            }
+          },
+        },
+        {
+          onExecute: () => () => {
+            calls += 1;
+            return calls === 1 ? incrementalOf("abandoned", 0) : incrementalOf("sent", 10);
+          },
+        },
+        {
+          // The second entry is the one around the first next(): it runs it, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await server.handle(request);
+    expect(response.status).toBe(200);
+    const parts = readMultipart(await response.text());
+    expect(parts).toEqual([
+      { data: { hello: "sent" }, hasNext: true },
+      { incremental: [{ data: { count: 1 }, path: [] }], hasNext: false },
+    ]);
+    const closed = await Promise.race([
+      (async () => {
+        while (returns === 0) {
+          await sleep(1);
+        }
+        return "closed";
+      })(),
+      sleep(1000).then(() => "never closed"),
+    ]);
+    expect(closed).toBe("closed");
+    expect(signalOf(request)?.aborted).toBe(false);
   });
 
   it("a continuation on mutationOf(req).settled runs before drain() resolves", async () => {
