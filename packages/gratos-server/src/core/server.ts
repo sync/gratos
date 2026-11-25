@@ -211,6 +211,8 @@ interface TrackedMutation {
 
 const noop = (_status: number): void => {};
 
+const settled = (): void => {};
+
 /** The abandoned executions of a request that dispatched nothing. */
 const noneAbandoned: ReadonlySet<Promise<void>> = new Set();
 
@@ -270,8 +272,10 @@ interface Dispatched {
    * (the core's executor call, or the entry around a claim's `next()`) and then threw. Each is
    * kept, from inside the entry before the wrapper can throw, as a promise that settles (never
    * rejects) once the execution has settled and a stream it gave is closed (nobody else holds
-   * it), and leaves the set then. An executor may call `next()` later, also while the request
-   * waits for them, so the set is read until it is empty (see settleAbandoned).
+   * it), and leaves the set then. Once one is kept, so is every `next()` execution still running
+   * whose own wrapper did not throw (the claim that called it may be the abandoned one, which
+   * nobody waits for). An executor may call `next()` later, also while the request waits for
+   * them, so the set is read until it is empty (see settleAbandoned).
    */
   readonly abandoned: ReadonlySet<Promise<void>>;
   /** Whether a mutation's executor was called (false when it failed before dispatch). */
@@ -722,6 +726,14 @@ const serve = <Ctx>(
     // so its claims are ignored once every hook has had its say.
     const { enter } = run;
     const abandoned = new Set<Promise<void>>();
+    /** The `next()` executions still running whose entry succeeded, until one is abandoned. */
+    let running: Set<Promise<void>> | undefined = new Set();
+    const keep = (done: Promise<void>): void => {
+      abandoned.add(done);
+      void done.then(() => {
+        abandoned.delete(done);
+      });
+    };
     /**
      * Keeps an execution a wrapper left running until it settles (see Dispatched), observed at
      * once: it may reject while an executor that caught the wrapper's error still works on its
@@ -733,11 +745,12 @@ const serve = <Ctx>(
       result: PromiseOrValue<ExecutorResult>,
       controller: AbortController | undefined,
     ): void => {
-      const done = retire(run, result);
-      abandoned.add(done);
-      void done.then(() => {
-        abandoned.delete(done);
-      });
+      keep(retire(run, result));
+      // A next() an abandoned claim made (or makes) may have succeeded: it is kept too.
+      for (const done of running ?? []) {
+        keep(done);
+      }
+      running = undefined;
       if (controller !== undefined) {
         enterOrRun(
           enter,
@@ -767,18 +780,19 @@ const serve = <Ctx>(
       const own = controller?.signal ?? signal;
       const claim = chosen[index];
       let ran: { readonly result: PromiseOrValue<ExecutorResult> } | undefined;
+      let result: PromiseOrValue<ExecutorResult>;
       try {
-        return enter(() => {
+        result = enter(() => {
           // Its `next` is the executor that would have run without it (the next claim in list
           // order, else the default), bound to the request: an executor may call it later, from
           // outside the executor call (an event emitter's callback, a queue), and the work still
           // runs in the wrappers.
-          const result =
+          const executed =
             claim === undefined
               ? defaultExecutor(input.operation, args, own, enter, logger)
               : claim(() => enterExecutor(index + 1, own));
-          ran = { result };
-          return result;
+          ran = { result: executed };
+          return executed;
         });
       } catch (error) {
         // The wrapper's error stays the failure.
@@ -787,6 +801,20 @@ const serve = <Ctx>(
         }
         throw error;
       }
+      if (index > 0 && isPromiseLike(result)) {
+        // Kept until it settles (its result stays the caller's): see Dispatched.
+        const done = result.then(settled, settled);
+        if (running === undefined) {
+          keep(done);
+        } else {
+          const pending = running;
+          pending.add(done);
+          void done.then(() => {
+            pending.delete(done);
+          });
+        }
+      }
+      return result;
     };
     const { mutation } = run;
     if (mutation !== undefined && draining) {

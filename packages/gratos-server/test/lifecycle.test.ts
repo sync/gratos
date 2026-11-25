@@ -1035,6 +1035,78 @@ describe("control.drain", () => {
     expect(signalOf(request)?.aborted).toBe(false);
   });
 
+  it("keeps a mutation tracked until a next() an abandoned executor makes has settled, also when that next()'s wrapper succeeds", async () => {
+    const events: Array<string> = [];
+    const answered = gate();
+    const delayed = gate();
+    const started = gate();
+    const hold = gate();
+    let entries = 0;
+    const server = createServer({
+      schema: basicSchema({
+        Mutation: {
+          bump: async () => {
+            started.resolve();
+            await hold.promise;
+            events.push("committed");
+            return 1;
+          },
+        },
+      }),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback at once.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              answered.resolve();
+              return { data: { bump: 0 } };
+            }
+          },
+        },
+        {
+          // Left running by the wrapper's error; later starts the mutation, and answers before
+          // it settles (a race it loses against a timeout, say).
+          onExecute: () => async (next) => {
+            await delayed.promise;
+            const child = Promise.resolve(next());
+            return Promise.race([child, Promise.resolve({ data: { bump: -1 } })]);
+          },
+        },
+        {
+          // Only the entry around the first claim's next() fails: the one around the second
+          // claim's next() succeeds.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const pending = gql(server, "mutation { bump }");
+    await answered.promise;
+    await flush();
+    const drained = server.control.drain().then(() => events.push("drained"));
+    delayed.resolve();
+    await started.promise;
+    await flush();
+    // The abandoned executor has answered; the mutation its next() started has not settled.
+    expect(events).toEqual([]);
+    hold.resolve();
+    await drained;
+    expect(events).toEqual(["committed", "drained"]);
+    const sent = await pending;
+    expect(sent.status).toBe(200);
+    expect(sent.body).toEqual({ data: { bump: 0 } });
+  });
+
   it("stops the execution a claim's delayed next() starts once the wrapper around that claim failed and the executor answered with a fallback", async () => {
     const delayed = gate();
     let settled = false;

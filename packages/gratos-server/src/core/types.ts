@@ -213,8 +213,9 @@ export interface Plugin<Ctx = unknown> {
    * runs with a signal linked to the one of the entry that called its executor, also when it is
    * called later), the executor call's with the core signal, as the request fails. A failed
    * request answers, and a started mutation's completion (`mutationOf(req).settled`, the drain)
-   * is published, only once none is left, work one of them starts meanwhile included; a
-   * mutation's is never stopped. A plugin
+   * is published, only once none is left, work one of them starts meanwhile included, and every
+   * `next()` execution still running then, also one whose own wrapper succeeded (the claim that
+   * called it may be the abandoned one); a mutation's is never stopped. A plugin
    * carries request-local state into the resolvers this way, which keep receiving the
    * application's own context value: the Effect layer enters an `AsyncLocalStorage`, whose store
    * the async continuations of that work inherit. Wrappers nest in list order (the first is the
