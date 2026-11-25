@@ -13,7 +13,11 @@ import type { Scope } from "effect";
 
 import { GuardTimeout } from "./errors.ts";
 
-/** The type of the operation a resolver runs in. Default "query" (no server, as in unit tests). */
+/**
+ * The type of the operation a resolver runs in. The wrapper always sets it: from the request
+ * scope, or, for a resolver with none (an execution not bound to its request), from the
+ * resolver's own operation. Default "query" for an Effect run outside the wrapper (unit tests).
+ */
 export const OperationType = Context.Reference<"query" | "mutation" | "subscription">(
   "@dblechoc/gratos-server/effect/OperationType",
   { defaultValue: () => "query" },

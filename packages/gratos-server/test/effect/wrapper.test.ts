@@ -973,6 +973,38 @@ describe("an executor that runs a document of its own", () => {
   });
 });
 
+describe("a resolver with no request scope", () => {
+  it("runs under its own operation's type: an unbound mutation gets no query timeout", async () => {
+    const guard = makeGuard<AppError>({
+      authorize: () => true,
+      refuse: () => new Forbidden({ scopes: [] }),
+      timeout: "10 millis",
+    });
+    const server = createServer({
+      schema: effectSchema(
+        makeSchema("type Query { value: String } type Mutation { write: String }", {
+          Mutation: {
+            write: () =>
+              guard.guard({ effect: Effect.succeed("written").pipe(Effect.delay("40 millis")) }),
+          },
+        }),
+        { failure, isFailure: isAppError },
+      ),
+      plugins: [
+        {
+          // Runs a re-parsed document without binding its operation: no request scope.
+          onExecute: (_input, args) => () =>
+            execute({ ...args, document: parse(print(args.document)) }),
+        },
+        effect(),
+      ],
+    });
+    expect((await gql(server, "mutation { write }")).body).toEqual({
+      data: { write: "written" },
+    });
+  });
+});
+
 /** A server whose query never settles until it is interrupted, counting the interrupts. */
 const hanging = () => {
   const started = gate();

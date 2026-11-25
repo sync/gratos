@@ -33,6 +33,7 @@ import type {
 import { cancelled } from "../core/errors.ts";
 import type { PromiseOrValue } from "../core/types.ts";
 import { fromCause } from "./errors.ts";
+import { OperationType } from "./guard.ts";
 import type { FromCauseOptions } from "./errors.ts";
 import { currentScope, servicesFor } from "./state.ts";
 import type { RequestScope } from "./state.ts";
@@ -47,16 +48,35 @@ export const internals = {
   runForkWith: Effect.runForkWith,
 };
 
-/** The fork context of a request without an effect() plugin (unit tests, a bare server). */
-const emptyScope: RequestScope = {
+type OperationKind = GraphQLResolveInfo["operation"]["operation"];
+
+/** A scope for resolvers that run with no request scope, carrying only their operation's type. */
+const unboundScopeOf = (type: OperationKind): RequestScope => ({
   operations: new Set(),
-  context: Context.empty(),
+  context: Context.make(OperationType, type),
   fibers: new Set(),
   streams: new Set(),
   interruptOnAbort: false,
   aborted: false,
   spanEnded: () => {},
+});
+
+const unboundScopes: Readonly<Record<OperationKind, RequestScope>> = {
+  query: unboundScopeOf("query"),
+  mutation: unboundScopeOf("mutation"),
+  subscription: unboundScopeOf("subscription"),
 };
+
+/**
+ * The fork context of a resolver with no request scope (a server without an effect() plugin,
+ * an execution its executor did not bind to the request): no services and no fiber tracking,
+ * but the OperationType of the resolver's own operation, so an unbound mutation never gets
+ * the query timeout.
+ */
+const unboundScope = (info: GraphQLResolveInfo): RequestScope =>
+  unboundScopes[info.operation.operation];
+
+const isUnbound = (scope: RequestScope): boolean => scope.operations.size === 0;
 
 /** A Promise as graphql-js tells one: an object whose `then` is a function. */
 const isThenable = (value: unknown): value is PromiseLike<unknown> =>
@@ -72,7 +92,7 @@ const isSemanticNonNull = (field: GraphQLField<unknown, unknown>): boolean => {
 
 /** Starts tracking a running fiber in its request scope; it removes itself when it completes. */
 const track = (scope: RequestScope, fiber: Fiber.Fiber<unknown, unknown>): void => {
-  if (scope === emptyScope) {
+  if (isUnbound(scope)) {
     return;
   }
   scope.fibers.add(fiber);
@@ -106,7 +126,7 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
       return settleExit(effect);
     }
     // The execution scope (effect()'s wrapExecution): a thenable's continuation inherits it.
-    const scope = currentScope(info) ?? emptyScope;
+    const scope = currentScope(info) ?? unboundScope(info);
     if (scope.aborted && scope.interruptOnAbort) {
       // The client has left (a Promise-wrapped resolver settled after the abort): the Effect is
       // never started. track() still interrupts a fiber whose own startup saw the abort.
@@ -166,7 +186,7 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
    */
   const sourceValue = (value: unknown, info: GraphQLResolveInfo): PromiseOrValue<unknown> => {
     if (Stream.isStream(value)) {
-      return streamSource(value, currentScope(info) ?? emptyScope, options);
+      return streamSource(value, currentScope(info) ?? unboundScope(info), options);
     }
     if (Effect.isEffect(value)) {
       const ran = run(value, info);
@@ -213,7 +233,7 @@ const streamSource = <A, E, R, F>(
  * pull and the end only once the close has run its finalizers.
  */
 const tracked = <A>(iterator: AsyncIterator<A>, scope: RequestScope): AsyncIterator<A> => {
-  if (scope === emptyScope) {
+  if (isUnbound(scope)) {
     return iterator;
   }
   let closing: PromiseWithResolvers<void> | undefined;
