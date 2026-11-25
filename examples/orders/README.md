@@ -114,9 +114,10 @@ committed files are stale.
 
 ### 3. Nothing
 
-There is no step 3. `effectSchema` wraps every resolver of the schema once, at startup, so the
-new field runs as an Effect with the request's services, trace and abort signal, and its typed
-failures are mapped by the app's `failure` matcher. `src/graphql.ts` does not change.
+There is no step 3: nothing registers the new field. `effectSchema` wraps every resolver of the
+schema once, at startup, so the new field runs as an Effect with the request's services, trace
+and abort signal, and its typed failures are mapped by the app's `failure` matcher.
+`src/graphql.ts` does not change.
 
 ### 4. Guard
 

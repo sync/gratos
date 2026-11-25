@@ -61,7 +61,7 @@ const snippetsIn = (text: string, firstLine = 1): Array<Snippet> =>
 
 const snippetsOf = (doc: string): Array<Snippet> => snippetsIn(read(doc));
 
-/** The README's `### n. Name` sections: each step's name, and its tagged code blocks. */
+/** The README's `### n. Name` sections: each step's name, its prose, and its tagged code blocks. */
 const stepsOf = (readme: string) => {
   const headings = [...readme.matchAll(/^### (\d)\. (\w+)$/gm)];
   return headings.map((heading, index) => {
@@ -70,6 +70,8 @@ const stepsOf = (readme: string) => {
     const text = readme.slice(start, next === -1 ? undefined : next);
     return {
       name: heading[2] ?? "",
+      /** The step's text, with its line breaks as spaces. */
+      prose: text.replaceAll(/\s+/g, " "),
       snippets: snippetsIn(text, readme.slice(0, start).split("\n").length),
     };
   });
@@ -100,9 +102,11 @@ describe("the README's new resolver", () => {
 
   // Each step shows its own code, quoted from the file it lives in (so it compiles and runs), and
   // the steps that touch the field (write, generate, test) all name the same one.
-  const steps = new Map(stepsOf(readme).map((step) => [step.name, step.snippets]));
+  const sections = stepsOf(readme);
+  const steps = new Map(sections.map((step) => [step.name, step.snippets]));
   const files = (step: string) => (steps.get(step) ?? []).map((snippet) => snippet.file);
   const code = (step: string) => (steps.get(step) ?? []).map((snippet) => snippet.code).join("\n");
+  const prose = (step: string) => sections.find((section) => section.name === step)?.prose ?? "";
 
   it("shows each step's own code, quoted from its file", () => {
     expect(files("Write")).toEqual(["examples/orders/src/models/User.ts"]);
@@ -113,6 +117,14 @@ describe("the README's new resolver", () => {
     expect(files("Nothing")).toEqual([]);
     expect(files("Guard")).toEqual(["examples/orders/src/models/User.ts"]);
     expect(files("Test")).toEqual(["examples/orders/test/resolvers.test.ts"]);
+  });
+
+  it("says why step 3 is nothing: effectSchema runs a new field with no registration", () => {
+    expect(prose("Nothing")).toContain("There is no step 3: nothing registers the new field.");
+    expect(prose("Nothing")).toContain(
+      "`effectSchema` wraps every resolver of the schema once, at startup",
+    );
+    expect(prose("Nothing")).toContain("`src/graphql.ts` does not change.");
   });
 
   it("writes, generates, guards and tests the same field", () => {
