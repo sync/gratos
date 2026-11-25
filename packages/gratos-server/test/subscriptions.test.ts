@@ -1064,6 +1064,30 @@ describe("the default executor", () => {
     ]);
   });
 
+  it("runs a source that is an AsyncIterable with a `then` that is not a function", async () => {
+    const schema = makeSchema(
+      `
+        type Query { hello: String }
+        type Subscription { odd: Int }
+      `,
+      { Subscription: { odd: (payload: number) => payload } },
+    );
+    Object.assign(schema.getSubscriptionType()?.getFields()["odd"] ?? {}, {
+      // graphql-js takes it for an AsyncIterable (its isPromise wants a callable `then`).
+      subscribe: () => ({
+        then: 1,
+        async *[Symbol.asyncIterator]() {
+          yield 1;
+        },
+      }),
+    });
+    const server = createServer({ schema });
+    const response = await subscribe(server, "subscription { odd }");
+    const { names, payloads } = readSse(await response.text());
+    expect(names).toEqual(["next", "complete"]);
+    expect(payloads).toEqual([{ data: { odd: 1 } }]);
+  });
+
   it("runs on the pinned schema itself: a resolver changed before replaceSchema(same schema) runs", async () => {
     const { schema } = fixture();
     const server = createServer({ schema });

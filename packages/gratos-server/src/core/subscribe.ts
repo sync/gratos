@@ -26,8 +26,12 @@ import type { ExecutionArgs, ExecutionResult, ValidatedSubscriptionArgs } from "
 
 import type { PromiseOrValue } from "./types.ts";
 
+/** A Promise as graphql-js tells one (isPromise): an object whose `then` is a function. */
 const isPromiseLike = <T>(value: PromiseOrValue<T>): value is Promise<T> =>
-  typeof value === "object" && value !== null && "then" in value;
+  typeof value === "object" &&
+  value !== null &&
+  "then" in value &&
+  typeof value.then === "function";
 
 /** A pull that rejects with the signal's reason once it aborts, as subscribe()'s pulls do. */
 const cancellable = <T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> => {
