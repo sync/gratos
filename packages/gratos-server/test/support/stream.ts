@@ -163,21 +163,31 @@ export interface Listening {
  * leaves before the Response exists aborts the Request's signal; once the Response is being
  * written, a disconnect is visible only as a cancel of its body (the pipeline destroys the
  * readable, which cancels the web stream). A client that leaves during its upload is a
- * cancellation: its request never reaches `handle`. Any other failure of the adapter (one that
- * is not the client's socket going away) fails the test through `close()`.
+ * cancellation: its request never reaches `handle`. Any other failure of the adapter fails the
+ * test through `close()`, told apart by where it came from (not by the final socket state: a
+ * body error makes the pipeline destroy the socket too).
  */
 export const listen = async (server: Server): Promise<Listening> => {
   const failures: Array<unknown> = [];
   const http = createHttpServer((req, res) => {
-    /** The client's socket is gone (it left, or the pipeline destroyed it for a body error). */
-    const gone = (): boolean => req.socket.destroyed;
     const controller = new AbortController();
     let responded = false;
+    /** The Response body itself errored: an adapter failure, whatever the socket's state after. */
+    let bodyFailed = false;
+    /** The client left: its socket closed before the response finished (not a body error). */
+    let clientLeft = false;
+    req.on("aborted", () => {
+      clientLeft = true;
+    });
     res.on("close", () => {
+      if (!res.writableFinished && !bodyFailed) {
+        clientLeft = true;
+      }
       if (!responded) {
         controller.abort();
       }
     });
+
     const serve = async (): Promise<void> => {
       const bytes = await buffer(req);
       const method = req.method ?? "GET";
@@ -198,10 +208,17 @@ export const listen = async (server: Server): Promise<Listening> => {
         return;
       }
       res.flushHeaders();
-      await pipeline(Readable.fromWeb(response.body), res);
+      const readable = Readable.fromWeb(response.body);
+      readable.once("error", () => {
+        // Recorded before the pipeline tears the response (and its socket) down.
+        if (!clientLeft) {
+          bodyFailed = true;
+        }
+      });
+      await pipeline(readable, res);
     };
     serve().catch((error: unknown) => {
-      if (gone()) {
+      if (clientLeft && !bodyFailed) {
         // A cancellation: the client left (during the upload, or mid-body).
         return;
       }

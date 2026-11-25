@@ -637,8 +637,11 @@ describe("a standalone handle(Request): cancelling the body", () => {
     if (body === null) {
       throw new Error("no body");
     }
-    const { text, reader } = await readUntil(body, (sofar) => readSse(sofar).payloads.length === 3);
-    expect(readSse(text).names).toEqual(["next", "next", "next"]);
+    // At least 3: one chunk can carry several events of a source that goes on.
+    const { text, reader } = await readUntil(body, (sofar) => readSse(sofar).payloads.length >= 3);
+    const { names } = readSse(text);
+    expect(names.length).toBeGreaterThanOrEqual(3);
+    expect(names.every((name) => name === "next")).toBe(true);
     await reader.cancel();
     await eventually(() => cleanups.includes("forever"));
     expect(reported).toEqual([]);
@@ -893,6 +896,36 @@ describe("over real HTTP (node:http)", () => {
     // afterEach's close() fails the test if the adapter itself failed.
   });
 
+  it("a response body that errors while the client is connected fails the adapter", async () => {
+    const { schema } = fixture();
+    const listening = await listen(
+      createServer({
+        schema,
+        plugins: [
+          {
+            // A body that fails on its first read, with the client still connected.
+            onResponse: (response) =>
+              new Response(
+                new ReadableStream({
+                  pull: (controller) => {
+                    controller.error(new Error("the body failed"));
+                  },
+                }),
+                { status: response.status, headers: response.headers },
+              ),
+          },
+        ],
+      }),
+    );
+    const response = await fetchGraphQL(
+      listening.url,
+      { query: "{ hello }" },
+      { accept: "application/graphql-response+json" },
+    );
+    await response.text().catch(() => undefined);
+    await expect(listening.close()).rejects.toThrow();
+  });
+
   it("an SSE subscription delivers N events and then completes", async () => {
     const { schema } = fixture();
     const url = await serve(createServer({ schema }));
@@ -981,7 +1014,7 @@ describe("over real HTTP (node:http)", () => {
         if (body === null) {
           throw new Error("no body");
         }
-        await readUntil(body, (sofar) => readSse(sofar).payloads.length === 2);
+        await readUntil(body, (sofar) => readSse(sofar).payloads.length >= 2);
       }
       expect(cleanups).toEqual([]);
       client.abort();
