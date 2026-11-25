@@ -156,6 +156,7 @@ const fixture = () => {
   const setup = gate();
   const setupStarted = gate();
   let setupPulls = 0;
+  let setupReturns = 0;
   Object.assign(field("slowSetup"), {
     subscribe: async () => {
       setupStarted.resolve();
@@ -166,7 +167,10 @@ const fixture = () => {
             setupPulls += 1;
             return Promise.resolve({ done: false, value: 1 });
           },
-          return: () => Promise.resolve({ done: true, value: undefined }),
+          return: () => {
+            setupReturns += 1;
+            return Promise.resolve({ done: true, value: undefined });
+          },
         }),
       };
     },
@@ -206,6 +210,7 @@ const fixture = () => {
     setup,
     setupStarted,
     setupPulls: () => setupPulls,
+    setupReturns: () => setupReturns,
   };
 };
 
@@ -460,8 +465,8 @@ describe("a standalone handle(Request): cancelling the body", () => {
     expect(reported).toEqual([]);
   });
 
-  it("a client that leaves while the source is set up gets a 499, unreported; the source is never pulled", async () => {
-    const { schema, setup, setupStarted, setupPulls } = fixture();
+  it("a client that leaves while the source is set up gets a 499, unreported; the late source is closed, never pulled", async () => {
+    const { schema, setup, setupStarted, setupPulls, setupReturns } = fixture();
     const responses: Array<number> = [];
     const reported: Array<GraphQLError> = [];
     const server = createServer({
@@ -492,9 +497,10 @@ describe("a standalone handle(Request): cancelling the body", () => {
     expect(responses).toEqual([CLIENT_CLOSED_REQUEST]);
     // graphql's subscribe() answered with an AbortError at the field, which is not reported.
     expect(reported).toEqual([]);
-    // graphql 17.1 drops a source iterable that resolves after the abort (it never calls its
-    // return()), so a source with setup work watches info.getAbortSignal() itself.
+    // graphql 17.1 drops a source that resolves after the abort; the core closes it, once.
+    await eventually(() => setupReturns() > 0);
     await flush();
+    expect(setupReturns()).toBe(1);
     expect(setupPulls()).toBe(0);
   });
 

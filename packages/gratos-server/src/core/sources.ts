@@ -8,6 +8,11 @@
 // nobody reads: a pull that only `return()` would release (an idle source) is never released,
 // and a body cancel waits on it forever. The adapter asks the source once, so subscribe() reads
 // and closes one request-local iterator.
+//
+// graphql 17.1 also drops a source whose resolver settles after the request signal aborted
+// (cancellablePromise rejects at the abort and ignores the late value), so nothing would ever
+// close it. The adapter closes a source that subscribe() has not taken once the signal aborts.
+// Its `return()` runs at most once, whoever asks (the adapter or subscribe()).
 import { defaultFieldResolver, GraphQLObjectType, GraphQLSchema } from "graphql";
 import type { GraphQLFieldConfigMap, GraphQLFieldResolver } from "graphql";
 
@@ -25,23 +30,60 @@ const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
   "then" in value &&
   typeof value.then === "function";
 
-/** The source as one iterator, whatever its `[Symbol.asyncIterator]()` returns on later calls. */
-const adaptSource = (source: AsyncIterable<unknown>): AsyncIterable<unknown> => {
+const DONE: IteratorReturnResult<undefined> = { done: true, value: undefined };
+
+/**
+ * The source as one iterator, whatever its `[Symbol.asyncIterator]()` returns on later calls,
+ * closed once. Until subscribe() takes it, an abort of the request signal closes it.
+ */
+const adaptSource = (
+  source: AsyncIterable<unknown>,
+  signal: AbortSignal | undefined,
+): AsyncIterable<unknown> => {
   const iterator = source[Symbol.asyncIterator]();
-  return { [Symbol.asyncIterator]: () => iterator };
+  let closing: Promise<IteratorResult<unknown>> | undefined;
+  const close = (): Promise<IteratorResult<unknown>> => {
+    closing ??= (async () => {
+      await iterator.return?.();
+      return DONE;
+    })();
+    return closing;
+  };
+  let taken = false;
+  if (signal !== undefined) {
+    const closeUntaken = (): void => {
+      if (!taken) {
+        // Nobody reads this source any more: its own failure to close concerns no one.
+        close().catch(() => undefined);
+      }
+    };
+    if (signal.aborted) {
+      closeUntaken();
+    } else {
+      signal.addEventListener("abort", closeUntaken, { once: true });
+    }
+  }
+  const adapted: AsyncIterator<unknown> = { next: () => iterator.next(), return: close };
+  return {
+    [Symbol.asyncIterator]: () => {
+      taken = true;
+      return adapted;
+    },
+  };
 };
 
 /** Adapts whatever a source resolver returns (the source, or a Promise of it). */
 const adaptResolver =
   (resolve: Resolver): Resolver =>
   (source, args, context, info) => {
+    const signal = info.getAbortSignal();
     const result = resolve(source, args, context, info);
     if (isPromiseLike(result)) {
       return Promise.resolve(result).then((resolved) =>
-        isAsyncIterable(resolved) ? adaptSource(resolved) : resolved,
+        isAsyncIterable(resolved) ? adaptSource(resolved, signal) : resolved,
       );
     }
-    return isAsyncIterable(result) ? adaptSource(result) : result;
+    return isAsyncIterable(result) ? adaptSource(result, signal) : result;
   };
 
 const build = (schema: GraphQLSchema): GraphQLSchema => {
