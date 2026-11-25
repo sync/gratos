@@ -652,6 +652,77 @@ describe("wrapExecution", () => {
   });
 });
 
+/** A server with a @stream source, and what its source's `return()` saw. */
+interface StreamServer {
+  readonly server: Server;
+  readonly seen: Array<string>;
+  readonly pulls: () => number;
+}
+
+/**
+ * A server whose `items` field is a @stream source: one item, then an idle pull that only the
+ * cleanup settles. Its `return()` records whether the request's wrapper store is in effect.
+ * The executor is the default one, with the core's abort signal; with `outsideStore` it runs
+ * outside the wrappers' store, so nothing it starts carries the store.
+ */
+const streamServer = (request: Request, outsideStore = false): StreamServer => {
+  const storage = new AsyncLocalStorage<Request>();
+  const seen: Array<string> = [];
+  const where = (): string => (storage.getStore() === request ? "in" : "out");
+  let pulls = 0;
+  const server = createServer({
+    schema: makeSchema("type Query { items: [Int] }", {
+      Query: {
+        items: () => {
+          const release = Promise.withResolvers<IteratorResult<number>>();
+          return {
+            [Symbol.asyncIterator]: () => ({
+              next: () => {
+                pulls += 1;
+                return pulls === 1 ? Promise.resolve({ done: false, value: 1 }) : release.promise;
+              },
+              return: () => {
+                seen.push(`return ${where()}`);
+                release.resolve({ done: true, value: undefined });
+                return Promise.resolve({ done: true, value: undefined });
+              },
+            }),
+          };
+        },
+      },
+    }),
+    plugins: [
+      ...(outsideStore
+        ? [
+            {
+              onExecute: (_input, args) => () =>
+                storage.exit(() => legacyExecuteIncrementally(args)),
+            } satisfies Plugin,
+          ]
+        : []),
+      incremental(),
+      { wrapExecution: (req, run) => storage.run(req, run) },
+    ],
+    logger: silent,
+  });
+  return { server, seen, pulls: () => pulls };
+};
+
+/** Reads the initial result, then leaves a read pending on the idle pull. */
+const readToIdlePull = async (
+  response: Response,
+  pulls: () => number,
+): Promise<{ reader: ReadableStreamDefaultReader<Uint8Array>; pending: Promise<unknown> }> => {
+  const { reader } = await readUntil(response.body ?? new ReadableStream(), (text) =>
+    text.includes('"hasNext":true'),
+  );
+  const pending = reader.read().catch(() => undefined);
+  while (pulls() < 2) {
+    await flush();
+  }
+  return { reader, pending };
+};
+
 describe("wrapExecution of a @stream source's cleanup", () => {
   it("closes a cancelled @stream's source inside the request's wrappers", async () => {
     // The executor runs without the abort signal (graphql-js would close the source from its
@@ -706,6 +777,55 @@ describe("wrapExecution of a @stream source's cleanup", () => {
     }
     await reader.cancel();
     await pending;
+    while (seen.length === 0) {
+      await flush();
+    }
+    expect(seen).toEqual(["return in"]);
+  });
+
+  it("closes a @stream source inside the wrappers on a body cancel, with the abort signal", async () => {
+    // graphql-js closes the source from its own listener on the core signal: the core aborts
+    // that signal inside the request's wrappers.
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed" },
+    );
+    const { server, seen, pulls } = streamServer(request);
+    const { reader, pending } = await readToIdlePull(await server.handle(request), pulls);
+    await reader.cancel();
+    await pending;
+    while (seen.length === 0) {
+      await flush();
+    }
+    expect(seen).toEqual(["return in"]);
+  });
+
+  it("closes a @stream source inside the wrappers when the request's signal aborts", async () => {
+    const client = new AbortController();
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed", signal: client.signal },
+    );
+    const { server, seen, pulls } = streamServer(request);
+    const { pending } = await readToIdlePull(await server.handle(request), pulls);
+    client.abort();
+    await pending;
+    while (seen.length === 0) {
+      await flush();
+    }
+    expect(seen).toEqual(["return in"]);
+  });
+
+  it("closes an unsent incremental result inside the wrappers (a 406)", async () => {
+    // The executor runs outside the wrappers' store, so nothing it started carries the store:
+    // only the core's own close, and its abort of the core signal, can enter the wrappers.
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "application/json" },
+    );
+    const { server, seen } = streamServer(request, true);
+    const response = await server.handle(request);
+    expect(response.status).toBe(406);
     while (seen.length === 0) {
       await flush();
     }

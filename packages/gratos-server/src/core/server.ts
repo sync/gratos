@@ -44,7 +44,7 @@ import { bindOperation, endStream, registerMutation, registerRequest } from "./r
 import type { MutationTracker } from "./requestState.ts";
 import { multipartResponse, sseResponse } from "./stream.ts";
 import { subscribeOnce } from "./subscribe.ts";
-import type { PayloadSource, StreamOptions, StreamPayload } from "./stream.ts";
+import type { Enter, PayloadSource, StreamOptions, StreamPayload } from "./stream.ts";
 import type {
   BaseServerOptions,
   ContextFactory,
@@ -145,9 +145,6 @@ const subscriptionSource = (
   },
 });
 
-/** Runs a synchronous entry into execution inside the request's execution wrappers. */
-type Enter = <T>(run: () => T) => T;
-
 /**
  * The subsequent payloads of an incremental result as stream payloads. Each pull and the close
  * run inside the request's execution wrappers (`wrapExecution`): graphql-js runs deferred work
@@ -177,16 +174,27 @@ interface TrackedMutation {
 
 const noop = (_status: number): void => {};
 
-/** A controller that aborts when `incoming` (the Request's signal: the client left) does. */
-const linkedController = (incoming: AbortSignal): AbortController => {
+/**
+ * A controller that aborts when `incoming` (the Request's signal: the client left) does. With
+ * `enter`, that abort runs inside the request's execution wrappers: execution's listeners on the
+ * controller's signal close sources (graphql-js closes the @stream sources from its own).
+ */
+const linkedController = (incoming: AbortSignal, enter?: Enter): AbortController => {
   const controller = new AbortController();
-  if (incoming.aborted) {
+  const abort = (): void => {
     controller.abort(incoming.reason);
+  };
+  if (incoming.aborted) {
+    abort();
   } else {
     incoming.addEventListener(
       "abort",
       () => {
-        controller.abort(incoming.reason);
+        if (enter === undefined) {
+          abort();
+        } else {
+          enter(abort);
+        }
       },
       { once: true, signal: controller.signal },
     );
@@ -415,6 +423,7 @@ const serve = <Ctx>(
         process: (payload) => payload,
         failure: sourceFailure,
         controller: run.controller,
+        enter: run.enter,
         clientSignal: run.request.signal,
         logger,
         onEnd: () => {
@@ -427,13 +436,16 @@ const serve = <Ctx>(
     });
   };
 
-  /** Closes a streamed result; a cleanup that fails is logged and never changes the answer. */
-  const closeStreamed = async (result: ExecutorResult): Promise<void> => {
+  /**
+   * Closes a streamed result inside the request's execution wrappers (its sources' cleanup runs
+   * there); a cleanup that fails is logged and never changes the answer.
+   */
+  const closeStreamed = async (run: Run, result: ExecutorResult): Promise<void> => {
     try {
       if (Symbol.asyncIterator in result) {
-        await result.return();
+        await run.enter(() => result.return());
       } else if ("initialResult" in result) {
-        await result.subsequentResults.return();
+        await run.enter(() => result.subsequentResults.return());
       }
     } catch (error) {
       logger.error("gratos-server: closing a streamed result failed.", error);
@@ -442,14 +454,17 @@ const serve = <Ctx>(
 
   /**
    * Closes a streamed result that is not sent (a refusal, a client that left, a failing result
-   * hook). The core signal aborts first, so a cleanup that waits on it, or on a pending pull,
-   * ends. The answer that follows (a 406, a failing hook's 500) gets a controller of its own,
+   * hook). The core signal aborts first, inside the execution wrappers (graphql-js closes @stream
+   * sources from its listener on it), so a cleanup that waits on it, or on a pending pull, ends.
+   * The answer that follows (a 406, a failing hook's 500) gets a controller of its own,
    * aborted only when the client leaves: the core signal no longer says whether it is there.
    */
   const closeUnsent = async (run: Run, result: ExecutorResult): Promise<void> => {
-    run.controller.abort();
+    run.enter(() => {
+      run.controller.abort();
+    });
     run.controller = linkedController(run.request.signal);
-    await closeStreamed(result);
+    await closeStreamed(run, result);
   };
 
   /** Whether the request is a mutation (not started yet) and the drain has begun. */
@@ -688,6 +703,7 @@ const serve = <Ctx>(
     process: (payload) => processPayload(run, ctx, payload),
     failure: sourceFailure,
     controller: run.controller,
+    enter: run.enter,
     clientSignal: run.request.signal,
     logger,
     onEnd: () => {
@@ -737,7 +753,7 @@ const serve = <Ctx>(
       // mutation's completion is published, without the core signal (a started mutation never
       // gets it), and the request fails.
       logger.error("gratos-server: an executor streamed the result of a mutation.");
-      await closeStreamed(result);
+      await closeStreamed(run, result);
       if (run.controller.signal.aborted) {
         return new Response(null, { status: CLIENT_CLOSED_REQUEST });
       }
@@ -901,7 +917,9 @@ const serve = <Ctx>(
 
   const handle = async (request: Request): Promise<Response> => {
     const start = performance.now();
-    const controller = linkedController(request.signal);
+    const enter = entryOf(request);
+    // The client leaving aborts the core signal inside the execution wrappers.
+    const controller = linkedController(request.signal, enter);
     registerRequest(request, controller.signal, start);
     const run: Run = {
       request,
@@ -913,7 +931,7 @@ const serve = <Ctx>(
       errorsAsEvents: false,
       ctx: undefined,
       mutation: undefined,
-      enter: entryOf(request),
+      enter,
     };
     let response: Response;
     try {

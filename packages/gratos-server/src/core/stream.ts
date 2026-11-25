@@ -17,6 +17,8 @@
 // - closing the stream early (a body cancel, or the core signal aborting) aborts the core signal
 //   first, so cooperative sources stop (one waiting on `info.getAbortSignal()`), and only then
 //   awaits the iterator's `return()`: a `return()` alone can wait forever on a pending pull.
+//   The core signal aborts inside the request's execution wrappers (`enter`): graphql-js closes
+//   the @stream sources from its own listener on that signal, so the abort is part of closing them.
 import { GraphQLError } from "graphql";
 import type { ExecutionResult } from "graphql";
 
@@ -28,6 +30,9 @@ export interface StreamPayload {
   readonly result: ExecutionResult;
   readonly hasNext: boolean;
 }
+
+/** Runs a synchronous entry into execution inside the request's execution wrappers. */
+export type Enter = <T>(run: () => T) => T;
 
 /** The payloads still to come, pulled one at a time. */
 export interface PayloadSource {
@@ -45,8 +50,13 @@ export interface StreamOptions {
   readonly process: (result: ExecutionResult) => ExecutionResult;
   /** Turns a rejected pull into the GraphQL error the client gets (before `process`). */
   readonly failure: (error: unknown) => GraphQLError;
-  /** The core's request signal, and the controller that aborts it. */
+  /**
+   * The core's request signal, and the controller that aborts it. The stream aborts it inside
+   * `enter`: execution's listeners on it close sources (graphql-js closes @stream sources).
+   */
   readonly controller: AbortController;
+  /** Enters the request's execution wrappers (`wrapExecution`). */
+  readonly enter: Enter;
   /**
    * The incoming request's own signal: the client leaving. Watched until the closing frame is
    * queued, also after the core signal was aborted to stop a failed source.
@@ -106,7 +116,7 @@ const sseFraming: Framing = {
 };
 
 const streamResponse = (framing: Framing, options: StreamOptions): Response => {
-  const { first, rest, process, failure, controller, clientSignal, logger, onEnd } = options;
+  const { first, rest, process, failure, controller, enter, clientSignal, logger, onEnd } = options;
   const { signal } = controller;
   /** Set once the stream has ended or was cancelled: nothing more may touch its controller. */
   let finished = false;
@@ -128,6 +138,13 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
   let stoppingSource = false;
   let closing: Promise<void> | undefined;
 
+  /** Aborts the core signal inside the request's execution wrappers. */
+  const abortCore = (): void => {
+    enter(() => {
+      controller.abort();
+    });
+  };
+
   /** Closes the executor's iterator once; its own failure is not the client's concern. */
   const release = (): Promise<void> => {
     listening.abort();
@@ -147,7 +164,7 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
    */
   const stop = (): Promise<void> => {
     listening.abort();
-    controller.abort();
+    abortCore();
     return release();
   };
 
@@ -269,7 +286,7 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           // last payload, through the same result hooks. A client that leaves before the closing
           // frame is queued still ends the body (its own signal is still watched).
           stoppingSource = true;
-          controller.abort();
+          abortCore();
           // A listener on the core signal may have made the client leave right away (the body
           // has ended): nothing is reported then, as for any rejected pull once it has left.
           if (finished) {
