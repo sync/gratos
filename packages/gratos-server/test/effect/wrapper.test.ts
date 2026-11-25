@@ -4,7 +4,7 @@
 import { EventEmitter, EventEmitterAsyncResource } from "node:events";
 
 import { Cause, Context, Data, Effect, Match, Predicate, Stream } from "effect";
-import { Headers, HttpServerRequest } from "effect/http";
+import { Headers, HttpServerRequest, HttpServerResponse } from "effect/http";
 import {
   createSourceEventStream,
   execute,
@@ -1097,6 +1097,8 @@ describe("effectRoute with a Web-backed request", () => {
     const response = await Effect.runPromise(Effect.scoped(effectRoute(server)(modified)));
     expect(response.status).toBe(200);
     expect(seen).toEqual({ url: "http://localhost/graphql?tenant=t1", tenant: "t1" });
+    // The body went through too: the operation ran.
+    expect(await HttpServerResponse.toWeb(response).json()).toEqual({ data: { value: "v" } });
   });
 
   it("interrupts the resolver's fiber when the route is interrupted", async () => {
