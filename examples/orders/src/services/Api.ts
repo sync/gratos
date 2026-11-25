@@ -10,6 +10,11 @@ export interface OrderRow {
   readonly total: number;
   readonly status: string;
   readonly customer_id: string;
+  /**
+   * Goes up by one on every change to the order. The change published on the Bus carries it, so
+   * a reader can tell whether an event is newer than a row it read.
+   */
+  readonly revision: number;
 }
 
 export interface UserRow {

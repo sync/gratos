@@ -427,7 +427,13 @@ const post = (query: string, accept = "application/graphql-response+json") =>
 const o3Event = (status: string) => ({ data: { orderChanged: { id: "o-3", status } } });
 
 /** A change the backend makes on its own: no mutation of the app refunds an order. */
-const REFUNDED: OrderRow = { id: "o-3", total: 7.25, status: "refunded", customer_id: "u-1" };
+const REFUNDED: OrderRow = {
+  id: "o-3",
+  total: 7.25,
+  status: "refunded",
+  customer_id: "u-1",
+  revision: 3,
+};
 
 describe("the orders app over HTTP, SSE subscriptions", () => {
   it("streams the order, then each change to it, as SSE events", async () => {

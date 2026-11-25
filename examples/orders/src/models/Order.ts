@@ -86,11 +86,14 @@ export function orderChanged(ctx: Ctx, id: ID): Stream.Stream<Order, AppError, S
     // return(), and the Stream's scope closes its bus subscription.
     stream: Effect.gen(function* () {
       const bus = yield* Bus;
-      // Subscribed before the read, so no change made in between is lost.
+      // Subscribed before the read, so no change made in between is lost. A change made after the
+      // subscribe and before the read is in both: drop every event the read already shows (its
+      // revision is not newer), so each change is streamed once.
       const changes = yield* bus.subscribe(`orders.${id}`);
       const api = yield* Api;
       const now = yield* api.order_get({ id });
-      return Stream.concat(Stream.succeed(now), changes).pipe(Stream.map((row) => new Order(row)));
+      const newer = Stream.filter(changes, (row) => row.revision > now.revision);
+      return Stream.concat(Stream.succeed(now), newer).pipe(Stream.map((row) => new Order(row)));
     }),
   });
 }

@@ -49,8 +49,17 @@ export interface Run {
   readonly microsPerEvent: number;
 }
 
-/** A warm-up event (some are published before the subscription listens, and are dropped). */
-const WARM_UP: OrderRow = { id: "o-1", total: 42.5, status: "warm-up", customer_id: "u-1" };
+/**
+ * A warm-up event (some are published before the subscription listens, and are dropped). Its
+ * revision is newer than the seed row's, so the app's source streams it.
+ */
+const WARM_UP: OrderRow = {
+  id: "o-1",
+  total: 42.5,
+  status: "warm-up",
+  customer_id: "u-1",
+  revision: 2,
+};
 /** A measured event: only these are counted. */
 const MEASURED: OrderRow = { ...WARM_UP, status: "measured" };
 const WARM_UP_MARKER = '"status":"warm-up"';

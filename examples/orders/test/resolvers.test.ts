@@ -7,6 +7,7 @@ import { Effect, Exit, Fiber, Stream } from "effect";
 import { anonymousContext, contextFor } from "../src/models/context.ts";
 import { cancelOrder, order, orderChanged, orders } from "../src/models/Order.ts";
 import { user } from "../src/models/User.ts";
+import { Api } from "../src/services/Api.ts";
 import type { OrderRow } from "../src/services/Api.ts";
 import { Bus } from "../src/services/Bus.ts";
 import { Forbidden, NotFound } from "../src/services/errors.ts";
@@ -15,8 +16,17 @@ import { FakeApi } from "../src/services/FakeApi.ts";
 const guestCtx = () => anonymousContext();
 const userCtx = () => contextFor({ userId: "u-1", scopes: ["USER"] });
 
-/** An event published straight on the bus (no Api call makes it): a status no cancel produces. */
-const SHIPPED: OrderRow = { id: "o-1", total: 42.5, status: "shipped", customer_id: "u-1" };
+/**
+ * An event published straight on the bus (no Api call makes it): a status no cancel produces, at
+ * a revision newer than any a test's cancel makes.
+ */
+const SHIPPED: OrderRow = {
+  id: "o-1",
+  total: 42.5,
+  status: "shipped",
+  customer_id: "u-1",
+  revision: 3,
+};
 
 describe("resolvers, with no server", () => {
   it.effect("a guest cannot cancel an order", () =>
@@ -33,7 +43,7 @@ describe("resolvers, with no server", () => {
 
   it.effect("orders maps each row", () =>
     Effect.gen(function* () {
-      const rows = [{ id: "o-1", total: 5, status: "open", customer_id: "u-1" }];
+      const rows = [{ id: "o-1", total: 5, status: "open", customer_id: "u-1", revision: 1 }];
       const result = yield* orders(userCtx(), "u-1").pipe(Effect.provide(FakeApi.withOrders(rows)));
 
       expect(result.map((o) => o.id)).toEqual(["o-1"]);
@@ -90,6 +100,45 @@ describe("resolvers, with no server", () => {
         "o-1:cancelled",
         "o-1:shipped",
       ]);
+    }).pipe(Effect.provide(FakeApi.layer)),
+  );
+
+  // The snapshot and the bus subscription share no boundary: a change made while the stream
+  // sets up reaches it once, either in the snapshot or as an event, never both and never neither.
+  it.effect.each([
+    ["after the subscribe, before the read: in the snapshot only", "before", ["cancelled"]],
+    ["after the read: as an event", "after", ["open", "cancelled"]],
+  ] as const)("a change during orderChanged's setup is streamed once, %s", ([, when, expected]) =>
+    Effect.gen(function* () {
+      const api = yield* Api;
+      let changed = false;
+      /** The Api, with o-1 cancelled during the stream's own read of it, `when` that read. */
+      const racing = Api.of({
+        ...api,
+        order_get: (input) => {
+          if (changed) {
+            return api.order_get(input);
+          }
+          changed = true;
+          const cancel = Effect.orDie(api.order_cancel(input));
+          return when === "before"
+            ? Effect.andThen(cancel, () => api.order_get(input))
+            : Effect.tap(api.order_get(input), () => cancel);
+        },
+      });
+      const changes = yield* orderChanged(userCtx(), "o-1").pipe(
+        Stream.take(expected.length + 1),
+        Stream.runCollect,
+        Effect.provideService(Api, racing),
+        Effect.forkChild({ startImmediately: true }),
+      );
+      // The next change: the stream's last event, so a duplicate or a gap shows before it.
+      const bus = yield* Bus;
+      yield* bus.publish("orders.o-1", SHIPPED);
+
+      const streamed = yield* Fiber.join(changes);
+      expect(changed).toBe(true);
+      expect(streamed.map((o) => o.status)).toEqual([...expected, "shipped"]);
     }).pipe(Effect.provide(FakeApi.layer)),
   );
 

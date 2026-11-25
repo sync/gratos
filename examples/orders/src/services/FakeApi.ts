@@ -8,10 +8,10 @@ import { Bus } from "./Bus.ts";
 import { Forbidden, NotFound } from "./errors.ts";
 
 const SEED_ORDERS: ReadonlyArray<OrderRow> = [
-  { id: "o-1", total: 42.5, status: "open", customer_id: "u-1" },
-  { id: "o-2", total: 18, status: "shipped", customer_id: "u-1" },
-  { id: "o-3", total: 7.25, status: "open", customer_id: "u-1" },
-  { id: "o-4", total: 99, status: "open", customer_id: "u-2" },
+  { id: "o-1", total: 42.5, status: "open", customer_id: "u-1", revision: 1 },
+  { id: "o-2", total: 18, status: "shipped", customer_id: "u-1", revision: 1 },
+  { id: "o-3", total: 7.25, status: "open", customer_id: "u-1", revision: 1 },
+  { id: "o-4", total: 99, status: "open", customer_id: "u-2", revision: 1 },
 ];
 
 const SEED_USERS: ReadonlyArray<UserRow> = [
@@ -52,7 +52,11 @@ const apiLayer = (seed: ReadonlyArray<OrderRow>) =>
             if (current.status !== "open") {
               return yield* new Forbidden();
             }
-            const row: OrderRow = { ...current, status: "cancelled" };
+            const row: OrderRow = {
+              ...current,
+              status: "cancelled",
+              revision: current.revision + 1,
+            };
             orders.set(id, row);
             yield* bus.publish(`orders.${id}`, row);
             return row;

@@ -17,7 +17,13 @@ const event = (status: string) =>
   );
 
 /** An order row with `id`. */
-const row = (id: string): OrderRow => ({ id, total: 1, status: "open", customer_id: "u-1" });
+const row = (id: string): OrderRow => ({
+  id,
+  total: 1,
+  status: "open",
+  customer_id: "u-1",
+  revision: 1,
+});
 
 describe("bench:subscriptions", () => {
   it.each([
