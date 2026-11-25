@@ -409,6 +409,18 @@ const formatCodeSpan = (
   return context;
 };
 
+/** A position in a file, 1-based, as the formatter prints it (`file:line:column`). */
+export interface DiagnosticPosition {
+  readonly line: number;
+  readonly column: number;
+}
+
+/** Where `start` is in `file`. */
+export const diagnosticPosition = (file: DiagnosticFile, start: number): DiagnosticPosition => {
+  const { line, character } = lineAndCharacterOf(file, start);
+  return { line: line + 1, column: character + 1 };
+};
+
 export const flattenDiagnosticMessageText = (
   diagnostic: string | DiagnosticMessageChain | undefined,
   newLine: string,

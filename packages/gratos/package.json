@@ -11,7 +11,11 @@
     "#typescript": "./src/ts/index.ts"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./dev": {
+      "types": "./src/devApi.ts",
+      "default": "./src/dev.ts"
+    }
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
