@@ -29,6 +29,12 @@ The server listens on `http://127.0.0.1:4000/graphql` (`PORT` and `HOST` change 
 is a bearer token naming a user of the fake backend (`u-1` or `u-2`); without one you are a
 guest, and every guarded field answers `Forbidden`.
 
+This is demo authentication, not a pattern to copy. The seed user ids are the credentials: anyone
+who knows one is signed in as that user. And the guard checks scopes only, never ownership: any
+signed-in user may read, cancel and watch any user's orders (`orders(userId: "u-2")` works for
+`u-1`). A real app verifies a real token in `Session.read` and checks ownership in the resolver or
+the backend.
+
 ```sh
 curl -s localhost:4000/graphql -H 'content-type: application/json' \
   -H 'authorization: Bearer u-1' \
@@ -115,9 +121,8 @@ failures are mapped by the app's `failure` matcher. `src/graphql.ts` does not ch
 ### 4. Guard
 
 Call the guard once per field. It checks the session's scopes (and feature flags), then runs the
-Effect; a query gets a timeout (60 s by default), a mutation none (it always runs to its end),
-and a subscription only bounds its setup. A refusal is the app's own `Forbidden`, failed as an
-`Exit`: it costs no fiber and no span.
+Effect; a query gets a timeout (60 s by default), a mutation none (it always runs to its end). A
+refusal is the app's own `Forbidden`, failed as an `Exit`: it costs no fiber and no span.
 
 ```ts file=examples/orders/src/models/User.ts
   return ctx.guard({
@@ -125,9 +130,11 @@ and a subscription only bounds its setup. A refusal is the app's own `Forbidden`
     effect: Effect.gen(function* () {
 ```
 
-A subscription uses `ctx.guardStream`, with the setup `Effect` that returns the `Stream` (not a
-`Stream.unwrap` of it), so the timeout never ends an idle subscription (`orderChanged` in
-`src/models/Order.ts`).
+A subscription uses `ctx.guardStream` (`orderChanged` in `src/models/Order.ts`). Its refusal is a
+`Stream.fail` of the same `Forbidden`: the subscription answers with one SSE error event, then
+`event: complete`. Give it the setup `Effect` that returns the `Stream`, not a `Stream.unwrap` of
+it: only a setup Effect gets the timeout (`setupTimeout`, default 60 s), which bounds the setup
+alone and never ends an idle subscription. A `Stream` passed as it is gets no timeout at all.
 
 ### 5. Test
 

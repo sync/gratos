@@ -12,11 +12,18 @@ that file by `examples/orders/test/docs.test.ts`.
 
 ## Return types
 
-| Resolver returns            | GraphQL field type            | Where                         |
-| --------------------------- | ----------------------------- | ----------------------------- |
-| `Effect.Effect<A, E, R>`    | `A` (like `Promise<A>`)       | any field                     |
-| `Stream.Stream<A, E, R>`    | `A`, one event per item       | `@gqlSubscriptionField` only  |
-| `A`, `Promise<A>`, `AsyncIterable<A>` | as in Grats         | as in Grats                   |
+What the compiler accepts in a Grats model:
+
+| Resolver returns                      | GraphQL field type      | Where                                             |
+| ------------------------------------- | ----------------------- | ------------------------------------------------- |
+| `Effect.Effect<A, E, R>`              | `A` (like `Promise<A>`) | any field except a `Subscription` field           |
+| `Stream.Stream<A, E, R>`              | `A`, one event per item | `@gqlSubscriptionField` only                      |
+| `A`, `Promise<A>`, `AsyncIterable<A>` | as in Grats             | as in Grats (`AsyncIterable<A>` on subscriptions) |
+
+A `Subscription` field never returns an `Effect.Effect`, not even `Effect.Effect<AsyncIterable<A>>`
+or `Effect.Effect<Stream.Stream<A>>`: the compiler rejects it and asks for the `Stream.Stream`
+itself. A source that needs an Effect to set up is a Stream built from it (`Stream.unwrap`, or
+`ctx.guardStream`, see below).
 
 ```ts file=examples/orders/src/models/Order.ts
 /** Cancels an open order. @gqlMutationField */
@@ -36,6 +43,11 @@ Rules the compiler enforces:
   error (it would compile to a list and fail at run time).
 - Neither is valid in an input position (an argument or an input field), nor as the return type
   of a `@gqlContext` derived-context function.
+
+The runtime is more lenient than the compiler, for hand-written schemas passed to `effectSchema`:
+a `resolve` may return an Effect, an `Exit`, a Promise or a plain value, and a `subscribe` may
+return a `Stream`, an `AsyncIterable`, or an Effect or Promise of either. In a Grats model, keep to
+the table above.
 
 Every method field gets its own explicit `resolve` in the generated schema (Grats would use the
 default resolver for some), and arguments are passed positionally, in your parameter order:
@@ -149,14 +161,20 @@ the request's context:
 
 - `guard({ scopes, flag, effect })` checks the scopes (all of them, through `authorize`) and the
   feature flag, then runs `effect`. A refusal is `Effect.fail(refuse(…))`, the app's own error:
-  an Exit, so no fiber and no span.
-- The timeout (default 60 s) applies to queries only. A mutation gets no interrupting timeout; a
-  subscription bounds only its setup. A timeout is a defect, `GuardTimeout`, not a typed failure,
-  so resolver types stay `Effect<A, AppError, R>` and the app's exhaustive matcher never sees it;
-  it becomes a 504 (`onTimeout`).
-- `guardStream({ scopes, flag, stream, setupTimeout })` takes the setup Effect that returns the
-  Stream (or a Stream): pass the `Effect.gen(…)` itself, not `Stream.unwrap(Effect.gen(…))`,
-  because a timeout on an unwrapped stream would end idle subscriptions.
+  an Exit, so no fiber and no span. The field answers with that error.
+- The timeout (default 60 s) applies to queries only. A mutation gets no interrupting timeout. A
+  timeout is a defect, `GuardTimeout`, not a typed failure, so resolver types stay
+  `Effect<A, AppError, R>` and the app's exhaustive matcher never sees it; it becomes a 504
+  (`onTimeout`).
+- `guardStream({ scopes, flag, stream, setupTimeout })` guards a subscription source. A refusal
+  is `Stream.fail(refuse(…))`, a Stream, not an Exit: the source starts and fails on its first
+  pull, so the subscription answers with one SSE error event (the mapped `refuse(…)` error),
+  then `event: complete`.
+- `stream` is either the setup Effect that returns the Stream, or a Stream. Only a setup Effect
+  gets a timeout, `setupTimeout` (default: the guard's `timeout`), and it bounds that setup alone,
+  never the stream's lifetime. A Stream passed as it is gets no timeout at all, also when it was
+  built from an Effect: `Stream.unwrap(Effect.gen(…))` is a Stream, so its setup is unbounded.
+  Pass the `Effect.gen(…)` itself to have the setup bounded.
 
 ```ts file=examples/orders/src/models/Order.ts
   return ctx.guardStream({
@@ -182,14 +200,21 @@ report sees unmasked errors. Plugins that only observe or refuse (`effect()`, `s
 
 - **One Request, one `handle()` call.** Every per-request state, the core's and the plugins', is
   keyed by the Request object. Never pass a Request to `handle()` again (on any server) while an
-  earlier call on it is still in flight, streamed body included; parallel calls need distinct
-  Request objects. The core reads a POST's body, so replay a POST from a `request.clone()` taken
-  before the first call. An overlap is not blocked, only warned about.
-- **Plugin hooks that must not throw.** A `wrapExecution` wrapper calls `run` exactly once and
-  must not throw; an executor must not throw after it has called `next()` (report failure through
-  its result or a rejected Promise). Breaking this is handled on a best-effort basis only: the
-  error is logged, the request fails with a 500, and work started in that instant may not be
-  stopped.
+  earlier call on it is still in flight: until its response body has ended, not only until
+  `handle()` has returned. Parallel calls need distinct Request objects. The core reads a POST's
+  body, so replay a POST from a `request.clone()` taken before the first call. An overlap is not
+  blocked, and the core's warning sees it only while the earlier `handle()` call has not returned
+  yet: an overlap with a body still streaming (SSE, `@defer`, `@stream`) breaks the rule with no
+  warning.
+- **Plugin hooks that must not throw.** A `wrapExecution(request, run)` wrapper calls `run`
+  exactly once, synchronously, and returns its result unchanged. It must be reentrant: the core
+  may enter the wrappers again from inside `run` (nested calls, in another async context too);
+  `effect()`'s wrapper runs `run` directly when its request's scope is in effect already. It must
+  not throw,
+  before or after `run`. An executor must not throw after it has called `next()` (report failure
+  through its result or a rejected Promise). Breaking this is handled on a best-effort basis
+  only: the error is logged, the request fails with a 500, and work started in that instant may
+  not be stopped.
 - **Subscriptions run graphql-js's own steps in the core**: `createSourceEventStream`, then
   `executeSubscriptionEvent` per event, with the core holding the one source iterator it reads
   and closes (graphql 17.1's `subscribe()` may read and close different iterators of a plain
