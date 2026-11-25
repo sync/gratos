@@ -61,7 +61,9 @@ export const makeServer = (schema: GraphQLSchema, services: Context.Context<Serv
         }),
         services,
       ),
-    plugins: [apq(), jit(), effect()],
+    // `context`: resolvers find the app's services also when the server is used without a route
+    // (makeServer(...).handle(request) in a test); a route still forks with its own context.
+    plugins: [apq(), jit(), effect({ context: services })],
   });
 
 /**

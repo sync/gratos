@@ -6,6 +6,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { GraphQLObjectType, GraphQLSchema, GraphQLString } from "graphql";
 
+import { getSchema } from "../src/generated/schema.ts";
 import { makeServer } from "../src/graphql.ts";
 import { Bus } from "../src/services/Bus.ts";
 import { Forbidden, isAppError, NotFound } from "../src/services/errors.ts";
@@ -43,6 +44,28 @@ const failing = new GraphQLSchema({
 });
 
 describe("the app's server", () => {
+  it.effect("resolves an order through its services with no route (handle() alone)", () =>
+    Effect.gen(function* () {
+      const services = yield* Layer.build(Layer.mergeAll(FakeApi.layer, Bus.layer));
+      const server = makeServer(getSchema(), services);
+      const response = yield* Effect.promise(() =>
+        server.handle(
+          new Request("http://localhost/graphql", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/graphql-response+json",
+            },
+            body: JSON.stringify({ query: '{ order(id: "o-1") { id } }' }),
+          }),
+        ),
+      );
+      expect(yield* Effect.promise(() => response.json())).toEqual({
+        data: { order: { id: "o-1" } },
+      });
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("maps the app's errors, and masks a foreign value with a matching tag", () =>
     Effect.gen(function* () {
       const services = yield* Layer.build(Layer.mergeAll(FakeApi.layer, Bus.layer));

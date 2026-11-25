@@ -305,7 +305,8 @@ describe("the dev log's fallback", () => {
       child.stdout.on("data", (chunk: Buffer) => {
         stdout += chunk.toString();
       });
-      const [code] = await once(child, "exit");
+      // "close" comes after stdout has ended, so every chunk has arrived.
+      const [code] = await once(child, "close");
       expect(stdout).toBe("Success");
       expect(code).toBe(0);
     } finally {
