@@ -4,14 +4,16 @@
 // - a plain value is returned after one Effect.isEffect check;
 // - an Exit (Effect.succeed, Effect.fail, a guard refusal) is answered at once, with no fiber;
 // - an Effect is forked with runForkWith(the request's fork context, from the execution scope
-//   effect()'s wrapExecution enters; never from the context value); when pollUnsafe already has
-//   its exit (a synchronous Effect), the value is returned with no Promise, else the fiber is
-//   tracked in the request scope until it completes (addObserver) and a Promise is returned.
+//   effect()'s wrapExecution enters, when the resolver's info.operation is the scope's operation;
+//   never from the context value); when pollUnsafe already has its exit (a synchronous Effect),
+//   the value is returned with no Promise, else the fiber is tracked in the request scope until
+//   it completes (addObserver) and a Promise is returned.
 // A thenable (Grats' async adapters for an async derived context) keeps its fast path, but its
 // fulfilled value is classified the same way: an Effect is run, a Stream becomes the
 // single-iterator iterable. A subscription source may also be an Effect (or an Exit) of its
-// Stream or AsyncIterable: it is run through the same runner, then its value is classified. A resolver that returns a tagged-error instance as data counts as an
-// Effect (a Data.TaggedError is yieldable): it fails with itself and goes through the mapper.
+// Stream or AsyncIterable: it is run through the same runner, then its value is classified. A
+// resolver that returns a tagged-error instance as data counts as an Effect (a Data.TaggedError
+// is yieldable): it fails with itself and goes through the mapper.
 //
 // Semantic non-null: Grats emits `extensions.gratos.semanticNonNull` instead of assertNonNull for
 // an Effect-returning resolve, and the wrapper checks the unwrapped value, raising the same error.
@@ -21,7 +23,12 @@ import { Context, Effect, Exit, Predicate, Stream } from "effect";
 import type { Fiber, Tracer } from "effect";
 import { HttpServerError } from "effect/http";
 import { isObjectType } from "graphql";
-import type { GraphQLField, GraphQLFieldResolver, GraphQLSchema } from "graphql";
+import type {
+  GraphQLField,
+  GraphQLFieldResolver,
+  GraphQLResolveInfo,
+  GraphQLSchema,
+} from "graphql";
 
 import { cancelled } from "../core/errors.ts";
 import type { PromiseOrValue } from "../core/types.ts";
@@ -42,6 +49,7 @@ export const internals = {
 
 /** The fork context of a request without an effect() plugin (unit tests, a bare server). */
 const emptyScope: RequestScope = {
+  operation: undefined,
   context: Context.empty(),
   fibers: new Set(),
   interruptOnAbort: false,
@@ -89,12 +97,15 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
     throw fromCause(exit.cause, options);
   };
 
-  const run = (effect: Effect.Effect<unknown, unknown, unknown>): PromiseOrValue<unknown> => {
+  const run = (
+    effect: Effect.Effect<unknown, unknown, unknown>,
+    info: GraphQLResolveInfo,
+  ): PromiseOrValue<unknown> => {
     if (Exit.isExit(effect)) {
       return settleExit(effect);
     }
     // The execution scope (effect()'s wrapExecution): a thenable's continuation inherits it.
-    const scope = currentScope() ?? emptyScope;
+    const scope = currentScope(info) ?? emptyScope;
     if (scope.aborted && scope.interruptOnAbort) {
       // The client has left (a Promise-wrapped resolver settled after the abort): the Effect is
       // never started. track() still interrupts a fiber whose own startup saw the abort.
@@ -134,12 +145,12 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
   };
 
   /** Classifies a resolve's return value. */
-  const resolveValue = (value: unknown): PromiseOrValue<unknown> => {
+  const resolveValue = (value: unknown, info: GraphQLResolveInfo): PromiseOrValue<unknown> => {
     if (Effect.isEffect(value)) {
-      return run(value);
+      return run(value, info);
     }
     if (isThenable(value)) {
-      return Promise.resolve(value).then((fulfilled) => resolveValue(fulfilled));
+      return Promise.resolve(value).then((fulfilled) => resolveValue(fulfilled, info));
     }
     if (nonNull && (value === null || value === undefined)) {
       throw new Error(NON_NULL_MESSAGE);
@@ -152,16 +163,18 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
    * Effect (an Exit included) is run as a field's is, and what it succeeds with is classified the
    * same way (a Stream, or an AsyncIterable as it is); a thenable's value too.
    */
-  const sourceValue = (value: unknown): PromiseOrValue<unknown> => {
+  const sourceValue = (value: unknown, info: GraphQLResolveInfo): PromiseOrValue<unknown> => {
     if (Stream.isStream(value)) {
-      return streamSource(value, currentScope() ?? emptyScope, options);
+      return streamSource(value, currentScope(info) ?? emptyScope, options);
     }
     if (Effect.isEffect(value)) {
-      const ran = run(value);
-      return Predicate.isPromise(ran) ? ran.then(sourceValue) : sourceValue(ran);
+      const ran = run(value, info);
+      return Predicate.isPromise(ran)
+        ? ran.then((source) => sourceValue(source, info))
+        : sourceValue(ran, info);
     }
     if (isThenable(value)) {
-      return Promise.resolve(value).then((fulfilled) => sourceValue(fulfilled));
+      return Promise.resolve(value).then((fulfilled) => sourceValue(fulfilled, info));
     }
     return value;
   };
@@ -200,7 +213,7 @@ export const wrapSubscribe = <TSource, TContext, TArgs, E>(
   spanName = "subscribe",
 ): GraphQLFieldResolver<TSource, TContext, TArgs> => {
   const { sourceValue } = makeRunner(options, spanName, false);
-  return (source, args, ctx, info) => sourceValue(subscribe(source, args, ctx, info));
+  return (source, args, ctx, info) => sourceValue(subscribe(source, args, ctx, info), info);
 };
 
 /**
@@ -238,12 +251,13 @@ export const effectSchema = <E>(
       const { resolve, subscribe } = field;
       if (resolve !== undefined && !wrappedFunctions.has(resolve)) {
         field.resolve = wrapped<GraphQLFieldResolver<unknown, unknown>>((source, args, ctx, info) =>
-          runner.resolveValue(resolve(source, args, ctx, info)),
+          runner.resolveValue(resolve(source, args, ctx, info), info),
         );
       }
       if (subscribe !== undefined && !wrappedFunctions.has(subscribe)) {
         field.subscribe = wrapped<GraphQLFieldResolver<unknown, unknown>>(
-          (source, args, ctx, info) => sources.sourceValue(subscribe(source, args, ctx, info)),
+          (source, args, ctx, info) =>
+            sources.sourceValue(subscribe(source, args, ctx, info), info),
         );
       }
     }

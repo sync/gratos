@@ -4,6 +4,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { Context, Fiber } from "effect";
+import type { GraphQLResolveInfo, OperationDefinitionNode } from "graphql";
 
 /** What effectRoute records for a request it serves. */
 export interface RouteState {
@@ -48,6 +49,12 @@ export const closeRoute = (state: RouteState): void => {
  * running, which a client abort interrupts (except a mutation's).
  */
 export interface RequestScope {
+  /**
+   * The operation the request executes (the node in its document, which every resolver's
+   * `info.operation` is). A resolver of another execution that inherited the store (a nested
+   * server's, run from a timer the request's resolver set) does not belong to this scope.
+   */
+  readonly operation: OperationDefinitionNode | undefined;
   readonly context: Context.Context<never>;
   readonly fibers: Set<Fiber.Fiber<unknown, unknown>>;
   /** Interrupt fibers on a client abort (false for a mutation: its fibers always finish). */
@@ -87,8 +94,16 @@ export const enterScope = <T>(request: Request, run: () => T): T => {
   return scope === undefined ? run() : executionScope.run(scope, run);
 };
 
-/** The request scope of the execution a resolver is called in, if any. */
-export const currentScope = (): RequestScope | undefined => executionScope.getStore();
+/**
+ * The request scope of the execution a resolver is called in, if any: the store, when the
+ * resolver belongs to its execution (see RequestScope.operation). An AsyncLocalStorage store
+ * follows every async continuation, so another execution started from one (a nested bare server,
+ * a direct `execute()`) inherits it; such a resolver has no request scope.
+ */
+export const currentScope = (info: GraphQLResolveInfo): RequestScope | undefined => {
+  const scope = executionScope.getStore();
+  return scope?.operation === info.operation ? scope : undefined;
+};
 
 /**
  * The request's fork context as providing what an app's resolvers require. graphql-js hands the

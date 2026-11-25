@@ -6,7 +6,12 @@ import { EventEmitter } from "node:events";
 import { Cause, Context, Data, Effect, Match, Predicate, Stream } from "effect";
 import { HttpServerRequest } from "effect/http";
 import { createSourceEventStream, execute, parse, validateSubscriptionArgs } from "graphql";
-import type { GraphQLError, GraphQLFieldResolver, GraphQLSchema } from "graphql";
+import type {
+  GraphQLError,
+  GraphQLFieldResolver,
+  GraphQLResolveInfo,
+  GraphQLSchema,
+} from "graphql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -713,6 +718,49 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       },
     );
 
+    it("gives a nested bare server's resolvers no request scope of the outer request", async () => {
+      const guard = makeGuard<AppError>({
+        authorize: () => true,
+        refuse: () => new Forbidden({ scopes: [] }),
+        timeout: "10 millis",
+      });
+      // A bare server (no effect() plugin), on its own schema, run from inside the outer request.
+      const inner = createServer({
+        schema: effectSchema(
+          makeSchema("type Query { guarded: String }", {
+            Query: {
+              guarded: () =>
+                guard.guard({ effect: Effect.succeed("late").pipe(Effect.delay("40 millis")) }),
+            },
+          }),
+          { failure, isFailure: isAppError },
+        ),
+      });
+      let nested: Promise<unknown> | undefined;
+      const built = build({
+        Mutation: {
+          // A timer set in the mutation's resolver inherits its AsyncLocalStorage store.
+          write: () =>
+            Effect.promise(
+              () =>
+                new Promise<string>((resolve) => {
+                  setTimeout(() => {
+                    nested = gql(inner, "query Inner { guarded }").then((sent) => sent.body);
+                    resolve("written");
+                  }, 0);
+                }),
+            ),
+        },
+      });
+      const sent = await run(built, "mutation W { write }");
+      expect(sent.body).toEqual({ data: { write: "written" } });
+      // The query guard applies: the inner request is a query, not the outer mutation.
+      expect(await nested).toMatchObject({
+        data: { guarded: null },
+        errors: [{ message: "Request timeout", extensions: { code: "REQUEST_TIMEOUT" } }],
+      });
+    });
+
     it("finds the scope with no context factory", async () => {
       const tracer = recordingTracer();
       const schema = effectSchema(
@@ -745,9 +793,14 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
           events: () => Stream.make({ value: "a" }, { value: "b" }, { value: "c" }),
         },
         Item: {
-          value: (source: { value: string }) =>
+          value: (
+            source: { value: string },
+            _args: unknown,
+            _ctx: unknown,
+            info: GraphQLResolveInfo,
+          ) =>
             Effect.sync(() => {
-              maxFibers = Math.max(maxFibers, currentScope()?.fibers.size ?? 0);
+              maxFibers = Math.max(maxFibers, currentScope(info)?.fibers.size ?? 0);
               return source.value;
             }).pipe(Effect.delay("1 millis")),
         },

@@ -283,6 +283,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       span.attribute("graphql.mutation", true);
     }
     const scope: RequestScope = {
+      operation,
       context: Context.add(
         Context.add(state.context, Tracer.ParentSpan, span),
         OperationType,
