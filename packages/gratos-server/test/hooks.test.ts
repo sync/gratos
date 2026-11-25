@@ -1213,6 +1213,17 @@ describe("a Request passed to handle() again", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
+  it("replays a POST from a clone taken before the first call; the used POST cannot be", async () => {
+    const server = createServer({ schema: basicSchema(), logger: silent });
+    const request = post({ query: "{ count }" });
+    const replay = request.clone();
+    expect((await send(server, request)).body).toEqual({ data: { count: 1 } });
+    // handle() read the body: the used POST cannot be cloned, and passed again it is a 400.
+    expect(() => request.clone()).toThrow(TypeError);
+    expect((await server.handle(request)).status).toBe(400);
+    expect((await send(server, replay)).body).toEqual({ data: { count: 1 } });
+  });
+
   it("does not warn when the Request is reused after the earlier call returned", async () => {
     const warn = vi.fn();
     const server = createServer({ schema: basicSchema(), logger: { warn, error: () => {} } });

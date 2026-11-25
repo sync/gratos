@@ -1142,7 +1142,7 @@ const serve = <Ctx>(
     const start = performance.now();
     if (!beginHandling(request)) {
       logger.warn(
-        "gratos-server: a Request was passed to handle() while an earlier call on it is in flight; its per-request state is shared. Pass request.clone() instead.",
+        "gratos-server: a Request was passed to handle() while an earlier call on it is in flight; its per-request state is shared. Give each call its own Request (a request.clone() taken before the first call).",
       );
     }
     let response: Response;
