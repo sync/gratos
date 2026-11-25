@@ -96,7 +96,9 @@ const responseStream = (
    */
   const closeSource = async (thrown: { readonly error: unknown } | undefined): Promise<void> => {
     try {
-      if (thrown !== undefined && iterator.throw !== undefined) {
+      if (thrown !== undefined) {
+        // The method is read inside `enter` too (an accessor may need the request's state); a
+        // source with no `throw()` gets `return()`.
         const after = await enter(() => iterator.throw?.(thrown.error));
         if (after?.done !== true) {
           await enter(() => iterator.return?.());

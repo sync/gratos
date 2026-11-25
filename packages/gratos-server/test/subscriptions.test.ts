@@ -1293,6 +1293,46 @@ describe("the response stream of a subscription", () => {
     expect(seen).toEqual(["throw request", "return request"]);
   });
 
+  it("reads the source's throw() inside enter too", async () => {
+    const storage = new AsyncLocalStorage<string>();
+    const seen: Array<string> = [];
+    const schema = makeSchema(
+      `
+        type Query { hello: String }
+        type Subscription { entered: Int }
+      `,
+      { Subscription: { entered: (payload: number) => payload } },
+    );
+    Object.assign(schema.getSubscriptionType()?.getFields()["entered"] ?? {}, {
+      subscribe: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.resolve({ done: false, value: 1 }),
+          // An accessor that needs the request's store: it has no throw() to offer outside it.
+          get throw() {
+            seen.push(`read throw ${storage.getStore() ?? "outside"}`);
+            if (storage.getStore() === undefined) {
+              throw new Error("outside the request");
+            }
+            return undefined;
+          },
+          return: () => {
+            seen.push(`return ${storage.getStore() ?? "outside"}`);
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        }),
+      }),
+    });
+    const result = await subscribeOnce(
+      { schema, document: parse("subscription { entered }") },
+      (run) => storage.run("request", run),
+    );
+    if (!(Symbol.asyncIterator in result)) {
+      throw new Error("no stream");
+    }
+    await expect(result.throw(new Error("stop"))).rejects.toThrow("stop");
+    expect(seen).toEqual(["read throw request", "return request"]);
+  });
+
   it("return() before the first pull closes the source, once", async () => {
     const { stream, probe } = await streamOf(3);
     await stream.return();
