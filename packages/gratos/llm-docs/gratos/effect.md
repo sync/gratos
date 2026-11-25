@@ -38,16 +38,18 @@ Rules the compiler enforces:
   `import { Effect as Fx }` with `Fx.Effect` is not detected (a documented limitation).
 - The Effect is the outermost wrapper of the return type. `Effect.Effect<Promise<A>>`,
   `Promise<Effect.Effect<A>>`, `Array<Effect.Effect<A>>`, `Effect.Effect<A>[]` and an Effect
-  around a Stream are errors: the runtime wrapper only handles an Effect returned directly.
+  around a Stream are errors. This is the compiler's rule, so that the field's type and its
+  markers come from one outer Effect: the runtime is more lenient (it also runs an Effect that a
+  Promise resolves to, see below), but it never runs an Effect inside a list.
 - A `Stream.Stream` is valid only on a subscription field; on a query or object field it is an
   error (it would compile to a list and fail at run time).
 - Neither is valid in an input position (an argument or an input field), nor as the return type
   of a `@gqlContext` derived-context function.
 
 The runtime is more lenient than the compiler, for hand-written schemas passed to `effectSchema`:
-a `resolve` may return an Effect, an `Exit`, a Promise or a plain value, and a `subscribe` may
-return a `Stream`, an `AsyncIterable`, or an Effect or Promise of either. In a Grats model, keep to
-the table above.
+a `resolve` may return an Effect, an `Exit`, a plain value or a Promise of any of them (the
+Effect it resolves to is run), and a `subscribe` may return a `Stream`, an `AsyncIterable`, or
+an Effect or Promise of either. In a Grats model, keep to the table above.
 
 Every method field gets its own explicit `resolve` in the generated schema (Grats would use the
 default resolver for some), and arguments are passed positionally, in your parameter order:
@@ -210,11 +212,13 @@ report sees unmasked errors. Plugins that only observe or refuse (`effect()`, `s
   exactly once, synchronously, and returns its result unchanged. It must be reentrant: the core
   may enter the wrappers again from inside `run` (nested calls, in another async context too);
   `effect()`'s wrapper runs `run` directly when its request's scope is in effect already. It must
-  not throw,
-  before or after `run`. An executor must not throw after it has called `next()` (report failure
-  through its result or a rejected Promise). Breaking this is handled on a best-effort basis
-  only: the error is logged, the request fails with a 500, and work started in that instant may
-  not be stopped.
+  not throw, before or after `run`. An executor must not throw after it has called `next()`
+  (report failure through its result or a rejected Promise). Breaking this is handled on a
+  best-effort basis only, and work started in that instant may not be stopped. What the client
+  gets depends on when it throws: around the executor call, before the response has started, the
+  error is logged and the request fails with a 500. A streamed response (SSE, `@defer`,
+  `@stream`) has sent its status already: a throw on one of its later pulls ends the stream with
+  an error as its last payload, and one while it closes or aborts is only logged.
 - **Subscriptions run graphql-js's own steps in the core**: `createSourceEventStream`, then
   `executeSubscriptionEvent` per event, with the core holding the one source iterator it reads
   and closes (graphql 17.1's `subscribe()` may read and close different iterators of a plain
