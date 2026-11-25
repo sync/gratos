@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { NodeServices } from "@effect/platform-node";
-import { assert, describe, expect, it } from "@effect/vitest";
+import { assert, describe, expect, it, vi } from "@effect/vitest";
 import { Effect, Result } from "effect";
 
 import { devSchema, GRATS_ERROR, loadSchema } from "../src/dev.ts";
@@ -158,6 +158,46 @@ describe("devSchema", () => {
       expect(error.message).toBe("Gratos failed unexpectedly while building the schema.");
       expect(error.diagnostics[0]?.message).toContain("boom");
     }).pipe(Effect.provide(NodeServices.layer));
+  });
+});
+
+const throwing = (line: string) => {
+  throw new Error(`the logger is broken (${line.slice(0, 20)})`);
+};
+
+describe("devSchema's error report", () => {
+  it.effect("keeps the original GratsDevError when the logger throws", () =>
+    Effect.gen(function* () {
+      const missing = join(import.meta.dirname, "missing", "tsconfig.json");
+      const error = yield* Effect.flip(
+        devSchema({ tsconfig: missing, load: async () => 1, log: throwing }),
+      );
+      expect(error._tag).toBe("GratsDevError");
+      expect(error.message).toContain("Could not read");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it("resolves loadSchema with the original GratsDevError when the logger throws", async () => {
+    const project = smokeCopy("dev-logger");
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      const bad = await loadSchema({
+        tsconfig: project.path("tsconfig.json"),
+        load: () => Promise.reject(new SyntaxError("Unexpected token")),
+        log: throwing,
+      });
+      assert(Result.isFailure(bad));
+      expect(bad.failure.message).toBe(
+        "Gratos could not load the app: SyntaxError: Unexpected token",
+      );
+      // The terminal still gets the error.
+      expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join("")).toContain(
+        `${bad.failure.formatted}\nGratos: the dev log failed: Error: the logger is broken`,
+      );
+    } finally {
+      stderr.mockRestore();
+      project.remove();
+    }
   });
 });
 

@@ -111,7 +111,19 @@ export const devSchema: typeof declaredDevSchema = (options) => {
         log(
           `Gratos: every request answers 500 ${GRATS_ERROR} until the next good save (${elapsed()}).`,
         );
-      }),
+      }).pipe(
+        // Outside catchDefect above: a logger that throws must not replace the error it reports.
+        // The terminal still gets the error, on standard error.
+        Effect.catchDefect((defect) =>
+          Effect.sync(
+            () =>
+              void process.stderr.write(
+                `${error.formatted}\nGratos: the dev log failed: ${String(defect)}\n`,
+              ),
+          ),
+        ),
+        Effect.catchDefect(() => Effect.void),
+      ),
     ),
   );
 };
