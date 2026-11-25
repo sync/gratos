@@ -184,7 +184,7 @@ export const countEvents = (body: ReadableStream<Uint8Array>): EventCounter => {
   return { counts, check, waitFor, close };
 };
 
-const subscription = () =>
+const subscription = (signal: AbortSignal) =>
   new Request("http://localhost/graphql", {
     method: "POST",
     headers: {
@@ -193,7 +193,44 @@ const subscription = () =>
       authorization: "Bearer u-1",
     },
     body: JSON.stringify({ query: 'subscription { orderChanged(id: "o-1") { id status } }' }),
+    signal,
   });
+
+/**
+ * Sends the subscription through `handle` and resolves with its response. The response comes
+ * with the first event (the app's source sends the order as it is first; the plain one, the
+ * first warm-up event), so a warm-up event is published at each turn of the event loop until it
+ * answers. When `deadline` passes (or `publish` throws) first, the client leaves: the request is
+ * aborted, and a response that still comes later has its body cancelled, so no subscription
+ * outlives the run.
+ */
+export const openSubscription = async (
+  handle: (request: Request) => Promise<Response>,
+  publish: () => void,
+  deadline: number,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const pending = handle(subscription(controller.signal));
+  try {
+    for (;;) {
+      if (performance.now() > deadline) {
+        throw new Error("timed out waiting for the subscription to answer");
+      }
+      publish();
+      const response = await Promise.race([pending, immediate()]);
+      if (response !== undefined) {
+        return response;
+      }
+    }
+  } catch (error) {
+    controller.abort(error);
+    void pending.then(
+      (late) => late.body?.cancel().catch(() => undefined),
+      () => undefined,
+    );
+    throw error;
+  }
+};
 
 /**
  * One run: `events` events through a fresh server and subscription, within `timeoutMs` (default
@@ -230,19 +267,15 @@ export const measure = async (
       };
     }
     const server = makeServer(schema, services, { report: () => {} });
-    const pending = server.handle(subscription());
-    // The response comes with the first event (the app's source sends the order as it is first;
-    // the plain one, the first warm-up event). The bus drops what it publishes before the Stream
-    // has subscribed: warm up until a warm-up event has come through the body, then publish the
-    // measured ones.
-    let response: Response | undefined;
-    while (response === undefined) {
-      if (performance.now() > deadline) {
-        throw new Error("timed out waiting for the subscription to answer");
-      }
-      publish(WARM_UP);
-      response = await Promise.race([pending, immediate()]);
-    }
+    const response = await openSubscription(
+      (request) => server.handle(request),
+      () => {
+        publish(WARM_UP);
+      },
+      deadline,
+    );
+    // The bus drops what it publishes before the Stream has subscribed: warm up until a warm-up
+    // event has come through the body, then publish the measured ones.
     if (response.body === null) {
       throw new Error("the subscription has no body");
     }

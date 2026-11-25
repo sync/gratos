@@ -3,9 +3,9 @@
 // shared CI runner is too noisy for them); `pnpm bench:subscriptions` reports them. Its waits are
 // checked here too: a body that fails or ends, or an event that never comes, stops the run with an
 // error instead of a hang, and the body is cancelled on every path.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { countEvents, measure, plainQueue } from "../bench/subscriptions.ts";
+import { countEvents, measure, openSubscription, plainQueue } from "../bench/subscriptions.ts";
 import type { OrderRow } from "../src/services/Api.ts";
 
 const encoder = new TextEncoder();
@@ -93,6 +93,48 @@ describe("bench:subscriptions", () => {
     });
     await counter.close();
     expect(cancelled).toBe(true);
+  });
+
+  it("aborts the request when the subscription does not answer in time, and cancels a late body", async () => {
+    let sent: Request | undefined;
+    const late = Promise.withResolvers<Response>();
+    let published = 0;
+
+    const error = await openSubscription(
+      (request) => {
+        sent = request;
+        return late.promise;
+      },
+      () => {
+        published += 1;
+      },
+      performance.now() + 50,
+    ).then(
+      () => undefined,
+      (error_: unknown) => error_,
+    );
+
+    expect(error).toMatchObject({ message: "timed out waiting for the subscription to answer" });
+    expect(published).toBeGreaterThan(0);
+    // The client left: the server sees the request aborted.
+    expect(sent?.signal.aborted).toBe(true);
+    // A response that comes anyway has its body cancelled: none of its events is read.
+    let cancelled = false;
+    late.resolve(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start: (controller) => {
+            controller.enqueue(event("warm-up"));
+          },
+          cancel: () => {
+            cancelled = true;
+          },
+        }),
+      ),
+    );
+    await vi.waitFor(() => {
+      expect(cancelled).toBe(true);
+    });
   });
 
   it("the plain source is a FIFO, also across a drained queue", async () => {
