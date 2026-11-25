@@ -833,6 +833,126 @@ describe("wrapExecution of a @stream source's cleanup", () => {
   });
 });
 
+/**
+ * A @stream server (see streamServer) whose wrapper throws once armed: by `arm()`, or, with
+ * `armOnExecute`, once the executor has returned (only the core's later entries fail). Its
+ * logger records errors.
+ */
+const throwingWrapperServer = (armOnExecute: boolean, withSignal = true) => {
+  let armed = false;
+  let pulls = 0;
+  const returned: Array<string> = [];
+  const error = vi.fn();
+  const server = createServer({
+    schema: makeSchema("type Query { items: [Int] }", {
+      Query: {
+        items: () => {
+          const release = Promise.withResolvers<IteratorResult<number>>();
+          return {
+            [Symbol.asyncIterator]: () => ({
+              next: () => {
+                pulls += 1;
+                return pulls === 1 ? Promise.resolve({ done: false, value: 1 }) : release.promise;
+              },
+              return: () => {
+                returned.push("return");
+                release.resolve({ done: true, value: undefined });
+                return Promise.resolve({ done: true, value: undefined });
+              },
+            }),
+          };
+        },
+      },
+    }),
+    plugins: [
+      {
+        // Without the signal only the core's own close of the results reaches the source.
+        onExecute: (_input, args) => (next) => {
+          const result = withSignal
+            ? next()
+            : legacyExecuteIncrementally({ ...args, abortSignal: undefined });
+          armed ||= armOnExecute;
+          return result;
+        },
+      },
+      incremental(),
+      {
+        wrapExecution: (_request, run) => {
+          if (armed) {
+            throw new Error("wrapper failed");
+          }
+          return run();
+        },
+      },
+    ],
+    logger: { warn: () => {}, error },
+  });
+  const arm = (): void => {
+    armed = true;
+  };
+  return { server, returned, error, arm, pulls: () => pulls };
+};
+
+describe("a wrapper that throws on the core's own entries", () => {
+  it("still aborts the core signal and closes an unsent result (a 406)", async () => {
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "application/json" },
+    );
+    const { server, returned, error } = throwingWrapperServer(true);
+    const response = await server.handle(request);
+    expect(response.status).toBe(406);
+    expect(signalOf(request)?.aborted).toBe(true);
+    while (returned.length === 0) {
+      await flush();
+    }
+    expect(returned).toEqual(["return"]);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on an abort.",
+      expect.any(Error),
+    );
+  });
+
+  it("still closes an unsent result directly when the executor ignores the signal", async () => {
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "application/json" },
+    );
+    const { server, returned, error } = throwingWrapperServer(true, false);
+    const response = await server.handle(request);
+    expect(response.status).toBe(406);
+    while (returned.length === 0) {
+      await flush();
+    }
+    expect(returned).toEqual(["return"]);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on a close.",
+      expect.any(Error),
+    );
+  });
+
+  it("still aborts the core signal and releases the source when a stream's body is cancelled", async () => {
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed" },
+    );
+    const { server, returned, error, arm, pulls } = throwingWrapperServer(false);
+    const { reader, pending } = await readToIdlePull(await server.handle(request), pulls);
+    arm();
+    await expect(reader.cancel()).resolves.toBeUndefined();
+    await pending;
+    expect(signalOf(request)?.aborted).toBe(true);
+    while (returned.length === 0) {
+      await flush();
+    }
+    expect(returned).toEqual(["return"]);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on an abort.",
+      expect.any(Error),
+    );
+  });
+});
+
 describe("aborts of an unread JSON body", () => {
   it("runs the core signal's listeners inside the wrappers when the body is cancelled", async () => {
     const storage = new AsyncLocalStorage<Request>();

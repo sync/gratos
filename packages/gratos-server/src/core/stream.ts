@@ -34,6 +34,41 @@ export interface StreamPayload {
 /** Runs a synchronous entry into execution inside the request's execution wrappers. */
 export type Enter = <T>(run: () => T) => T;
 
+/**
+ * Runs one of the core's own entries that must happen whatever the wrappers do (an abort of the
+ * core signal, the close of a source) inside the request's execution wrappers. A wrapper that
+ * throws is logged with `message`, and `run` runs directly when it had not run yet (its result is
+ * kept when it had). A throw from `run` itself propagates.
+ */
+export const enterOrRun = <T>(enter: Enter, logger: Logger, message: string, run: () => T): T => {
+  let ran: { readonly value: T } | undefined;
+  let threw: { readonly error: unknown } | undefined;
+  try {
+    return enter(() => {
+      try {
+        const value = run();
+        ran = { value };
+        return value;
+      } catch (error) {
+        threw = { error };
+        throw error;
+      }
+    });
+  } catch (error) {
+    if (threw !== undefined && threw.error === error) {
+      throw error;
+    }
+    logger.error(message, error);
+    if (ran !== undefined) {
+      return ran.value;
+    }
+    if (threw !== undefined) {
+      throw threw.error;
+    }
+    return run();
+  }
+};
+
 /** The payloads still to come, pulled one at a time. */
 export interface PayloadSource {
   readonly next: () => Promise<IteratorResult<StreamPayload, void>>;
@@ -138,9 +173,12 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
   let stoppingSource = false;
   let closing: Promise<void> | undefined;
 
-  /** Aborts the core signal inside the request's execution wrappers. */
+  /**
+   * Aborts the core signal inside the request's execution wrappers. A throwing wrapper is logged
+   * and the signal aborted anyway, so a stop still reaches the sources and releases them.
+   */
   const abortCore = (): void => {
-    enter(() => {
+    enterOrRun(enter, logger, "gratos-server: a wrapExecution wrapper failed on an abort.", () => {
       controller.abort();
     });
   };

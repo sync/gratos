@@ -42,7 +42,7 @@ import type { Accepted, MediaType } from "./http.ts";
 import { hasIncrementalDirectives, NoIncrementalMutationsRule } from "./incremental.ts";
 import { bindOperation, endStream, registerMutation, registerRequest } from "./requestState.ts";
 import type { MutationTracker } from "./requestState.ts";
-import { multipartResponse, sseResponse } from "./stream.ts";
+import { enterOrRun, multipartResponse, sseResponse } from "./stream.ts";
 import { subscribeOnce } from "./subscribe.ts";
 import type { Enter, PayloadSource, StreamOptions, StreamPayload } from "./stream.ts";
 import type {
@@ -154,6 +154,7 @@ const subscriptionSource = (
 const incrementalSource = (
   results: IncrementalResults["subsequentResults"],
   enter: Enter,
+  logger: Logger,
 ): PayloadSource => ({
   next: async () => {
     const pulled = await enter(() => results.next());
@@ -161,8 +162,14 @@ const incrementalSource = (
       ? pulled
       : { done: false, value: { result: pulled.value, hasNext: pulled.value.hasNext } };
   },
+  // A throwing wrapper still closes the results (directly).
   return: async () => {
-    await enter(() => results.return());
+    await enterOrRun(
+      enter,
+      logger,
+      "gratos-server: a wrapExecution wrapper failed on a close.",
+      () => results.return(),
+    );
   },
 });
 
@@ -194,18 +201,18 @@ const linkedController = (
     incoming.addEventListener(
       "abort",
       () => {
-        if (enter === undefined) {
+        if (enter === undefined || logger === undefined) {
           abort();
           return;
         }
         // Inside an EventTarget listener a throwing wrapper would be an uncaught exception and
         // leave the core signal unaborted (sources never told to stop): log it and abort anyway.
-        try {
-          enter(abort);
-        } catch (error) {
-          logger?.error("gratos-server: a wrapExecution wrapper failed on a client abort.", error);
-          abort();
-        }
+        enterOrRun(
+          enter,
+          logger,
+          "gratos-server: a wrapExecution wrapper failed on a client abort.",
+          abort,
+        );
       },
       { once: true, signal: controller.signal },
     );
@@ -452,11 +459,13 @@ const serve = <Ctx>(
    * there); a cleanup that fails is logged and never changes the answer.
    */
   const closeStreamed = async (run: Run, result: ExecutorResult): Promise<void> => {
+    const message = "gratos-server: a wrapExecution wrapper failed on a close.";
     try {
+      // A throwing wrapper still closes the result (directly).
       if (Symbol.asyncIterator in result) {
-        await run.enter(() => result.return());
+        await enterOrRun(run.enter, logger, message, () => result.return());
       } else if ("initialResult" in result) {
-        await run.enter(() => result.subsequentResults.return());
+        await enterOrRun(run.enter, logger, message, () => result.subsequentResults.return());
       }
     } catch (error) {
       logger.error("gratos-server: closing a streamed result failed.", error);
@@ -469,11 +478,10 @@ const serve = <Ctx>(
    * sources from its listener on it), so a cleanup that waits on it, or on a pending pull, ends.
    * The answer that follows (a 406, a failing hook's 500) gets a controller of its own,
    * aborted only when the client leaves: the core signal no longer says whether it is there.
+   * A throwing wrapper is logged; the signal still aborts and the result still closes.
    */
   const closeUnsent = async (run: Run, result: ExecutorResult): Promise<void> => {
-    run.enter(() => {
-      run.controller.abort();
-    });
+    abortInside(run);
     run.controller = linkedController(run.request.signal);
     await closeStreamed(run, result);
   };
@@ -509,14 +517,15 @@ const serve = <Ctx>(
    * the core makes. A throwing wrapper is logged and the signal aborted anyway.
    */
   const abortInside = (run: Run): void => {
-    try {
-      run.enter(() => {
-        run.controller.abort();
-      });
-    } catch (error) {
-      logger.error("gratos-server: a wrapExecution wrapper failed on an abort.", error);
-      run.controller.abort();
-    }
+    const { controller } = run;
+    enterOrRun(
+      run.enter,
+      logger,
+      "gratos-server: a wrapExecution wrapper failed on an abort.",
+      () => {
+        controller.abort();
+      },
+    );
   };
 
   const transportError = (run: Run, message: string, status: number): Response =>
@@ -826,7 +835,7 @@ const serve = <Ctx>(
         throw error;
       }
       return multipartResponse(
-        streamOptions(run, ctx, first, incrementalSource(subsequentResults, run.enter)),
+        streamOptions(run, ctx, first, incrementalSource(subsequentResults, run.enter, logger)),
       );
     }
     const payload = processPayload(run, ctx, result);
