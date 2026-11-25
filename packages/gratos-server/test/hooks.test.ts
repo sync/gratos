@@ -1201,6 +1201,32 @@ describe("a Request passed to handle() again", () => {
     expect((await send(server, replay)).body).toEqual({ data: { count: 1 } });
   });
 
+  it("stops counting a warned call when it ends, even when the logger throws", async () => {
+    const hold = gate();
+    let warnings = 0;
+    const server = createServer({
+      schema: basicSchema(),
+      logger: {
+        warn: () => {
+          warnings += 1;
+          throw new Error("logger failed");
+        },
+        error: () => {},
+      },
+      context: () => hold.promise.then(() => ({})),
+    });
+    const request = new Request(URL_, { method: "GET" });
+    const first = server.handle(request);
+    const second = server.handle(request);
+    hold.resolve();
+    // The throwing warning neither fails the overlapping call nor leaves it counted.
+    expect((await second).status).toBe(405);
+    expect((await first).status).toBe(405);
+    expect(warnings).toBe(1);
+    await (await server.handle(request)).text();
+    expect(warnings).toBe(1);
+  });
+
   it("does not warn when the Request is reused after the earlier call returned", async () => {
     const warn = vi.fn();
     const server = createServer({ schema: basicSchema(), logger: { warn, error: () => {} } });

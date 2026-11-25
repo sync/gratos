@@ -1139,12 +1139,17 @@ const serve = <Ctx>(
 
   const handle = async (request: Request): Promise<Response> => {
     const start = performance.now();
-    if (!beginHandling(request)) {
-      logger.warn(
-        "gratos-server: a Request was passed to handle() while an earlier call on it is in flight; its per-request state is shared. Give each call its own Request (a request.clone() taken before the first call).",
-      );
-    }
+    const overlaps = !beginHandling(request);
     try {
+      if (overlaps) {
+        try {
+          logger.warn(
+            "gratos-server: a Request was passed to handle() while an earlier call on it is in flight; its per-request state is shared. Give each call its own Request (a request.clone() taken before the first call).",
+          );
+        } catch {
+          // A throwing logger must not fail the request, nor leave this call counted.
+        }
+      }
       return await handleOwned(request, start);
     } finally {
       endHandling(request);
