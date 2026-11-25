@@ -68,6 +68,11 @@ const leftAs = (request: Request): Trigger => (streamEnded(request) ? "complete"
 /** The per-request finalizer state. */
 interface SpanState {
   readonly request: Request;
+  /**
+   * The core signal of the handle() call this state belongs to: a Request handed to handle()
+   * again (a bodyless one can be) gets a fresh state, and its own span.
+   */
+  readonly signal: AbortSignal | undefined;
   readonly context: Context.Context<never>;
   readonly tracer: Tracer.Tracer;
   readonly clock: Clock.Clock;
@@ -118,8 +123,13 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     if (state.mutation === "settled") {
       // A started mutation always finished: ok or error, never cancel. Its answer failing (a
       // throwing result hook's 500) or its body failing is an error too.
+      // The tracked answer's status counts too: an SSE-only client gets a failed answer as an
+      // event with a 200 (the attribute keeps the 200 it got).
       exit =
-        state.errors > 0 || status >= 400 || state.trigger === "error"
+        state.errors > 0 ||
+        status >= 400 ||
+        (state.answered ?? 0) >= 400 ||
+        state.trigger === "error"
           ? Exit.fail(state.trigger === "error" ? "response body failed" : "graphql errors")
           : Exit.void;
     } else if (state.trigger === "cancel" || state.status === 499) {
@@ -204,14 +214,16 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
   };
 
   const stateOf = (request: Request): SpanState => {
+    const signal = signalOf(request);
     let state = states.get(request);
-    if (state !== undefined) {
+    if (state !== undefined && state.signal === signal) {
       return state;
     }
     const route = routeOf(request);
     const context = route?.context ?? base;
     const created: SpanState = {
       request,
+      signal,
       context,
       tracer: Context.get(context, Tracer.Tracer),
       clock: Context.get(context, Clock.Clock),

@@ -10,7 +10,7 @@ import { createServer, gqlError, jit, serverTiming } from "../../src/index.ts";
 import type { Plugin, Server } from "../../src/index.ts";
 import { effect, effectSchema } from "../../src/effect/index.ts";
 import { closeRoute, registerRoute } from "../../src/effect/state.ts";
-import { flush, gate, gql, post } from "../support/http.ts";
+import { flush, gate, gql, post, URL_ } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
 import { readSse, readUntil } from "../support/stream.ts";
 import { executors, recordingTracer, until } from "./support.ts";
@@ -1110,5 +1110,42 @@ describe("effect() span bookkeeping", () => {
     expect(operation?.endCalls).toBe(1);
     await until(() => logged.length > 0);
     expect(logged[0]).toEqual(["gratos-server: an onSpanEnd callback failed.", expect.any(Error)]);
+  });
+
+  it("ends a mutation whose failed answer an SSE-only client got as an event with error", async () => {
+    const throwing: Plugin = {
+      onResult: () => {
+        throw new Error("hook failed");
+      },
+    };
+    const built = build(
+      [throwing],
+      { Mutation: { first: () => Effect.succeed("one") } },
+      {
+        quiet: true,
+      },
+    );
+    const response = await built.server.handle(
+      post({ query: "mutation Write { first }" }, { accept: "text/event-stream" }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("event: complete");
+    const [operation] = operations(built.tracer);
+    expect(operation?.outcome).toBe("error");
+    expect(operation?.attributes.get("http.response.status_code")).toBe(200);
+    expect(operation?.endCalls).toBe(1);
+  });
+
+  it("gives a Request handed to handle() twice a span for each call", async () => {
+    const built = build([]);
+    const request = new Request(URL_, { method: "HEAD" });
+    expect((await built.server.handle(request)).status).toBe(405);
+    expect((await built.server.handle(request)).status).toBe(405);
+    const spans = operations(built.tracer);
+    expect(spans).toHaveLength(2);
+    for (const span of spans) {
+      expect(span.endCalls).toBe(1);
+      expect(span.outcome).toBe("error");
+    }
   });
 });
