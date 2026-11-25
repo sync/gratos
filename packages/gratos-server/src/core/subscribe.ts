@@ -50,10 +50,18 @@ const cancellable = <T>(promise: Promise<T>, signal: AbortSignal | undefined): P
   return settled;
 };
 
+const DONE: IteratorReturnResult<void> = { done: true, value: undefined };
+
+/** What a pending pull settles with once the stream is closed. */
+const CLOSED: unique symbol = Symbol("closed");
+
 /**
- * The response stream of one source: each event executed as subscribe() executes it. Its
- * `return()` closes the source's iterator at once, even while a pull is pending or before the
- * first pull (an async generator would queue it, or skip its `finally`), and only once.
+ * The response stream of one source: each event executed as subscribe() executes it. It is an
+ * explicit iterator, not an async generator, whose calls a generator would queue behind a pending
+ * pull (or skip its `finally` before the first one). Closing it (`return()`, an event that
+ * fails to execute) reaches the source's iterator once and at once, even while a pull is
+ * pending or before the first pull, and settles a pending pull as done even when the source's
+ * own `next()` never settles. As in graphql's mapAsyncIterable, pulls are not queued.
  */
 const responseStream = (
   validated: ValidatedSubscriptionArgs,
@@ -61,13 +69,24 @@ const responseStream = (
 ): AsyncGenerator<ExecutionResult, void, void> => {
   const iterator = source[Symbol.asyncIterator]();
   const signal = validated.externalAbortSignal;
+  /** No more pulls reach the source: it ended, it threw, or the stream was closed. */
+  let finished = false;
   /** The source ended by itself: there is nothing to close. */
   let ended = false;
-  let closed = false;
   let closing: Promise<void> | undefined;
+  /**
+   * Settles each pending pull as closed. One per pull (not one shared promise every pull races),
+   * so a long subscription does not pile up reactions.
+   */
+  const pending = new Set<(closed: typeof CLOSED) => void>();
+
   /** Closes the source once; its own failure to close concerns no one (as in subscribe()). */
   const close = (): Promise<void> => {
-    closed = true;
+    finished = true;
+    for (const settle of pending) {
+      settle(CLOSED);
+    }
+    pending.clear();
     closing ??= ended
       ? Promise.resolve()
       : (async () => {
@@ -80,39 +99,55 @@ const responseStream = (
     return closing;
   };
 
-  async function* events(): AsyncGenerator<ExecutionResult, void, void> {
-    while (!closed) {
+  const pull = async (): Promise<IteratorResult<ExecutionResult, void>> => {
+    if (finished) {
+      return DONE;
+    }
+    const closed = Promise.withResolvers<typeof CLOSED>();
+    pending.add(closed.resolve);
+    let pulled: IteratorResult<unknown> | typeof CLOSED;
+    try {
+      pulled = await Promise.race([iterator.next(), closed.promise]);
+    } catch (error) {
       // A source that throws ends the stream with its error; a later `return()` still reaches
       // it, as in subscribe().
-      const pulled = await iterator.next();
-      if (pulled.done === true) {
-        ended = true;
-        return;
-      }
-      if (closed) {
-        return;
-      }
-      let result: ExecutionResult;
-      try {
-        result = await executeSubscriptionEvent({ ...validated, rootValue: pulled.value });
-      } catch (error) {
-        // As subscribe()'s for await: an event that fails to execute closes the source.
-        await close();
-        throw error;
-      }
-      yield result;
+      finished = true;
+      throw error;
+    } finally {
+      pending.delete(closed.resolve);
     }
-  }
-
-  const generator = events();
-  const next = generator.next.bind(generator);
-  const finish = generator.return.bind(generator);
-  generator.next = () => cancellable(next(), signal);
-  generator.return = async (value) => {
-    await close();
-    return finish(value);
+    if (pulled === CLOSED || finished) {
+      return DONE;
+    }
+    if (pulled.done === true) {
+      finished = true;
+      ended = true;
+      return DONE;
+    }
+    let result: ExecutionResult;
+    try {
+      result = await executeSubscriptionEvent({ ...validated, rootValue: pulled.value });
+    } catch (error) {
+      // As subscribe()'s for await: an event that fails to execute closes the source.
+      await close();
+      throw error;
+    }
+    return finished ? DONE : { done: false, value: result };
   };
-  return generator;
+
+  const stream: AsyncGenerator<ExecutionResult, void, void> = {
+    next: () => cancellable(pull(), signal),
+    return: async () => {
+      await close();
+      return DONE;
+    },
+    throw: (error: unknown) => Promise.reject(error),
+    [Symbol.asyncIterator]: () => stream,
+    [Symbol.asyncDispose]: async () => {
+      await close();
+    },
+  };
+  return stream;
 };
 
 /**

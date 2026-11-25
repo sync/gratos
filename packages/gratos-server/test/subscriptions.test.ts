@@ -1163,3 +1163,82 @@ describe("the response stream of a subscription", () => {
     expect(probe).toEqual({ iterators: 1, pulls: 2, returns: 0 });
   });
 });
+
+/**
+ * A schema whose `probed` source is one hand-written iterator: it yields 1, 2, … unless `stuck`,
+ * when every pull stays pending forever (return() still resolves); it has a throw() only when
+ * `throws`. The probe records every call.
+ */
+const probed = ({ stuck = false, throws = false } = {}) => {
+  const probe = { pulls: 0, returns: 0, throws: [] as Array<unknown> };
+  const schema = makeSchema(
+    `
+      type Query { hello: String }
+      type Subscription { probed: Int }
+    `,
+    { Subscription: { probed: (payload: number) => payload } },
+  );
+  const done = { done: true, value: undefined } as const;
+  const iterator: AsyncIterator<number> = {
+    next: () => {
+      probe.pulls += 1;
+      return stuck ? gate<never>().promise : Promise.resolve({ done: false, value: probe.pulls });
+    },
+    return: () => {
+      probe.returns += 1;
+      return Promise.resolve(done);
+    },
+  };
+  if (throws) {
+    iterator.throw = (error: unknown) => {
+      probe.throws.push(error);
+      return Promise.resolve(done);
+    };
+  }
+  Object.assign(schema.getSubscriptionType()?.getFields()["probed"] ?? {}, {
+    subscribe: () => ({ [Symbol.asyncIterator]: () => iterator }),
+  });
+  return { schema, probe };
+};
+
+const probedStream = async (options: { stuck?: boolean; throws?: boolean } = {}) => {
+  const { schema, probe } = probed(options);
+  const result = await subscribeOnce({ schema, document: parse("subscription { probed }") });
+  if (!(Symbol.asyncIterator in result)) {
+    throw new Error("no stream");
+  }
+  return { stream: result, probe };
+};
+
+describe("closing the response stream while a source pull never settles", () => {
+  it("return() settles the pending pull and closes the source once", async () => {
+    const { stream, probe } = await probedStream({ stuck: true });
+    const pending = stream.next();
+    await flush();
+    expect(probe.pulls).toBe(1);
+    const timedOut = sleep(1000).then(() => "return() hangs");
+    expect(await Promise.race([stream.return().then(() => "returned"), timedOut])).toBe("returned");
+    expect(await pending).toEqual({ done: true, value: undefined });
+    expect(await stream.next()).toEqual({ done: true, value: undefined });
+    expect(probe).toEqual({ pulls: 1, returns: 1, throws: [] });
+  });
+
+  it("a body cancel ends while the source's pull is pending, and return() is called once", async () => {
+    const { schema, probe } = probed({ stuck: true });
+    const server = createServer({ schema });
+    const request = post({ query: "subscription { probed }" }, { accept: "text/event-stream" });
+    const response = await server.handle(request);
+    const reader = response.body?.getReader();
+    if (reader === undefined) {
+      throw new Error("no body");
+    }
+    const read = reader.read();
+    await eventually(() => probe.pulls === 1);
+    const timedOut = sleep(1000).then(() => "the body cancel hangs");
+    expect(await Promise.race([reader.cancel().then(() => "cancelled"), timedOut])).toBe(
+      "cancelled",
+    );
+    expect(await read).toEqual({ done: true, value: undefined });
+    expect(probe).toEqual({ pulls: 1, returns: 1, throws: [] });
+  });
+});
