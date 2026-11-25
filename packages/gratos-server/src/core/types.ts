@@ -52,7 +52,9 @@ export type NextExecutor = () => PromiseOrValue<ExecutorResult>;
  * no late start) has passed. `next` runs the operation as it would run without this executor:
  * the next claim in list order, else the default. An executor that only sometimes takes over
  * (jit during warm-up) delegates to it, and keeps its own bookkeeping (counting, compiling) in
- * the executor, so an operation that is refused never touches it.
+ * the executor, so an operation that is refused never touches it. A mutation's result must be
+ * a single result: a streamed one is closed unread and the request fails with a 500, since its
+ * work would outlive `mutationOf(req).settled` and `drain()`.
  */
 export type Executor = (next: NextExecutor) => PromiseOrValue<ExecutorResult>;
 
