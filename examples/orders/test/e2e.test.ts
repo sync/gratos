@@ -2,7 +2,8 @@
 // the OS picks), driven by Apollo Client (the catalog pins it) for the query, the mutation, @defer
 // and @stream, and by fetch for the SSE subscription (Apollo's HttpLink speaks multipart
 // subscriptions, not SSE). Apollo gets Defer20220824Handler explicitly, the incremental format the
-// server speaks. Every wait is bounded; nothing depends on timing.
+// server speaks. Every wait is bounded: each request (its body included) has a deadline, and every
+// Apollo client and SSE reader is stopped when its test ends, passed or failed.
 import { ApolloClient, gql, HttpLink, InMemoryCache } from "@apollo/client";
 import { Defer20220824Handler } from "@apollo/client/incremental";
 import { CombinedGraphQLErrors } from "@apollo/client/errors";
@@ -25,10 +26,26 @@ interface Exchange {
   readonly body: Promise<string>;
 }
 
+/** How long any request of these tests may take, its response body included. */
+const DEADLINE_MS = 10_000;
+
+/** `inner`, with a deadline on every request (on top of the caller's own signal, if any). */
+const withDeadline = (inner: typeof fetch): typeof fetch => {
+  const bounded: typeof fetch = (input, init) => {
+    const deadline = AbortSignal.timeout(DEADLINE_MS);
+    const signal = init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline;
+    return inner(input, { ...init, signal });
+  };
+  return bounded;
+};
+
+/** The global fetch, with the deadline. */
+const boundedFetch = withDeadline(globalThis.fetch);
+
 /** A fetch that records each exchange, handing Apollo an untouched copy of the response. */
 const recordingFetch = (exchanges: Array<Exchange>): typeof fetch => {
   const recorded: typeof fetch = async (input, init) => {
-    const response = await fetch(input, init);
+    const response = await boundedFetch(input, init);
     const [mine, theirs] = response.body === null ? [null, null] : response.body.tee();
     exchanges.push({
       request: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
@@ -66,14 +83,16 @@ const client = (
     fetch: recordingFetch(exchanges),
     headers: options.guest === true ? {} : { authorization: AUTHORIZATION },
   });
-  return {
-    apollo: new ApolloClient({
-      link: options.persisted === true ? new PersistedQueryLink({ sha256 }).concat(http) : http,
-      cache: new InMemoryCache(),
-      incrementalHandler: new Defer20220824Handler(),
-    }),
-    exchanges,
-  };
+  const apollo = new ApolloClient({
+    link: options.persisted === true ? new PersistedQueryLink({ sha256 }).concat(http) : http,
+    cache: new InMemoryCache(),
+    incrementalHandler: new Defer20220824Handler(),
+  });
+  // Stops its queries when the test ends, also a failed one.
+  onTestFinished(() => {
+    apollo.stop();
+  });
+  return { apollo, exchanges };
 };
 
 let served: Served;
@@ -357,13 +376,12 @@ describe("the orders app over HTTP, with Apollo Client", () => {
   });
 });
 
-/** POSTs a GraphQL request with the session. */
+/** POSTs a GraphQL request with the session (and the deadline, its body included). */
 const post = (query: string, accept = "application/graphql-response+json") =>
-  fetch(served.url, {
+  boundedFetch(served.url, {
     method: "POST",
     headers: { "content-type": "application/json", accept, authorization: AUTHORIZATION },
     body: JSON.stringify({ query }),
-    signal: AbortSignal.timeout(10_000),
   });
 
 /** An `orderChanged` event of o-3 with `status`. */
@@ -426,11 +444,10 @@ describe("the orders app over HTTP, SSE subscriptions", () => {
   });
 
   it("refuses a guest's subscription with one error event, then complete", async () => {
-    const response = await fetch(served.url, {
+    const response = await boundedFetch(served.url, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "text/event-stream" },
       body: JSON.stringify({ query: 'subscription { orderChanged(id: "o-1") { id } }' }),
-      signal: AbortSignal.timeout(10_000),
     });
     const text = await response.text();
     expect(text).toContain('"message":"Forbidden"');
