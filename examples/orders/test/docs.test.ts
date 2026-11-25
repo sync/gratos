@@ -51,12 +51,29 @@ const quotes = (text: string, snippet: string): boolean => {
   });
 };
 
-const snippetsOf = (doc: string): Array<Snippet> =>
-  [...read(doc).matchAll(FENCE)].map((match) => ({
+/** The tagged code blocks of `text` (the text of `doc`, or a part of it starting at its `line`). */
+const snippetsIn = (text: string, firstLine = 1): Array<Snippet> =>
+  [...text.matchAll(FENCE)].map((match) => ({
     file: match[1] ?? "",
     code: match[2] ?? "",
-    line: read(doc).slice(0, match.index).split("\n").length,
+    line: firstLine + text.slice(0, match.index).split("\n").length - 1,
   }));
+
+const snippetsOf = (doc: string): Array<Snippet> => snippetsIn(read(doc));
+
+/** The README's `### n. Name` sections: each step's name, and its tagged code blocks. */
+const stepsOf = (readme: string) => {
+  const headings = [...readme.matchAll(/^### (\d)\. (\w+)$/gm)];
+  return headings.map((heading, index) => {
+    const start = heading.index;
+    const next = headings[index + 1]?.index ?? readme.indexOf("\n## ", start);
+    const text = readme.slice(start, next === -1 ? undefined : next);
+    return {
+      name: heading[2] ?? "",
+      snippets: snippetsIn(text, readme.slice(0, start).split("\n").length),
+    };
+  });
+};
 
 describe.each(DOCS)("%s", (doc) => {
   const snippets = snippetsOf(doc);
@@ -81,17 +98,35 @@ describe("the README's new resolver", () => {
     expect(steps).toEqual(["Write", "Generate", "Nothing", "Guard", "Test"]);
   });
 
-  it("writes, generates and tests the same field", () => {
-    const files = snippetsOf("examples/orders/README.md").map((snippet) => snippet.file);
-    // Write: the model; generate: the SDL and the resolver map; test: a resolver test.
-    expect(files).toEqual(
-      expect.arrayContaining([
-        "examples/orders/src/models/User.ts",
-        "examples/orders/src/generated/schema.graphql",
-        "examples/orders/src/generated/schema.ts",
-        "examples/orders/test/resolvers.test.ts",
-      ]),
-    );
+  // Each step shows its own code, quoted from the file it lives in (so it compiles and runs), and
+  // the steps that touch the field (write, generate, test) all name the same one.
+  const steps = new Map(stepsOf(readme).map((step) => [step.name, step.snippets]));
+  const files = (step: string) => (steps.get(step) ?? []).map((snippet) => snippet.file);
+  const code = (step: string) => (steps.get(step) ?? []).map((snippet) => snippet.code).join("\n");
+
+  it("shows each step's own code, quoted from its file", () => {
+    expect(files("Write")).toEqual(["examples/orders/src/models/User.ts"]);
+    expect(files("Generate")).toEqual([
+      "examples/orders/src/generated/schema.graphql",
+      "examples/orders/src/generated/schema.ts",
+    ]);
+    expect(files("Nothing")).toEqual([]);
+    expect(files("Guard")).toEqual(["examples/orders/src/models/User.ts"]);
+    expect(files("Test")).toEqual(["examples/orders/test/resolvers.test.ts"]);
+  });
+
+  it("writes, generates, guards and tests the same field", () => {
+    // Write: the query field's function.
+    const field = /@gqlQueryField \*\/\nexport function (\w+)\(/.exec(code("Write"))?.[1] ?? "";
+    expect(field).not.toBe("");
+    const capitalized = `${field.charAt(0).toUpperCase()}${field.slice(1)}`;
+    // Generate: the field in the SDL, and its generated resolver calling the written function.
+    expect(code("Generate")).toMatch(new RegExp(`^\\s*${field}\\(`, "m"));
+    expect(code("Generate")).toContain(`return query${capitalized}Resolver(`);
+    // Guard: the guard call is the written code's own.
+    expect(quotes(code("Write"), code("Guard"))).toBe(true);
+    // Test: the written function, run with a fake layer.
+    expect(code("Test")).toMatch(new RegExp(`\\b${field}\\(`));
   });
 
   it("states the four rules for a new resolver", () => {
