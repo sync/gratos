@@ -1,0 +1,52 @@
+diff --git a/execution/execute.js b/execution/execute.js
+index 1174b86560b956c97f864421dcfd7026de8cbee3..4014f2adb50c11f206fb2b1bd4dd01bcf69b9957 100644
+--- a/execution/execute.js
++++ b/execution/execute.js
+@@ -362,6 +362,21 @@ function executeSubscription(validatedExecutionArgs) {
+         const result = resolveFn(rootValue, args, contextValue, info);
+         if ((0, isPromise_ts_1.isPromiseLike)(result)) {
+             const promisedResult = Promise.resolve(result);
++            if (externalAbortSignal) {
++                // gratos patch: cancellablePromise drops a source that settles after the abort,
++                // so nothing would ever close it. Close it here, once, without reading it.
++                promisedResult.then((eventStream) => {
++                    if (externalAbortSignal.aborted && (0, isAsyncIterable_ts_1.isAsyncIterable)(eventStream)) {
++                        (async () => {
++                            try {
++                                await eventStream[Symbol.asyncIterator]().return?.();
++                            }
++                            catch {
++                            }
++                        })();
++                    }
++                }, () => undefined);
++            }
+             const promise = externalAbortSignal
+                 ? (0, cancellablePromise_ts_1.cancellablePromise)(promisedResult, externalAbortSignal)
+                 : promisedResult;
+diff --git a/execution/execute.mjs b/execution/execute.mjs
+index 357520df0eb2f21ebd4c8f81250bbb1c791f0ddb..e926509d33e039623e01f8dd794f0c97e6f3bfac 100644
+--- a/execution/execute.mjs
++++ b/execution/execute.mjs
+@@ -344,6 +344,21 @@ function executeSubscription(validatedExecutionArgs) {
+         const result = resolveFn(rootValue, args, contextValue, info);
+         if (isPromiseLike(result)) {
+             const promisedResult = Promise.resolve(result);
++            if (externalAbortSignal) {
++                // gratos patch: cancellablePromise drops a source that settles after the abort,
++                // so nothing would ever close it. Close it here, once, without reading it.
++                promisedResult.then((eventStream) => {
++                    if (externalAbortSignal.aborted && isAsyncIterable(eventStream)) {
++                        (async () => {
++                            try {
++                                await eventStream[Symbol.asyncIterator]().return?.();
++                            }
++                            catch {
++                            }
++                        })();
++                    }
++                }, () => undefined);
++            }
+             const promise = externalAbortSignal
+                 ? cancellablePromise(promisedResult, externalAbortSignal)
+                 : promisedResult;
