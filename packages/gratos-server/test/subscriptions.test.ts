@@ -1246,6 +1246,71 @@ describe("closing the response stream while a source pull never settles", () => 
   });
 });
 
+/**
+ * A stream over a one-event source whose event resolver waits for `resolver` (never settling when
+ * it is never released), with the source's pulls and returns counted.
+ */
+const gatedEventStream = async () => {
+  const resolver = gate();
+  const probe = { pulls: 0, returns: 0 };
+  const schema = makeSchema(
+    `
+      type Query { hello: String }
+      type Subscription { gated: Int }
+    `,
+    { Subscription: { gated: async (payload: number) => resolver.promise.then(() => payload) } },
+  );
+  Object.assign(schema.getSubscriptionType()?.getFields()["gated"] ?? {}, {
+    subscribe: () => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          probe.pulls += 1;
+          return Promise.resolve(
+            probe.pulls === 1 ? { done: false, value: 7 } : { done: true, value: undefined },
+          );
+        },
+        return: () => {
+          probe.returns += 1;
+          return Promise.resolve({ done: true, value: undefined });
+        },
+      }),
+    }),
+  });
+  const result = await subscribeOnce({ schema, document: parse("subscription { gated }") });
+  if (!(Symbol.asyncIterator in result)) {
+    throw new Error("no stream");
+  }
+  return { stream: result, resolver, probe };
+};
+
+describe("reads of the response stream", () => {
+  it("overlapping next() calls deliver the last event before the end, in order", async () => {
+    const { stream, resolver, probe } = await gatedEventStream();
+    const first = stream.next();
+    const second = stream.next();
+    await flush();
+    // The second read waits for the first (event execution included) before it pulls.
+    expect(probe.pulls).toBe(1);
+    resolver.resolve();
+    expect(await first).toEqual({ done: false, value: { data: { gated: 7 } } });
+    expect(await second).toEqual({ done: true, value: undefined });
+    expect(probe).toEqual({ pulls: 2, returns: 0 });
+  });
+
+  it("return() settles a read whose event resolver never settles, and closes the source once", async () => {
+    const { stream, probe } = await gatedEventStream();
+    const pending = stream.next();
+    const queued = stream.next();
+    await flush();
+    expect(probe.pulls).toBe(1);
+    const timedOut = sleep(1000).then(() => "return() hangs");
+    expect(await Promise.race([stream.return().then(() => "returned"), timedOut])).toBe("returned");
+    expect(await pending).toEqual({ done: true, value: undefined });
+    expect(await queued).toEqual({ done: true, value: undefined });
+    expect(probe).toEqual({ pulls: 1, returns: 1 });
+  });
+});
+
 describe("throw() on the response stream", () => {
   const error = new Error("thrown by the consumer");
 

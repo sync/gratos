@@ -110,44 +110,66 @@ const responseStream = (
     return closing;
   };
 
+  /**
+   * One read: the source's next event, then its execution. A close settles it as done at either
+   * step, whether the source's pull or the event's resolvers ever settle.
+   */
   const pull = async (): Promise<IteratorResult<ExecutionResult, void>> => {
     if (finished) {
       return DONE;
     }
     const closed = Promise.withResolvers<typeof CLOSED>();
     pending.add(closed.resolve);
-    let pulled: IteratorResult<unknown> | typeof CLOSED;
     try {
-      pulled = await Promise.race([iterator.next(), closed.promise]);
-    } catch (error) {
-      // A source that throws ends the stream with its error; a later `return()` still reaches
-      // it, as in subscribe().
-      finished = true;
-      throw error;
+      let pulled: IteratorResult<unknown> | typeof CLOSED;
+      try {
+        pulled = await Promise.race([iterator.next(), closed.promise]);
+      } catch (error) {
+        // A source that throws ends the stream with its error; a later `return()` still reaches
+        // it, as in subscribe().
+        finished = true;
+        throw error;
+      }
+      if (pulled === CLOSED || finished) {
+        return DONE;
+      }
+      if (pulled.done === true) {
+        finished = true;
+        ended = true;
+        return DONE;
+      }
+      let executed: ExecutionResult | typeof CLOSED;
+      try {
+        executed = await Promise.race([
+          executeSubscriptionEvent({ ...validated, rootValue: pulled.value }),
+          closed.promise,
+        ]);
+      } catch (error) {
+        // As subscribe()'s for await: an event that fails to execute closes the source.
+        await close();
+        throw error;
+      }
+      return executed === CLOSED || finished ? DONE : { done: false, value: executed };
     } finally {
       pending.delete(closed.resolve);
     }
-    if (pulled === CLOSED || finished) {
-      return DONE;
-    }
-    if (pulled.done === true) {
-      finished = true;
-      ended = true;
-      return DONE;
-    }
-    let result: ExecutionResult;
-    try {
-      result = await executeSubscriptionEvent({ ...validated, rootValue: pulled.value });
-    } catch (error) {
-      // As subscribe()'s for await: an event that fails to execute closes the source.
-      await close();
-      throw error;
-    }
-    return finished ? DONE : { done: false, value: result };
+  };
+
+  /**
+   * Reads run one after another, as an async generator's do (and graphql-js subscribe()'s): a
+   * second `next()` waits for the first read, event execution included, so an event is never
+   * overtaken by the end of the source. A close settles the active read, and each waiting read
+   * then finds the stream finished.
+   */
+  let reads: Promise<unknown> = Promise.resolve();
+  const read = (): Promise<IteratorResult<ExecutionResult, void>> => {
+    const next = reads.then(pull, pull);
+    reads = next.catch(() => undefined);
+    return next;
   };
 
   const stream: AsyncGenerator<ExecutionResult, void, void> = {
-    next: () => cancellable(pull(), signal),
+    next: () => cancellable(read(), signal),
     return: async () => {
       await close();
       return DONE;
