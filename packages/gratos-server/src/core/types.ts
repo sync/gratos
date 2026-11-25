@@ -186,9 +186,12 @@ export interface Plugin<Ctx = unknown> {
   ) => ExecutionResult | undefined | void;
   /**
    * Wraps each synchronous entry into the operation's execution: the executor call (a query's or
-   * mutation's root fields, a subscription's source setup), each subscription event's execution,
-   * and each pull of an incremental response's subsequent payloads (graphql-js runs deferred work
-   * from there). It calls `run` once, synchronously, and returns what it returns. A plugin
+   * mutation's root fields, a subscription's source setup), each call into a subscription's source
+   * (its iterator, each pull, its `return()` or `throw()`), each subscription event's execution,
+   * each pull of an incremental response's subsequent payloads (graphql-js runs deferred work
+   * from there), and a custom executor's call to `next()` made outside the executor call (from an
+   * event emitter's callback, say). An entry made while the wrappers are already running
+   * (synchronously, as a `next()` called from the executor call is) is not wrapped again. It calls `run` once, synchronously, and returns what it returns. A plugin
    * carries request-local state into the resolvers this way, which keep receiving the
    * application's own context value: the Effect layer enters an `AsyncLocalStorage`, whose store
    * the async continuations of that work inherit. Wrappers nest in list order (the first is the

@@ -278,6 +278,27 @@ const serve = <Ctx>(
     return wrapped();
   };
 
+  /**
+   * A request's entry into its execution wrappers. An entry made inside one that is still running
+   * (synchronously: an executor calling `next()` from the executor call) runs directly, so the
+   * wrappers see it once; an entry from anywhere else (an awaited continuation, a callback an
+   * event emitter dispatches, the transport pulling a stream) enters them again.
+   */
+  const entryOf = (request: Request): Enter => {
+    let active = false;
+    return (run) => {
+      if (active || wrapExecution.length === 0) {
+        return run();
+      }
+      active = true;
+      try {
+        return enterExecution(request, run);
+      } finally {
+        active = false;
+      }
+    };
+  };
+
   const tracked = new Set<TrackedMutation>();
   let draining = false;
 
@@ -380,6 +401,8 @@ const serve = <Ctx>(
     errorsAsEvents: boolean;
     ctx: Ctx | undefined;
     mutation: MutationTracker | undefined;
+    /** Enters the request's execution wrappers (`wrapExecution`; see entryOf). */
+    readonly enter: Enter;
   }
 
   /**
@@ -601,12 +624,14 @@ const serve = <Ctx>(
     // claim in list order, else the default). A subscription always runs through subscribe(): a
     // claim cannot answer it (an executor such as legacyExecuteIncrementally would return a
     // one-shot result), so its claims are ignored once every hook has had its say.
-    const enter: Enter = (inner) => enterExecution(run.request, inner);
+    const { enter } = run;
     let execute: NextExecutor = defaultExecutor(input.operation, args, enter);
     const chosen = input.operation.operation === "subscription" ? undefined : claims;
     for (const claim of chosen?.toReversed() ?? []) {
       const next = execute;
-      execute = () => claim(next);
+      // Bound to the request: an executor may call `next()` later, from outside the executor
+      // call (an event emitter's callback, a queue), and the work still runs in the wrappers.
+      execute = () => claim(() => enter(next));
     }
     const { mutation } = run;
     if (mutation !== undefined && draining) {
@@ -757,12 +782,7 @@ const serve = <Ctx>(
         throw error;
       }
       return multipartResponse(
-        streamOptions(
-          run,
-          ctx,
-          first,
-          incrementalSource(subsequentResults, (inner) => enterExecution(run.request, inner)),
-        ),
+        streamOptions(run, ctx, first, incrementalSource(subsequentResults, run.enter)),
       );
     }
     const payload = processPayload(run, ctx, result);
@@ -888,6 +908,7 @@ const serve = <Ctx>(
       errorsAsEvents: false,
       ctx: undefined,
       mutation: undefined,
+      enter: entryOf(request),
     };
     let response: Response;
     try {

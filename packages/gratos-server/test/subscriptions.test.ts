@@ -1,6 +1,7 @@
 // Subscriptions (docs/plan.html M4b): always graphql-js subscribe(), encoded as GraphQL-over-SSE
 // "distinct connections"; errors from a failing source; disconnects over a standalone
 // handle(Request) and over real HTTP (node:http); and the plan's regression tests.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { on, once } from "node:events";
 import { EventEmitter } from "node:events";
 import { connect } from "node:net";
@@ -1255,6 +1256,43 @@ interface StreamHolder {
 }
 
 describe("the response stream of a subscription", () => {
+  it("calls the source's throw() and return() inside enter", async () => {
+    const storage = new AsyncLocalStorage<string>();
+    const seen: Array<string> = [];
+    const schema = makeSchema(
+      `
+        type Query { hello: String }
+        type Subscription { entered: Int }
+      `,
+      { Subscription: { entered: (payload: number) => payload } },
+    );
+    Object.assign(schema.getSubscriptionType()?.getFields()["entered"] ?? {}, {
+      subscribe: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.resolve({ done: false, value: 1 }),
+          // A source that catches the error and goes on: it is closed with return() after.
+          throw: () => {
+            seen.push(`throw ${storage.getStore() ?? "outside"}`);
+            return Promise.resolve({ done: false, value: 2 });
+          },
+          return: () => {
+            seen.push(`return ${storage.getStore() ?? "outside"}`);
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        }),
+      }),
+    });
+    const result = await subscribeOnce(
+      { schema, document: parse("subscription { entered }") },
+      (run) => storage.run("request", run),
+    );
+    if (!(Symbol.asyncIterator in result)) {
+      throw new Error("no stream");
+    }
+    await expect(result.throw(new Error("stop"))).rejects.toThrow("stop");
+    expect(seen).toEqual(["throw request", "return request"]);
+  });
+
   it("return() before the first pull closes the source, once", async () => {
     const { stream, probe } = await streamOf(3);
     await stream.return();

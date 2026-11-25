@@ -74,7 +74,9 @@ const responseStream = (
   source: AsyncIterable<unknown>,
   enter: <T>(run: () => T) => T,
 ): AsyncGenerator<ExecutionResult, void, void> => {
-  const iterator = source[Symbol.asyncIterator]();
+  // Every call into the source runs inside `enter`, as the source's setup did: its iterator,
+  // each pull (the body's reads come from the transport, outside the request), and its cleanup.
+  const iterator = enter(() => source[Symbol.asyncIterator]());
   const signal = validated.externalAbortSignal;
   /** No more pulls reach the source: it ended, it threw, or the stream was closed. */
   let finished = false;
@@ -95,12 +97,12 @@ const responseStream = (
   const closeSource = async (thrown: { readonly error: unknown } | undefined): Promise<void> => {
     try {
       if (thrown !== undefined && iterator.throw !== undefined) {
-        const after = await iterator.throw(thrown.error);
-        if (after.done !== true) {
-          await iterator.return?.();
+        const after = await enter(() => iterator.throw?.(thrown.error));
+        if (after?.done !== true) {
+          await enter(() => iterator.return?.());
         }
       } else {
-        await iterator.return?.();
+        await enter(() => iterator.return?.());
       }
     } catch {
       // Ignored, as subscribe() ignores it.
@@ -139,7 +141,7 @@ const responseStream = (
     try {
       let pulled: IteratorResult<unknown> | typeof CLOSED;
       try {
-        pulled = await Promise.race([iterator.next(), closed.promise]);
+        pulled = await Promise.race([enter(() => iterator.next()), closed.promise]);
       } catch (error) {
         // The stream was closed while the pull was pending, and the source's rejection came
         // first: the read is settled as closed, like any read a close interrupts.
@@ -209,7 +211,8 @@ const responseStream = (
 
 /**
  * Runs a subscription as graphql-js subscribe() does, returning its response stream, or the
- * errors-only result of a subscription that could not start. Each event executes inside `enter`
+ * errors-only result of a subscription that could not start. Each call into the source (its
+ * iterator, each pull, its `return()` or `throw()`) and each event's execution run inside `enter`
  * (the request's execution wrappers, `wrapExecution`), as the executor call itself does.
  */
 export const subscribeOnce = (

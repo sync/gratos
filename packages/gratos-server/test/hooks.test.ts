@@ -1,5 +1,6 @@
 // The hook contract (docs/plan.html M4a, "Contract types"): a test for each hook.
 import { AsyncLocalStorage } from "node:async_hooks";
+import { EventEmitter } from "node:events";
 
 import { GraphQLError } from "graphql";
 import type { ExecutionResult, OperationDefinitionNode } from "graphql";
@@ -7,9 +8,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createServer, gqlError, incremental } from "../src/index.ts";
 import type { Executor, Phase, Plugin, Server } from "../src/index.ts";
-import { gate, gql, post, send, URL_ } from "./support/http.ts";
+import { flush, gate, gql, post, send, URL_ } from "./support/http.ts";
 import type { Sent } from "./support/http.ts";
 import { basicSchema } from "./support/schema.ts";
+import { readUntil } from "./support/stream.ts";
 
 const silent = { warn: () => {}, error: () => {} };
 const answer42: Executor = () => ({ data: { count: 42 } });
@@ -492,6 +494,105 @@ describe("wrapExecution", () => {
     expect(seen).toBe(request);
     // The executor call, then each pull of the subsequent payloads.
     expect(entries).toBeGreaterThan(1);
+  });
+
+  it("enters the wrappers again when an executor calls next() from outside the request", async () => {
+    const storage = new AsyncLocalStorage<Request>();
+    // An EventEmitter calls its listeners in the emitter's context, not the listener's.
+    const emitter = new EventEmitter();
+    const listening = gate();
+    let seen: Request | undefined;
+    let resolved = false;
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          count: () => {
+            resolved = true;
+            seen = storage.getStore();
+            return 1;
+          },
+        },
+      }),
+      plugins: [
+        {
+          onExecute: () => (next) =>
+            new Promise((resolve) => {
+              emitter.once("go", () => {
+                resolve(next());
+              });
+              listening.resolve();
+            }),
+        },
+        { wrapExecution: (request, run) => storage.run(request, run) },
+      ],
+    });
+    const request = post({ query: "{ count }" });
+    const sending = send(server, request);
+    await listening.promise;
+    expect(storage.getStore()).toBeUndefined();
+    emitter.emit("go");
+    expect((await sending).body).toEqual({ data: { count: 1 } });
+    expect(resolved).toBe(true);
+    expect(seen).toBe(request);
+  });
+
+  it("enters each wrapper once when an executor calls next() inside the executor call", async () => {
+    const log: Array<string> = [];
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [{ onExecute: () => delegate }, recording("a", log, {})],
+    });
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
+    expect(log).toEqual(["a enter", "a exit"]);
+  });
+
+  it("wraps a subscription source's pulls and its cleanup", async () => {
+    const storage = new AsyncLocalStorage<Request>();
+    const seen: Array<string> = [];
+    const schema = basicSchema({}, "type Subscription { tick: Int }");
+    const tick = schema.getSubscriptionType()?.getFields()["tick"];
+    if (tick === undefined) {
+      throw new Error("no tick");
+    }
+    const request = post({ query: "subscription { tick }" }, { accept: "text/event-stream" });
+    const where = (): string => (storage.getStore() === request ? "in" : "out");
+    let pulls = 0;
+    tick.subscribe = () => ({
+      [Symbol.asyncIterator]: () => {
+        seen.push(`iterator ${where()}`);
+        return {
+          next: () => {
+            seen.push(`next ${where()}`);
+            pulls += 1;
+            // One event, then a pull that only the close settles (an idle source).
+            return pulls === 1
+              ? Promise.resolve({ done: false, value: 1 })
+              : new Promise<IteratorResult<number>>(() => {});
+          },
+          return: () => {
+            seen.push(`return ${where()}`);
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        };
+      },
+    });
+    tick.resolve = (payload: number) => payload;
+    const server = createServer({
+      schema,
+      plugins: [{ wrapExecution: (req, run) => storage.run(req, run) }],
+    });
+    const response = await server.handle(request);
+    const { reader } = await readUntil(response.body ?? new ReadableStream(), (text) =>
+      text.includes('"tick":1'),
+    );
+    // A second read, pending on the idle pull, which the cancel interrupts.
+    const pending = reader.read();
+    while (pulls < 2) {
+      await flush();
+    }
+    await reader.cancel();
+    expect(await pending).toEqual({ done: true, value: undefined });
+    expect(seen).toEqual(["iterator in", "next in", "next in", "return in"]);
   });
 });
 

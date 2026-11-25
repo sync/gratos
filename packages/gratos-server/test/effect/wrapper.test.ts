@@ -1,6 +1,8 @@
 // effectSchema, fromCause, wrapSubscribe and the guard, on standalone handle(Request), once per
 // executor (docs/plan.html M5 "Done when": semantic non-null, return paths, error mapping,
 // aborts, fibers, timeouts, guard).
+import { EventEmitter } from "node:events";
+
 import { Cause, Context, Data, Effect, Match, Predicate, Stream } from "effect";
 import { HttpServerRequest } from "effect/http";
 import { createSourceEventStream, execute, parse, validateSubscriptionArgs } from "graphql";
@@ -678,6 +680,34 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
         );
         expect(await response.text()).toContain('"slow":"late"');
         const [operation] = built.tracer.named("graphql D");
+        const [resolver] = built.tracer.named("resolve Query.slow");
+        expect(resolver?.parentId).toBe(operation?.spanId);
+      },
+    );
+
+    it.runIf(executor.name === "default")(
+      "finds the scope when a custom executor calls next() from an event emitter",
+      async () => {
+        const emitter = new EventEmitter();
+        const listening = gate();
+        const deferred: Plugin = {
+          onExecute: () => (next) =>
+            new Promise((resolve) => {
+              emitter.once("go", () => {
+                resolve(next());
+              });
+              listening.resolve();
+            }),
+        };
+        const built = build(
+          { Query: { slow: () => Effect.succeed("late").pipe(Effect.delay("1 millis")) } },
+          { plugins: [deferred] },
+        );
+        const sending = gql(built.server, "query E { slow }");
+        await listening.promise;
+        emitter.emit("go");
+        expect((await sending).body).toEqual({ data: { slow: "late" } });
+        const [operation] = built.tracer.named("graphql E");
         const [resolver] = built.tracer.named("resolve Query.slow");
         expect(resolver?.parentId).toBe(operation?.spanId);
       },
