@@ -54,9 +54,16 @@ export type NextExecutor = () => PromiseOrValue<ExecutorResult>;
  * (jit during warm-up) delegates to it, and keeps its own bookkeeping (counting, compiling) in
  * the executor, so an operation that is refused never touches it. A mutation's result must be
  * a single result: a streamed one is closed unread and the request fails with a 500, since its
- * work would outlive `mutationOf(req).settled` and `drain()`.
+ * work would outlive `mutationOf(req).settled` and `drain()`. `signal` is the abort signal of the
+ * entry it runs in, for a query (a mutation gets none): the core signal for the executor the core
+ * calls, a signal of its own, linked to the calling entry's, for one a `next()` runs. The core
+ * aborts that one when a wrapper around the `next()` throws after running it, so an executor
+ * that watches it (rather than `args.abortSignal`, the core signal) stops its abandoned work.
+ * An executor reports failure through its result or a rejected Promise, never by throwing after
+ * it has called `next()`: like a throwing `wrapExecution` wrapper, that breaks the contract and
+ * is handled on a best-effort basis only (logged, a 500, the core signal aborted).
  */
-export type Executor = (next: NextExecutor) => PromiseOrValue<ExecutorResult>;
+export type Executor = (next: NextExecutor, signal?: AbortSignal) => PromiseOrValue<ExecutorResult>;
 
 /** The phases the core reports to `onPhase`. Plugins may report their own (jit reports `jit`). */
 export type PhaseName = "parse" | "validate" | "jit" | (string & {});
@@ -67,6 +74,9 @@ export interface Phase {
   readonly start: number;
   readonly end: number;
 }
+
+/** A plugin's `wrapExecution`: runs `run` once, synchronously, and returns its result. */
+export type ExecutionWrapper = <T>(request: Request, run: () => T) => T;
 
 /** The first argument of `onExecute`. */
 export interface ExecuteInput {
@@ -85,6 +95,14 @@ export interface ExecuteInput {
   readonly request: Request;
   /** Reports a phase to every `onPhase` hook (jit uses it when it compiles). */
   readonly phase: (name: PhaseName, start: number, end: number) => void;
+  /**
+   * Binds another operation node to the request's execution (the selected one always is): an
+   * executor that runs a document of its own (a rewritten or re-parsed one, through its own
+   * `execute()`) binds the operation it runs, before running it, so request-local state that
+   * recognizes the request's resolvers by `info.operation` (the Effect layer's request scope)
+   * covers that execution too.
+   */
+  readonly bindOperation: (operation: OperationDefinitionNode) => void;
 }
 
 /** What `onServer` receives, once, when the server is created. */
@@ -170,16 +188,52 @@ export interface Plugin<Ctx = unknown> {
    * response, a subsequent incremental payload, or a subscription event (including the error a
    * failing source ends with). A subsequent payload keeps its errors in `incremental[].errors`:
    * read and rewrite errors with `payloadErrors` and `mapPayloadErrors`. Returns a replacement
-   * payload, or nothing (`hasNext` stays the executor's). Synchronous. A streamed response
-   * skips the payloads that arrive after the client has left. A single result is not skipped:
-   * a started mutation that finishes after a disconnect still runs the hooks on its result (its
-   * writes happened), and so does a query whose custom executor ignores the abort signal.
+   * payload, or nothing (`hasNext` stays the executor's). Synchronous. Payloads that arrive
+   * after the client has left are skipped (the request is a 499), a query's single result
+   * included, even from an executor that ignores the abort signal. A started mutation is the
+   * exception: one that finishes after a disconnect still runs the hooks on its result (its
+   * writes happened).
    */
   readonly onResult?: (
     payload: ExecutionResult,
     ctx: Ctx,
     request: Request,
   ) => ExecutionResult | undefined | void;
+  /**
+   * Wraps each synchronous entry into the operation's execution: the executor call (a query's or
+   * mutation's root fields, a subscription's source setup), each call into a subscription's source
+   * (its iterator, each pull, its `return()` or `throw()`), each subscription event's execution,
+   * each pull of an incremental response's subsequent payloads (graphql-js runs deferred work
+   * from there) and their close (which closes the @stream sources still open), the core's own
+   * aborts of the core signal (`signalOf(req)`: the client leaving, a stopped stream, an unsent
+   * result; graphql-js closes the @stream sources from its listener on that signal), and a custom
+   * executor's call to `next()` made outside the executor call (from an event emitter's callback,
+   * say). An entry made while the wrappers are already running (a
+   * `next()` called from the executor call) enters them again, nested: the code making it may
+   * run in another async context by then (a listener an `EventEmitterAsyncResource` calls in the
+   * context it was created in), so a wrapper must be reentrant, and may run `run` directly when
+   * its own state is in effect already. It calls `run` once, synchronously, and returns what it
+   * returns, and it must not throw. A wrapper (or an executor) that throws breaks this contract,
+   * and the core handles it on a best-effort basis only: the error is logged, the request fails
+   * with a 500, the core signal is aborted, and the work it can see is waited for as described
+   * below; work started in the instant before the throw (a resolver, a source iterator, a
+   * subscription event's execution) is not guaranteed to be stopped, closed or tracked.
+   * A wrapper that throws after calling `run` around an executor (the executor call, a
+   * `next()`) leaves that execution running, with nobody to read its result. The core keeps every
+   * such execution until it settles (a stream it gives is then closed) and stops a query's or
+   * subscription's: the one a `next()` started at once, on that entry's own signal (each `next()`
+   * runs with a signal linked to the one of the entry that called its executor, also when it is
+   * called later), the executor call's with the core signal, as the request fails. A failed
+   * request answers, and a started mutation's completion (`mutationOf(req).settled`, the drain)
+   * is published, only once none is left, work one of them starts meanwhile included, and every
+   * `next()` execution still running then, also one whose own wrapper succeeded (the claim that
+   * called it may be the abandoned one); a mutation's is never stopped. A plugin
+   * carries request-local state into the resolvers this way, which keep receiving the
+   * application's own context value: the Effect layer enters an `AsyncLocalStorage`, whose store
+   * the async continuations of that work inherit. Wrappers nest in list order (the first is the
+   * outermost). Synchronous, and in the hot loop.
+   */
+  readonly wrapExecution?: ExecutionWrapper;
   /**
    * Exactly once per request, on the Response before it goes to the transport (also for streamed
    * responses, whose headers it can still change). Not a "stream finished" hook. Returns a
@@ -268,6 +322,19 @@ export interface ServerControl {
 }
 
 export interface Server {
+  /**
+   * Handles one GraphQL-over-HTTP request. The Request object is the key of every per-request
+   * state the core and its plugins keep (`signalOf`, `startOf`, `mutationOf`, a plugin's own
+   * `WeakMap<Request, …>`), so a Request object must not be passed to `handle()` again, on this
+   * server or another, while an earlier call on it is still in flight, including a response body
+   * still being streamed. Parallel calls need distinct Request objects. The core reads a POST's
+   * body during `handle()`: a used POST can no longer be cloned (`clone()` throws a TypeError), and
+   * passed again it gets a 400. To replay a POST, clone it before the first call (or build a new
+   * Request with the same payload); reusing a Request with no body to read (a GET) after its
+   * response has finished works. An overlapping call is not blocked: the core logs a warning, which
+   * detects an overlap only until the earlier `handle()` call has returned (not while its body is
+   * still being streamed).
+   */
   readonly handle: (request: Request) => Promise<Response>;
   readonly control: ServerControl;
 }
@@ -285,4 +352,11 @@ export interface MutationState {
    * started. It never waits for the response body. The drain waits for it.
    */
   readonly settled: Promise<void>;
+  /**
+   * Once a started mutation has settled, the HTTP status of the answer the core built from its
+   * result (before onResponse): the response's status, an error result's 4xx or 5xx included,
+   * or 500 when building it failed (a result hook threw). `undefined` until then, and for a
+   * mutation that never started. A span end on `settled` reads it to tell ok from error.
+   */
+  readonly status: () => number | undefined;
 }

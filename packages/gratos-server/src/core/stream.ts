@@ -17,6 +17,8 @@
 // - closing the stream early (a body cancel, or the core signal aborting) aborts the core signal
 //   first, so cooperative sources stop (one waiting on `info.getAbortSignal()`), and only then
 //   awaits the iterator's `return()`: a `return()` alone can wait forever on a pending pull.
+//   The core signal aborts inside the request's execution wrappers (`enter`): graphql-js closes
+//   the @stream sources from its own listener on that signal, so the abort is part of closing them.
 import { GraphQLError } from "graphql";
 import type { ExecutionResult } from "graphql";
 
@@ -28,6 +30,49 @@ export interface StreamPayload {
   readonly result: ExecutionResult;
   readonly hasNext: boolean;
 }
+
+/** Runs a synchronous entry into execution inside the request's execution wrappers. */
+export type Enter = <T>(run: () => T) => T;
+
+/**
+ * Runs one of the core's own entries that must happen whatever the wrappers do (an abort of the
+ * core signal, the close of a source) inside the request's execution wrappers. A wrapper that
+ * throws is logged with `message` (a logger that throws as well is ignored), and `run` runs
+ * directly when it had not run yet (its result is kept when it had). A throw from `run` itself
+ * propagates.
+ */
+export const enterOrRun = <T>(enter: Enter, logger: Logger, message: string, run: () => T): T => {
+  let ran: { readonly value: T } | undefined;
+  let threw: { readonly error: unknown } | undefined;
+  try {
+    return enter(() => {
+      try {
+        const value = run();
+        ran = { value };
+        return value;
+      } catch (error) {
+        threw = { error };
+        throw error;
+      }
+    });
+  } catch (error) {
+    if (threw !== undefined && threw.error === error) {
+      throw error;
+    }
+    try {
+      logger.error(message, error);
+    } catch {
+      // A logger that throws too never skips the fallback, nor changes what `run` gave.
+    }
+    if (ran !== undefined) {
+      return ran.value;
+    }
+    if (threw !== undefined) {
+      throw threw.error;
+    }
+    return run();
+  }
+};
 
 /** The payloads still to come, pulled one at a time. */
 export interface PayloadSource {
@@ -45,9 +90,21 @@ export interface StreamOptions {
   readonly process: (result: ExecutionResult) => ExecutionResult;
   /** Turns a rejected pull into the GraphQL error the client gets (before `process`). */
   readonly failure: (error: unknown) => GraphQLError;
-  /** The core's request signal, and the controller that aborts it. */
+  /**
+   * The core's request signal, and the controller that aborts it. The stream aborts it inside
+   * `enter`: execution's listeners on it close sources (graphql-js closes @stream sources).
+   */
   readonly controller: AbortController;
+  /** Enters the request's execution wrappers (`wrapExecution`). */
+  readonly enter: Enter;
+  /**
+   * The incoming request's own signal: the client leaving. Watched until the closing frame is
+   * queued, also after the core signal was aborted to stop a failed source.
+   */
+  readonly clientSignal: AbortSignal;
   readonly logger: Logger;
+  /** Called once the stream has ended normally: its closing frame is in the body. */
+  readonly onEnd: () => void;
 }
 
 const encoder = new TextEncoder();
@@ -99,7 +156,7 @@ const sseFraming: Framing = {
 };
 
 const streamResponse = (framing: Framing, options: StreamOptions): Response => {
-  const { first, rest, process, failure, controller, logger } = options;
+  const { first, rest, process, failure, controller, enter, clientSignal, logger, onEnd } = options;
   const { signal } = controller;
   /** Set once the stream has ended or was cancelled: nothing more may touch its controller. */
   let finished = false;
@@ -112,9 +169,24 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
     started = true;
     return encoder.encode(prefix + text);
   };
-  /** Removes the abort listener once the stream has ended. */
+  /** Removes the abort listeners once the stream has ended. */
   const listening = new AbortController();
+  /**
+   * Set when the stream aborts the core signal itself to stop a failed source while it still
+   * sends that source's error: that abort is not the client leaving.
+   */
+  let stoppingSource = false;
   let closing: Promise<void> | undefined;
+
+  /**
+   * Aborts the core signal inside the request's execution wrappers. A throwing wrapper is logged
+   * and the signal aborted anyway, so a stop still reaches the sources and releases them.
+   */
+  const abortCore = (): void => {
+    enterOrRun(enter, logger, "gratos-server: a wrapExecution wrapper failed on an abort.", () => {
+      controller.abort();
+    });
+  };
 
   /** Closes the executor's iterator once; its own failure is not the client's concern. */
   const release = (): Promise<void> => {
@@ -135,7 +207,7 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
    */
   const stop = (): Promise<void> => {
     listening.abort();
-    controller.abort();
+    abortCore();
     return release();
   };
 
@@ -154,11 +226,22 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           stream.close();
           void stop();
         };
-        if (signal.aborted) {
+        if (signal.aborted || clientSignal.aborted) {
           leave();
           return;
         }
-        signal.addEventListener("abort", leave, { once: true, signal: listening.signal });
+        signal.addEventListener(
+          "abort",
+          () => {
+            if (!stoppingSource) {
+              leave();
+            }
+          },
+          { once: true, signal: listening.signal },
+        );
+        // The client leaving is watched on its own signal too, so it still ends the body while
+        // the stream sends a failed source's error after aborting the core signal itself.
+        clientSignal.addEventListener("abort", leave, { once: true, signal: listening.signal });
       },
       pull: async (stream) => {
         if (finished) {
@@ -169,6 +252,7 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           finished = true;
           stream.enqueue(chunk(text));
           stream.close();
+          onEnd();
           await release();
         };
         /**
@@ -240,11 +324,17 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
             return;
           }
           // The source failed. The executor is stopped as a cancel stops it: the core signal
-          // first (its listener here detached, the body still sends the error), so a cleanup
-          // that waits on the signal ends; `return()` comes once the last payload is sent. The
-          // source's error is that last payload, through the same result hooks.
-          listening.abort();
-          controller.abort();
+          // first (so a cleanup that waits on the signal ends), while the body still sends the
+          // error; `return()` comes once the last payload is sent. The source's error is that
+          // last payload, through the same result hooks. A client that leaves before the closing
+          // frame is queued still ends the body (its own signal is still watched).
+          stoppingSource = true;
+          abortCore();
+          // A listener on the core signal may have made the client leave right away (the body
+          // has ended): nothing is reported then, as for any rejected pull once it has left.
+          if (finished) {
+            return;
+          }
           const result = await processed({ errors: [failure(error)] });
           if (result !== undefined) {
             await sendPayload({ result, hasNext: false });

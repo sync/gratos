@@ -1,10 +1,13 @@
 // reportErrors(log): hands every error of every execution payload to `log`, with the request's
 // context: a result's errors, those of each incremental entry, and those of each subscription
 // event (including the error a failing source ends with). It sees results only (the core skips
-// it when the client has gone and execution was aborted). List it before maskErrors() so it sees
-// the unmasked errors.
+// it once the client has gone, except for a started mutation's result), and skips `cancelled()`
+// errors (work stopped because the client left, such as an Effect resolver interrupted on the
+// abort, wherever such an error still reaches a result). List it before
+// maskErrors() so it sees the unmasked errors.
 import type { GraphQLError } from "graphql";
 
+import { isCancelled } from "../core/errors.ts";
 import { payloadErrors } from "../core/payload.ts";
 import type { Plugin } from "../core/types.ts";
 
@@ -14,7 +17,9 @@ export const reportErrors = <Ctx = unknown>(
   name: "reportErrors",
   onResult: (payload, ctx, request) => {
     for (const error of payloadErrors(payload)) {
-      log(error, ctx, request);
+      if (!isCancelled(error)) {
+        log(error, ctx, request);
+      }
     }
     return undefined;
   },

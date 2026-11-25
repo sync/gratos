@@ -2,7 +2,7 @@
 // per-request AbortController, signalOf/startOf/mutationOf, the one synchronous gate step before
 // the executor, control.drain({ warnAfterMs }), 503 SERVER_DRAINING, and aborts.
 import { execute } from "graphql";
-import type { GraphQLResolveInfo } from "graphql";
+import type { ExecutionResult, GraphQLResolveInfo } from "graphql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -16,8 +16,9 @@ import {
   startOf,
 } from "../src/index.ts";
 import type { ExecuteInput, ExecutorResult, Plugin } from "../src/index.ts";
-import { flush, gate, gql, post, send, sleep } from "./support/http.ts";
+import { flush, gate, gql, post, send, sleep, waitFor } from "./support/http.ts";
 import { basicSchema } from "./support/schema.ts";
+import { readMultipart } from "./support/stream.ts";
 
 const silent = { warn: () => {}, error: () => {} };
 
@@ -205,6 +206,49 @@ describe("mutationOf", () => {
   });
 });
 
+describe("mutationOf(req).status", () => {
+  it("is the status of the answer built from a settled mutation's result", async () => {
+    const server = createServer({ schema: basicSchema() });
+    const request = post({ query: "mutation { bump }" });
+    const seen: Array<number | undefined> = [mutationOf(request)?.status()];
+    const response = await server.handle(request);
+    expect(response.status).toBe(200);
+    seen.push(mutationOf(request)?.status());
+    expect(seen).toEqual([undefined, 200]);
+  });
+
+  it("is a 500 when building the answer failed (a throwing result hook)", async () => {
+    let status: number | undefined;
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        {
+          onResult: () => {
+            throw new Error("hook failed");
+          },
+        },
+        {
+          onResponse: (_response, request) => {
+            status = mutationOf(request)?.status();
+          },
+        },
+      ],
+      logger: silent,
+    });
+    const response = await server.handle(post({ query: "mutation { bump }" }));
+    expect(response.status).toBe(500);
+    expect(status).toBe(500);
+  });
+
+  it("stays undefined for a mutation that never started", async () => {
+    const server = createServer({ schema: basicSchema() });
+    await server.control.drain();
+    const request = post({ query: "mutation { bump }" });
+    expect((await server.handle(request)).status).toBe(503);
+    expect(mutationOf(request)?.status()).toBeUndefined();
+  });
+});
+
 describe("no late start", () => {
   it("a client that leaves during the context phase never starts the mutation (499, onResponse runs)", async () => {
     const hold = gate();
@@ -277,6 +321,36 @@ describe("aborted execution", () => {
     expect(response.status).toBe(CLIENT_CLOSED_REQUEST);
     expect(response.body).toBeNull();
     expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(onResult).not.toHaveBeenCalled();
+    expect(onResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it("a query's single result that settles after the client left is a 499, unprocessed", async () => {
+    const late = gate<ExecutionResult>();
+    const executed = gate();
+    const onResult = vi.fn();
+    const onResponse = vi.fn();
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        // An executor that ignores the abort signal (as graphql-jit does).
+        {
+          onExecute: () => () => {
+            executed.resolve();
+            return late.promise;
+          },
+        },
+        { onResult, onResponse },
+      ],
+    });
+    const client = new AbortController();
+    const pending = server.handle(post({ query: "{ count }" }, { signal: client.signal }));
+    await executed.promise;
+    client.abort();
+    late.resolve({ data: { count: 1 } });
+    const response = await pending;
+    expect(response.status).toBe(CLIENT_CLOSED_REQUEST);
+    expect(response.body).toBeNull();
     expect(onResult).not.toHaveBeenCalled();
     expect(onResponse).toHaveBeenCalledTimes(1);
   });
@@ -635,6 +709,669 @@ describe("control.drain", () => {
     await drained;
     expect(events).toEqual(["first committed", "second committed", "drained"]);
     expect((await pending).body).toEqual({ data: { bump: 1, bump2: 2 } });
+  });
+
+  it("keeps a started mutation tracked until its work settles when a wrapper throws after it ran", async () => {
+    const events: Array<string> = [];
+    const hold = gate();
+    const started = gate();
+    const error = vi.fn();
+    const server = createServer({
+      schema: basicSchema({
+        Mutation: {
+          bump: async () => {
+            started.resolve();
+            await hold.promise;
+            events.push("committed");
+            return 1;
+          },
+        },
+      }),
+      logger: { warn: () => {}, error },
+      plugins: [
+        {
+          // Calls the executor, then fails: the mutation it started keeps running.
+          wrapExecution: (_request, run) => {
+            run();
+            throw new Error("wrapper failed");
+          },
+        },
+      ],
+    });
+    const pending = gql(server, "mutation { bump }");
+    await started.promise;
+    const drained = server.control.drain().then(() => events.push("drained"));
+    await sleep(5);
+    expect(events).toEqual([]);
+    hold.resolve();
+    await drained;
+    expect(events).toEqual(["committed", "drained"]);
+    const sent = await pending;
+    expect(sent.status).toBe(500);
+  });
+
+  it("keeps a started mutation tracked when a wrapper around an executor's next() throws after it ran", async () => {
+    const events: Array<string> = [];
+    const hold = gate();
+    const started = gate();
+    let entries = 0;
+    const server = createServer({
+      schema: basicSchema({
+        Mutation: {
+          bump: async () => {
+            started.resolve();
+            await hold.promise;
+            events.push("committed");
+            return 1;
+          },
+        },
+      }),
+      logger: silent,
+      plugins: [
+        // Delegates: its next() enters the wrappers again, inside the executor call.
+        { onExecute: () => (next) => next() },
+        {
+          // The second entry is the one around next(): it starts the mutation, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const result = run();
+            if (entries === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const pending = gql(server, "mutation { bump }");
+    await started.promise;
+    const drained = server.control.drain().then(() => events.push("drained"));
+    await sleep(5);
+    expect(events).toEqual([]);
+    hold.resolve();
+    await drained;
+    expect(events).toEqual(["committed", "drained"]);
+    expect((await pending).status).toBe(500);
+  });
+
+  it("keeps a mutation tracked until the work an abandoned executor starts while the request waits for it has settled", async () => {
+    const events: Array<string> = [];
+    const answered = gate();
+    const delayed = gate();
+    const started = gate();
+    const hold = gate();
+    let entries = 0;
+    const server = createServer({
+      schema: basicSchema({
+        Mutation: {
+          bump: async () => {
+            started.resolve();
+            await hold.promise;
+            events.push("committed");
+            return 1;
+          },
+        },
+      }),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback at once.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              answered.resolve();
+              return { data: { bump: 0 } };
+            }
+          },
+        },
+        {
+          // Left running by the wrapper's error; starts the mutation only once told to.
+          onExecute: () => async (next) => {
+            await delayed.promise;
+            try {
+              return await next();
+            } catch {
+              return { data: { bump: -1 } };
+            }
+          },
+        },
+        {
+          // The entries around each next() run it, then fail.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry > 1) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const pending = gql(server, "mutation { bump }");
+    await answered.promise;
+    await flush();
+    const drained = server.control.drain().then(() => events.push("drained"));
+    // The request now waits for the abandoned executor (the fallback's microtasks have run), which
+    // starts the mutation.
+    delayed.resolve();
+    await started.promise;
+    await flush();
+    expect(events).toEqual([]);
+    hold.resolve();
+    await drained;
+    expect(events).toEqual(["committed", "drained"]);
+    const sent = await pending;
+    expect(sent.status).toBe(200);
+    expect(sent.body).toEqual({ data: { bump: 0 } });
+  });
+
+  it("aborts a query a wrapper started before it threw, and answers its 500", async () => {
+    const started = gate();
+    let aborted = false;
+    const request = post({ query: "{ hello }" });
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          // Settles only once its abort signal aborts (the client stays connected).
+          hello: (_source, _args, _context, info: GraphQLResolveInfo) =>
+            new Promise<string>((resolve) => {
+              started.resolve();
+              info.getAbortSignal()?.addEventListener(
+                "abort",
+                () => {
+                  aborted = true;
+                  resolve("late");
+                },
+                { once: true },
+              );
+            }),
+        },
+      }),
+      logger: silent,
+      plugins: [
+        {
+          // Calls the executor, then fails: the query it started keeps waiting.
+          wrapExecution: (_request, run) => {
+            run();
+            throw new Error("wrapper failed");
+          },
+        },
+      ],
+    });
+    const sent = send(server, request);
+    await started.promise;
+    const answered = await Promise.race([sent, sleep(1000).then(() => "hung" as const)]);
+    expect(answered).not.toBe("hung");
+    expect(answered === "hung" ? undefined : answered.status).toBe(500);
+    expect(aborted).toBe(true);
+    expect(signalOf(request)?.aborted).toBe(true);
+  });
+
+  it("observes the rejection of an execution a wrapper around next() left running while the executor awaits a fallback", async () => {
+    const unhandled: Array<unknown> = [];
+    const listener = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", listener);
+    const caught = gate();
+    const abandon = gate();
+    const fallback = gate();
+    try {
+      let entries = 0;
+      const server = createServer({
+        schema: basicSchema(),
+        logger: silent,
+        plugins: [
+          {
+            // Catches the nested entry's error and answers with a fallback it waits for.
+            onExecute: () => async (next) => {
+              try {
+                return await next();
+              } catch {
+                caught.resolve();
+                await fallback.promise;
+                return { data: { hello: "fallback" } };
+              }
+            },
+          },
+          // Its execution, which the throwing wrapper leaves running, fails once told to.
+          {
+            onExecute: () => async () => {
+              await abandon.promise;
+              throw new Error("abandoned");
+            },
+          },
+          {
+            // The second entry is the one around next(): it runs it, then fails.
+            wrapExecution: (_request, run) => {
+              entries += 1;
+              const entry = entries;
+              const result = run();
+              if (entry === 2) {
+                throw new Error("wrapper failed");
+              }
+              return result;
+            },
+          },
+        ],
+      });
+      const sent = gql(server, "{ hello }");
+      // The abandoned execution rejects while the fallback is still held, and Node gets a full
+      // event-loop turn to report the rejection before anything else can observe it.
+      await caught.promise;
+      abandon.resolve();
+      await flush();
+      expect(unhandled).toEqual([]);
+      fallback.resolve();
+      const response = await sent;
+      expect(response.error).toBeUndefined();
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ data: { hello: "fallback" } });
+    } finally {
+      fallback.resolve();
+      process.off("unhandledRejection", listener);
+    }
+  });
+
+  it("stops a query a wrapper around next() left running when the executor answers with a fallback", async () => {
+    const started = gate();
+    let aborted = false;
+    let entries = 0;
+    const request = post({ query: "{ hello }" });
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          // Settles only once its abort signal aborts (the client stays connected).
+          hello: (_source, _args, _context, info: GraphQLResolveInfo) =>
+            new Promise<string>((resolve) => {
+              started.resolve();
+              info.getAbortSignal()?.addEventListener(
+                "abort",
+                () => {
+                  aborted = true;
+                  resolve("late");
+                },
+                { once: true },
+              );
+            }),
+        },
+      }),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              return { data: { hello: "fallback" } };
+            }
+          },
+        },
+        {
+          // The second entry is the one around next(): it starts the query, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await send(server, request);
+    await started.promise;
+    expect(response.error).toBeUndefined();
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: { hello: "fallback" } });
+    expect(aborted).toBe(true);
+    // Its own signal aborted: the core signal (the fallback's) is untouched.
+    expect(signalOf(request)?.aborted).toBe(false);
+  });
+
+  it("keeps a mutation tracked until a next() an abandoned executor makes has settled, also when that next()'s wrapper succeeds", async () => {
+    const events: Array<string> = [];
+    const answered = gate();
+    const delayed = gate();
+    const started = gate();
+    const hold = gate();
+    let entries = 0;
+    const server = createServer({
+      schema: basicSchema({
+        Mutation: {
+          bump: async () => {
+            started.resolve();
+            await hold.promise;
+            events.push("committed");
+            return 1;
+          },
+        },
+      }),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback at once.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              answered.resolve();
+              return { data: { bump: 0 } };
+            }
+          },
+        },
+        {
+          // Left running by the wrapper's error; later starts the mutation, and answers before
+          // it settles (a race it loses against a timeout, say).
+          onExecute: () => async (next) => {
+            await delayed.promise;
+            const child = Promise.resolve(next());
+            return Promise.race([child, Promise.resolve({ data: { bump: -1 } })]);
+          },
+        },
+        {
+          // Only the entry around the first claim's next() fails: the one around the second
+          // claim's next() succeeds.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const pending = gql(server, "mutation { bump }");
+    await answered.promise;
+    await flush();
+    const drained = server.control.drain().then(() => events.push("drained"));
+    delayed.resolve();
+    await started.promise;
+    await flush();
+    // The abandoned executor has answered; the mutation its next() started has not settled.
+    expect(events).toEqual([]);
+    hold.resolve();
+    await drained;
+    expect(events).toEqual(["committed", "drained"]);
+    const sent = await pending;
+    expect(sent.status).toBe(200);
+    expect(sent.body).toEqual({ data: { bump: 0 } });
+  });
+
+  it("stops the execution a claim's delayed next() starts once the wrapper around that claim failed and the executor answered with a fallback", async () => {
+    const delayed = gate();
+    let settled = false;
+    let entries = 0;
+    const request = post({ query: "{ hello }" });
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          // Settles only once its abort signal aborts (the client stays connected).
+          hello: (_source, _args, _context, info: GraphQLResolveInfo) =>
+            new Promise<string>((resolve) => {
+              info.getAbortSignal()?.addEventListener(
+                "abort",
+                () => {
+                  resolve("late");
+                },
+                { once: true },
+              );
+            }),
+        },
+      }),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              return { data: { hello: "fallback" } };
+            }
+          },
+        },
+        {
+          // Delegates only later (a queue, say), after the entry it was called in has failed.
+          onExecute: () => async (next) => {
+            await delayed.promise;
+            try {
+              return await next();
+            } finally {
+              settled = true;
+            }
+          },
+        },
+        {
+          // The second entry is the one around the first claim's next(): it runs the second
+          // claim, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await send(server, request);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: { hello: "fallback" } });
+    delayed.resolve();
+    // Its next() runs with the signal of the entry it was called in, which stopped with it.
+    await waitFor(() => settled, "the delayed next()'s execution settling");
+    expect(signalOf(request)?.aborted).toBe(false);
+  });
+
+  it("gives an executor a next() runs the signal of its own entry, aborted when the wrapper around that next() fails", async () => {
+    let stopped = false;
+    let entries = 0;
+    const request = post({ query: "{ hello }" });
+    const server = createServer({
+      schema: basicSchema(),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              return { data: { hello: "fallback" } };
+            }
+          },
+        },
+        {
+          // Settles only once its own signal aborts.
+          onExecute: () => (_next, signal) =>
+            new Promise<ExecutionResult>((resolve) => {
+              signal?.addEventListener(
+                "abort",
+                () => {
+                  stopped = true;
+                  resolve({ data: { hello: "late" } });
+                },
+                { once: true },
+              );
+            }),
+        },
+        {
+          // The second entry is the one around the first claim's next(): it runs the second
+          // claim, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await send(server, request);
+    expect(response.body).toEqual({ data: { hello: "fallback" } });
+    await waitFor(() => stopped, "the abandoned executor's signal aborting");
+    // The fallback's signal (the core's) is not aborted.
+    expect(signalOf(request)?.aborted).toBe(false);
+  });
+
+  it("closes a stream a wrapper around next() left running, and sends the stream the executor answers with instead", async () => {
+    let returns = 0;
+    let calls = 0;
+    let entries = 0;
+    /** An incremental result with one deferred payload, sent after `delay` ms. */
+    const incrementalOf = (hello: string, delay: number): ExecutorResult => ({
+      initialResult: { data: { hello }, hasNext: true },
+      subsequentResults: {
+        next: async () => {
+          await sleep(delay);
+          return {
+            done: false,
+            value: { incremental: [{ data: { count: 1 }, path: [] }], hasNext: false },
+          };
+        },
+        return: async () => {
+          if (hello === "abandoned") {
+            returns += 1;
+          }
+          return { done: true, value: undefined };
+        },
+        throw: (error: unknown) => Promise.reject(error),
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+        [Symbol.asyncDispose]: () => Promise.resolve(),
+      },
+    });
+    const request = post({ query: "{ hello }" }, { accept: "multipart/mixed" });
+    const server = createServer({
+      schema: basicSchema(),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and delegates again.
+          onExecute: () => (next) => {
+            try {
+              return next();
+            } catch {
+              return next();
+            }
+          },
+        },
+        {
+          onExecute: () => () => {
+            calls += 1;
+            return calls === 1 ? incrementalOf("abandoned", 0) : incrementalOf("sent", 10);
+          },
+        },
+        {
+          // The second entry is the one around the first next(): it runs it, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await server.handle(request);
+    expect(response.status).toBe(200);
+    const parts = readMultipart(await response.text());
+    expect(parts).toEqual([
+      { data: { hello: "sent" }, hasNext: true },
+      { incremental: [{ data: { count: 1 }, path: [] }], hasNext: false },
+    ]);
+    await waitFor(() => returns > 0, "the abandoned stream's return() call");
+    expect(signalOf(request)?.aborted).toBe(false);
+  });
+
+  it("never leaves the cleanup of a stream a wrapper around next() left running unhandled, when its close and the logger both fail", async () => {
+    const unhandled: Array<unknown> = [];
+    const listener = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", listener);
+    try {
+      let returns = 0;
+      let entries = 0;
+      const server = createServer({
+        schema: basicSchema(),
+        logger: {
+          warn: () => {},
+          error: () => {
+            throw new Error("logger failed");
+          },
+        },
+        plugins: [
+          {
+            // Catches the nested entry's error and answers with a fallback.
+            onExecute: () => (next) => {
+              try {
+                return next();
+              } catch {
+                return { data: { hello: "fallback" } };
+              }
+            },
+          },
+          {
+            // An incremental result whose close fails.
+            onExecute: () => () => ({
+              initialResult: { data: { hello: "abandoned" }, hasNext: true },
+              subsequentResults: {
+                next: () => Promise.resolve({ done: true, value: undefined }),
+                return: () => {
+                  returns += 1;
+                  return Promise.reject(new Error("close failed"));
+                },
+                throw: (error: unknown) => Promise.reject(error),
+                [Symbol.asyncIterator]() {
+                  return this;
+                },
+                [Symbol.asyncDispose]: () => Promise.resolve(),
+              },
+            }),
+          },
+          {
+            // The second entry is the one around next(): it runs it, then fails.
+            wrapExecution: (_request, run) => {
+              entries += 1;
+              const entry = entries;
+              const result = run();
+              if (entry === 2) {
+                throw new Error("wrapper failed");
+              }
+              return result;
+            },
+          },
+        ],
+      });
+      const response = await gql(server, "{ hello }");
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ data: { hello: "fallback" } });
+      await waitFor(() => returns > 0, "the abandoned stream's return() call");
+      await flush();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", listener);
+    }
   });
 
   it("a continuation on mutationOf(req).settled runs before drain() resolves", async () => {

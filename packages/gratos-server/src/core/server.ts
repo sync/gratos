@@ -40,11 +40,19 @@ import {
 } from "./http.ts";
 import type { Accepted, MediaType } from "./http.ts";
 import { hasIncrementalDirectives, NoIncrementalMutationsRule } from "./incremental.ts";
-import { registerMutation, registerRequest } from "./requestState.ts";
+import {
+  beginHandling,
+  bindOperation,
+  endHandling,
+  endStream,
+  recordAnswer,
+  registerMutation,
+  registerRequest,
+} from "./requestState.ts";
 import type { MutationTracker } from "./requestState.ts";
-import { multipartResponse, sseResponse } from "./stream.ts";
+import { enterOrRun, multipartResponse, sseResponse } from "./stream.ts";
 import { subscribeOnce } from "./subscribe.ts";
-import type { PayloadSource, StreamOptions, StreamPayload } from "./stream.ts";
+import type { Enter, PayloadSource, StreamOptions, StreamPayload } from "./stream.ts";
 import type {
   BaseServerOptions,
   ContextFactory,
@@ -55,7 +63,6 @@ import type {
   ExecutorResult,
   IncrementalResults,
   Logger,
-  NextExecutor,
   Params,
   Phase,
   PhaseName,
@@ -111,14 +118,23 @@ const unexpected = (originalError: unknown): GraphQLError =>
  * `legacyExecuteIncrementally()` when the schema declares @defer or @stream: `execute()` throws
  * on such a schema, even for an operation that uses neither.
  */
-const defaultExecutor =
-  (operation: OperationDefinitionNode, args: ExecutionArgs): NextExecutor =>
-  () => {
-    if (operation.operation === "subscription") {
-      return subscribeOnce(args);
-    }
-    return hasIncrementalDirectives(args.schema) ? legacyExecuteIncrementally(args) : execute(args);
-  };
+const defaultExecutor = (
+  operation: OperationDefinitionNode,
+  args: ExecutionArgs,
+  signal: AbortSignal | undefined,
+  enter: Enter,
+  logger: Logger,
+): PromiseOrValue<ExecutorResult> => {
+  if (operation.operation === "subscription") {
+    // A throwing wrapper still closes the source (directly).
+    return subscribeOnce(args, enter, (run) =>
+      enterOrRun(enter, logger, "gratos-server: a wrapExecution wrapper failed on a close.", run),
+    );
+  }
+  // The signal of the entry it runs in (see startExecution): the core's, or a claim's next()'s.
+  const run = signal === args.abortSignal ? args : { ...args, abortSignal: signal };
+  return hasIncrementalDirectives(run.schema) ? legacyExecuteIncrementally(run) : execute(run);
+};
 
 /** A rejected pull (a failed subscription source) as the GraphQL error the client gets. */
 const sourceFailure = (error: unknown): GraphQLError => {
@@ -145,16 +161,45 @@ const subscriptionSource = (
   },
 });
 
-/** The subsequent payloads of an incremental result as stream payloads. */
-const incrementalSource = (results: IncrementalResults["subsequentResults"]): PayloadSource => ({
+/**
+ * The subsequent payloads of an incremental result as stream payloads. Each pull and the close
+ * run inside the request's execution wrappers (`wrapExecution`): graphql-js runs deferred work
+ * from a pull, and closes the @stream sources (their `return()`, a generator's `finally`) from
+ * the close.
+ */
+const incrementalSource = (
+  results: IncrementalResults["subsequentResults"],
+  enter: Enter,
+  logger: Logger,
+): PayloadSource => ({
   next: async () => {
-    const pulled = await results.next();
+    let pull: ReturnType<typeof results.next> | undefined;
+    let entered: ReturnType<typeof results.next>;
+    try {
+      entered = enter(() => {
+        pull = results.next();
+        return pull;
+      });
+    } catch (error) {
+      // A wrapper that threw after starting the pull leaves it pending until the stream stops
+      // the source: its rejection then (an abort) is observed here, never unhandled, and the
+      // wrapper's error stays the failure.
+      void pull?.catch(() => {});
+      throw error;
+    }
+    const pulled = await entered;
     return pulled.done === true
       ? pulled
       : { done: false, value: { result: pulled.value, hasNext: pulled.value.hasNext } };
   },
+  // A throwing wrapper still closes the results (directly).
   return: async () => {
-    await results.return();
+    await enterOrRun(
+      enter,
+      logger,
+      "gratos-server: a wrapExecution wrapper failed on a close.",
+      () => results.return(),
+    );
   },
 });
 
@@ -164,18 +209,48 @@ interface TrackedMutation {
   readonly done: Promise<void>;
 }
 
-const noop = (): void => {};
+const noop = (_status: number): void => {};
 
-/** A controller that aborts when `incoming` (the Request's signal: the client left) does. */
-const linkedController = (incoming: AbortSignal): AbortController => {
+const settled = (): void => {};
+
+/** The abandoned executions of a request that dispatched nothing. */
+const noneAbandoned: ReadonlySet<Promise<void>> = new Set();
+
+/** The claims of an operation no plugin claims (and of every subscription). */
+const noClaims: ReadonlyArray<Executor> = [];
+
+/**
+ * A controller that aborts when `incoming` (the Request's signal: the client left) does. With
+ * `enter`, that abort runs inside the request's execution wrappers: execution's listeners on the
+ * controller's signal close sources (graphql-js closes the @stream sources from its own).
+ */
+const linkedController = (
+  incoming: AbortSignal,
+  enter?: Enter,
+  logger?: Logger,
+): AbortController => {
   const controller = new AbortController();
-  if (incoming.aborted) {
+  const abort = (): void => {
     controller.abort(incoming.reason);
+  };
+  if (incoming.aborted) {
+    abort();
   } else {
     incoming.addEventListener(
       "abort",
       () => {
-        controller.abort(incoming.reason);
+        if (enter === undefined || logger === undefined) {
+          abort();
+          return;
+        }
+        // Inside an EventTarget listener a throwing wrapper would be an uncaught exception and
+        // leave the core signal unaborted (sources never told to stop): log it and abort anyway.
+        enterOrRun(
+          enter,
+          logger,
+          "gratos-server: a wrapExecution wrapper failed on a client abort.",
+          abort,
+        );
       },
       { once: true, signal: controller.signal },
     );
@@ -192,10 +267,24 @@ type Outcome =
 interface Dispatched {
   readonly _tag: "dispatched";
   readonly outcome: Outcome;
+  /**
+   * The executions a wrapper left running: each entry into the wrappers that ran an executor
+   * (the core's executor call, or the entry around a claim's `next()`) and then threw. Each is
+   * kept, from inside the entry before the wrapper can throw, as a promise that settles (never
+   * rejects) once the execution has settled and a stream it gave is closed (nobody else holds
+   * it), and leaves the set then. Once one is kept, so is every `next()` execution still running
+   * whose own wrapper did not throw (the claim that called it may be the abandoned one, which
+   * nobody waits for). An executor may call `next()` later, also while the request waits for
+   * them, so the set is read until it is empty (see settleAbandoned).
+   */
+  readonly abandoned: ReadonlySet<Promise<void>>;
   /** Whether a mutation's executor was called (false when it failed before dispatch). */
   readonly mutationStarted: boolean;
-  /** Publishes a mutation's completion; a no-op for other operations. */
-  readonly finish: () => void;
+  /**
+   * Publishes a mutation's completion, with the status of the answer built from its result; a
+   * no-op for other operations.
+   */
+  readonly finish: (status: number) => void;
 }
 
 /** An early answer: a Response to send as is. */
@@ -253,6 +342,30 @@ const serve = <Ctx>(
   const onExecute = hooksOf(plugins, "onExecute");
   const onResult = hooksOf(plugins, "onResult");
   const onResponse = hooksOf(plugins, "onResponse");
+  // The first wrapper is the outermost.
+  const wrapExecution = hooksOf(plugins, "wrapExecution").toReversed();
+
+  /** Runs `run` inside every plugin's execution wrapper (directly when there is none). */
+  const enterExecution = <T>(request: Request, run: () => T): T => {
+    let wrapped = run;
+    for (const hook of wrapExecution) {
+      const inner = wrapped;
+      wrapped = () => hook(request, inner);
+    }
+    return wrapped();
+  };
+
+  /**
+   * A request's entry into its execution wrappers. Every entry enters them, also one made while
+   * they are running (an executor calling `next()` from the executor call): the code that makes
+   * it may run in another context by then (a listener an EventEmitterAsyncResource calls in the
+   * context it was created in, another request's, say), so only the wrappers know whether they
+   * are in effect. A wrapper entered again with its own state in effect can run `run` directly.
+   */
+  const entryOf =
+    (request: Request): Enter =>
+    (run) =>
+      enterExecution(request, run);
 
   const tracked = new Set<TrackedMutation>();
   let draining = false;
@@ -356,6 +469,8 @@ const serve = <Ctx>(
     errorsAsEvents: boolean;
     ctx: Ctx | undefined;
     mutation: MutationTracker | undefined;
+    /** Enters the request's execution wrappers (`wrapExecution`; see entryOf). */
+    readonly enter: Enter;
   }
 
   /**
@@ -368,6 +483,9 @@ const serve = <Ctx>(
    * connection without the errors.
    */
   const respond = (run: Run, result: ExecutionResult, status?: number): Response => {
+    const answered = status ?? statusOf(result, run.mediaType);
+    // The status a JSON client would get, also for an SSE-only one's 200 (answerStatusOf).
+    recordAnswer(run.request, answered);
     if (run.errorsAsEvents) {
       return sseResponse({
         first: { result, hasNext: false },
@@ -375,21 +493,31 @@ const serve = <Ctx>(
         process: (payload) => payload,
         failure: sourceFailure,
         controller: run.controller,
+        enter: run.enter,
+        clientSignal: run.request.signal,
         logger,
+        onEnd: () => {
+          endStream(run.request);
+        },
       });
     }
-    return jsonResponse(result, status ?? statusOf(result, run.mediaType), run.mediaType, () => {
-      run.controller.abort();
+    return jsonResponse(result, answered, run.mediaType, () => {
+      abortInside(run);
     });
   };
 
-  /** Closes a streamed result; a cleanup that fails is logged and never changes the answer. */
-  const closeStreamed = async (result: ExecutorResult): Promise<void> => {
+  /**
+   * Closes a streamed result inside the request's execution wrappers (its sources' cleanup runs
+   * there); a cleanup that fails is logged and never changes the answer.
+   */
+  const closeStreamed = async (run: Run, result: ExecutorResult): Promise<void> => {
+    const message = "gratos-server: a wrapExecution wrapper failed on a close.";
     try {
+      // A throwing wrapper still closes the result (directly).
       if (Symbol.asyncIterator in result) {
-        await result.return();
+        await enterOrRun(run.enter, logger, message, () => result.return());
       } else if ("initialResult" in result) {
-        await result.subsequentResults.return();
+        await enterOrRun(run.enter, logger, message, () => result.subsequentResults.return());
       }
     } catch (error) {
       logger.error("gratos-server: closing a streamed result failed.", error);
@@ -398,14 +526,16 @@ const serve = <Ctx>(
 
   /**
    * Closes a streamed result that is not sent (a refusal, a client that left, a failing result
-   * hook). The core signal aborts first, so a cleanup that waits on it, or on a pending pull,
-   * ends. The answer that follows (a 406, a failing hook's 500) gets a controller of its own,
+   * hook). The core signal aborts first, inside the execution wrappers (graphql-js closes @stream
+   * sources from its listener on it), so a cleanup that waits on it, or on a pending pull, ends.
+   * The answer that follows (a 406, a failing hook's 500) gets a controller of its own,
    * aborted only when the client leaves: the core signal no longer says whether it is there.
+   * A throwing wrapper is logged; the signal still aborts and the result still closes.
    */
   const closeUnsent = async (run: Run, result: ExecutorResult): Promise<void> => {
-    run.controller.abort();
+    abortInside(run);
     run.controller = linkedController(run.request.signal);
-    await closeStreamed(result);
+    await closeStreamed(run, result);
   };
 
   /** Whether the request is a mutation (not started yet) and the drain has begun. */
@@ -433,9 +563,26 @@ const serve = <Ctx>(
    * client does not accept. It is JSON with its status (the M4a HTTP matrix) for every client,
    * an SSE-only one included: only GraphQL request errors go out as GraphQL-over-SSE events.
    */
+  /**
+   * Aborts the core signal inside the request's execution wrappers (a JSON body cancelled
+   * unread), so its listeners (signalOf, a source's cleanup) run there, as on every other abort
+   * the core makes. A throwing wrapper is logged and the signal aborted anyway.
+   */
+  const abortInside = (run: Run): void => {
+    const { controller } = run;
+    enterOrRun(
+      run.enter,
+      logger,
+      "gratos-server: a wrapExecution wrapper failed on an abort.",
+      () => {
+        controller.abort();
+      },
+    );
+  };
+
   const transportError = (run: Run, message: string, status: number): Response =>
     jsonResponse(errorResult([new GraphQLError(message)]), status, run.mediaType, () => {
-      run.controller.abort();
+      abortInside(run);
     });
 
   /** read: method, Accept, Content-Type, body, onParams, the "no query" check. */
@@ -569,20 +716,106 @@ const serve = <Ctx>(
       return {
         _tag: "dispatched",
         outcome: { ok: false, error },
+        abandoned: noneAbandoned,
         mutationStarted: false,
         finish: noop,
       };
     }
-    // The first claim runs; its `next` is the executor that would have run without it (the next
-    // claim in list order, else the default). A subscription always runs through subscribe(): a
-    // claim cannot answer it (an executor such as legacyExecuteIncrementally would return a
-    // one-shot result), so its claims are ignored once every hook has had its say.
-    let execute: NextExecutor = defaultExecutor(input.operation, args);
-    const chosen = input.operation.operation === "subscription" ? undefined : claims;
-    for (const claim of chosen?.toReversed() ?? []) {
-      const next = execute;
-      execute = () => claim(next);
-    }
+    // The first claim runs. A subscription always runs through subscribe(): a claim cannot
+    // answer it (an executor such as legacyExecuteIncrementally would return a one-shot result),
+    // so its claims are ignored once every hook has had its say.
+    const { enter } = run;
+    const abandoned = new Set<Promise<void>>();
+    /** The `next()` executions still running whose entry succeeded, until one is abandoned. */
+    let running: Set<Promise<void>> | undefined = new Set();
+    const keep = (done: Promise<void>): void => {
+      abandoned.add(done);
+      void done.then(() => {
+        abandoned.delete(done);
+      });
+    };
+    /**
+     * Keeps an execution a wrapper left running until it settles (see Dispatched), observed at
+     * once: it may reject while an executor that caught the wrapper's error still works on its
+     * answer. Nobody reads its result, so a query's is stopped at once through its entry's own
+     * signal, inside the wrappers; the core's entry has none (the request fails, and
+     * settleAbandoned stops it with the core signal), and a mutation's is never stopped.
+     */
+    const abandon = (
+      result: PromiseOrValue<ExecutorResult>,
+      controller: AbortController | undefined,
+    ): void => {
+      keep(retire(run, result));
+      // A next() an abandoned claim made (or makes) may have succeeded: it is kept too.
+      for (const done of running ?? []) {
+        keep(done);
+      }
+      running = undefined;
+      if (controller !== undefined) {
+        enterOrRun(
+          enter,
+          logger,
+          "gratos-server: a wrapExecution wrapper failed on an abort.",
+          () => {
+            controller.abort();
+          },
+        );
+      }
+    };
+    const chosen = input.operation.operation === "subscription" ? noClaims : (claims ?? noClaims);
+    /**
+     * Enters the wrappers to run executor `index` (a claim, else the default), keeping what it
+     * returned from inside the entry: a wrapper that throws after running it leaves that
+     * execution running (see `abandoned`). A successful entry's result is returned as is. The
+     * core's entry (index 0) runs with the core signal; a claim's `next()` of a query runs with a
+     * signal of its own, linked to `signal`, the signal of the entry that called the claim: bound
+     * when the claim is called, so a `next()` it makes later (after an await, from a queue) is
+     * still stopped with it (see abandon).
+     */
+    const enterExecutor = (
+      index: number,
+      signal: AbortSignal | undefined,
+    ): PromiseOrValue<ExecutorResult> => {
+      const controller = index > 0 && signal !== undefined ? linkedController(signal) : undefined;
+      const own = controller?.signal ?? signal;
+      const claim = chosen[index];
+      let ran: { readonly result: PromiseOrValue<ExecutorResult> } | undefined;
+      let result: PromiseOrValue<ExecutorResult>;
+      try {
+        result = enter(() => {
+          // Its `next` is the executor that would have run without it (the next claim in list
+          // order, else the default), bound to the request: an executor may call it later, from
+          // outside the executor call (an event emitter's callback, a queue), and the work still
+          // runs in the wrappers.
+          const executed =
+            claim === undefined
+              ? defaultExecutor(input.operation, args, own, enter, logger)
+              : claim(() => enterExecutor(index + 1, own), own);
+          ran = { result: executed };
+          return executed;
+        });
+      } catch (error) {
+        // The wrapper's error stays the failure.
+        if (ran !== undefined) {
+          abandon(ran.result, controller);
+        }
+        throw error;
+      }
+      if (index > 0 && isPromiseLike(result)) {
+        // Kept until it settles (its result stays the caller's): see Dispatched.
+        const done = result.then(settled, settled);
+        if (running === undefined) {
+          keep(done);
+        } else {
+          const pending = running;
+          pending.add(done);
+          void done.then(() => {
+            pending.delete(done);
+          });
+        }
+      }
+      return result;
+    };
     const { mutation } = run;
     if (mutation !== undefined && draining) {
       return answer(respond(run, errorResult([serverDraining()])));
@@ -590,7 +823,7 @@ const serve = <Ctx>(
     if (run.controller.signal.aborted) {
       return answer(new Response(null, { status: CLIENT_CLOSED_REQUEST }));
     }
-    let finish = noop;
+    let finish: (status: number) => void = noop;
     if (mutation !== undefined) {
       const { promise: done, resolve } = Promise.withResolvers<undefined>();
       const entry: TrackedMutation = {
@@ -600,8 +833,8 @@ const serve = <Ctx>(
       };
       tracked.add(entry);
       mutation.start();
-      finish = () => {
-        mutation.settle();
+      finish = (status) => {
+        mutation.settle(status);
         tracked.delete(entry);
         resolve(undefined);
       };
@@ -610,12 +843,21 @@ const serve = <Ctx>(
     try {
       return {
         _tag: "dispatched",
-        outcome: { ok: true, result: execute() },
+        // Inside the execution wrappers (`wrapExecution`), which carry request-local state
+        // into the resolvers.
+        outcome: { ok: true, result: enterExecutor(0, args.abortSignal ?? undefined) },
+        abandoned,
         mutationStarted,
         finish,
       };
     } catch (error) {
-      return { _tag: "dispatched", outcome: { ok: false, error }, mutationStarted, finish };
+      return {
+        _tag: "dispatched",
+        outcome: { ok: false, error },
+        abandoned,
+        mutationStarted,
+        finish,
+      };
     }
   };
 
@@ -639,17 +881,64 @@ const serve = <Ctx>(
     process: (payload) => processPayload(run, ctx, payload),
     failure: sourceFailure,
     controller: run.controller,
+    enter: run.enter,
+    clientSignal: run.request.signal,
     logger,
+    onEnd: () => {
+      endStream(run.request);
+    },
   });
+
+  /**
+   * Waits for an execution a throwing wrapper left running, and closes a stream it gives, as any
+   * unsent one (inside the execution wrappers). Never rejects: its rejection, a failing close and
+   * that failure's logging concern no one.
+   */
+  const retire = async (run: Run, pending: PromiseOrValue<ExecutorResult>): Promise<void> => {
+    try {
+      const result = await settle(pending);
+      if (Symbol.asyncIterator in result || "initialResult" in result) {
+        await closeStreamed(run, result);
+      }
+    } catch {
+      // Nobody reads it.
+    }
+  };
+
+  /**
+   * Waits for the executions a throwing wrapper left running (see Dispatched), until none is
+   * left: also the work one of them starts while the request waits (a later `next()`). A
+   * started mutation never gets the core signal: it stays tracked (the drain waits) until its
+   * work has settled. A query or subscription is stopped first: the core signal aborts (one
+   * waiting on it settles only then, while its client may stay connected), and the answer that
+   * follows gets a controller of its own (see closeUnsent), so a connected client's error answer
+   * is not taken for a disconnect.
+   */
+  const settleAbandoned = async (
+    run: Run,
+    abandoned: ReadonlySet<Promise<void>>,
+    mutationStarted: boolean,
+  ): Promise<void> => {
+    if (abandoned.size === 0) {
+      return;
+    }
+    if (!mutationStarted) {
+      abortInside(run);
+      run.controller = linkedController(run.request.signal);
+    }
+    while (abandoned.size > 0) {
+      await Promise.all(abandoned);
+    }
+  };
 
   /** execute (await the executor) and encode: the result hooks, then the Response. */
   const encode = async (
     run: Run,
-    outcome: Outcome,
+    dispatched: Dispatched,
     ctx: Ctx,
     operation: OperationDefinitionNode,
-    mutationStarted: boolean,
   ): Promise<Response> => {
+    const { outcome, abandoned, mutationStarted } = dispatched;
     let result: ExecutorResult | undefined;
     let failure: { readonly error: unknown } | undefined;
     if (outcome.ok) {
@@ -660,6 +949,14 @@ const serve = <Ctx>(
       }
     } else {
       failure = { error: outcome.error };
+    }
+    // What a throwing wrapper left running (see Dispatched): waited for when the request failed,
+    // and for a started mutation whatever its executor answered (one that caught the wrapper's
+    // error and answered anyway), so the mutation stays tracked until that work settles. A
+    // query's, whose executor answered anyway, was stopped on its own signal, and the answer
+    // does not wait for it.
+    if (failure !== undefined || mutationStarted) {
+      await settleAbandoned(run, abandoned, mutationStarted);
     }
     if (failure !== undefined || result === undefined) {
       const error = failure?.error;
@@ -684,17 +981,20 @@ const serve = <Ctx>(
       // mutation's completion is published, without the core signal (a started mutation never
       // gets it), and the request fails.
       logger.error("gratos-server: an executor streamed the result of a mutation.");
-      await closeStreamed(result);
+      await closeStreamed(run, result);
       if (run.controller.signal.aborted) {
         return new Response(null, { status: CLIENT_CLOSED_REQUEST });
       }
       return respond(run, errorResult([unexpected(undefined)]), 500);
     }
-    if ((streamed || operation.operation === "subscription") && run.controller.signal.aborted) {
-      // The client left before the stream started: a cancellation, with nothing reported or
-      // sent. A subscription source that was still being set up comes back from subscribe() as
-      // an errors-only result (graphql's AbortError at the field); a stream that already exists
-      // is closed (the signal is aborted, so `return()` cannot wait on a pull).
+    if (!mutationStarted && run.controller.signal.aborted) {
+      // The client left before the result was encoded: a cancellation, with nothing reported or
+      // sent, for a single result as for a stream. A query's executor that ignores the signal
+      // (graphql-jit) still settles with a result, which nobody reads. A subscription source
+      // that was still being set up comes back from subscribe() as an errors-only result
+      // (graphql's AbortError at the field); a stream that already exists is closed (the signal
+      // is aborted, so `return()` cannot wait on a pull). A started mutation is never cancelled:
+      // its writes happened, so its result is processed as usual.
       if (streamed) {
         await closeUnsent(run, result);
       }
@@ -727,7 +1027,7 @@ const serve = <Ctx>(
         throw error;
       }
       return multipartResponse(
-        streamOptions(run, ctx, first, incrementalSource(subsequentResults)),
+        streamOptions(run, ctx, first, incrementalSource(subsequentResults, run.enter, logger)),
       );
     }
     const payload = processPayload(run, ctx, result);
@@ -783,6 +1083,7 @@ const serve = <Ctx>(
     }
 
     // context
+    bindOperation(request, operation);
     const context = await contextOf(run, { operation, document, params });
     if (context._tag === "answer") {
       return context.response;
@@ -815,23 +1116,50 @@ const serve = <Ctx>(
       phase: (name, start, end) => {
         reportPhase(request, name, start, end);
       },
+      bindOperation: (bound) => {
+        bindOperation(request, bound);
+      },
     };
     const dispatched = startExecution(run, input, args);
     if (dispatched._tag === "answer") {
       return dispatched.response;
     }
+    // A failure to build the answer (a throwing result hook) is a 500 (handle()'s catch).
+    let status = 500;
     try {
-      return await encode(run, dispatched.outcome, ctx, operation, dispatched.mutationStarted);
+      const response = await encode(run, dispatched, ctx, operation);
+      status = response.status;
+      return response;
     } finally {
       // A mutation's completion (mutationOf(req).settled, the drain) is published only once the
-      // result hooks have seen its result, never on body consumption.
-      dispatched.finish();
+      // result hooks have seen its result, never on body consumption, with the answer's status.
+      dispatched.finish(status);
     }
   };
 
   const handle = async (request: Request): Promise<Response> => {
     const start = performance.now();
-    const controller = linkedController(request.signal);
+    const overlaps = !beginHandling(request);
+    try {
+      if (overlaps) {
+        try {
+          logger.warn(
+            "gratos-server: a Request was passed to handle() while an earlier call on it is in flight; its per-request state is shared. Give each call its own Request (a request.clone() taken before the first call).",
+          );
+        } catch {
+          // A throwing logger must not fail the request, nor leave this call counted.
+        }
+      }
+      return await handleOwned(request, start);
+    } finally {
+      endHandling(request);
+    }
+  };
+
+  const handleOwned = async (request: Request, start: number): Promise<Response> => {
+    const enter = entryOf(request);
+    // The client leaving aborts the core signal inside the execution wrappers.
+    const controller = linkedController(request.signal, enter, logger);
     registerRequest(request, controller.signal, start);
     const run: Run = {
       request,
@@ -843,6 +1171,7 @@ const serve = <Ctx>(
       errorsAsEvents: false,
       ctx: undefined,
       mutation: undefined,
+      enter,
     };
     let response: Response;
     try {

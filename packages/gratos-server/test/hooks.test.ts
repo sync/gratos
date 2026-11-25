@@ -1,13 +1,17 @@
 // The hook contract (docs/plan.html M4a, "Contract types"): a test for each hook.
-import { GraphQLError } from "graphql";
-import type { ExecutionResult, OperationDefinitionNode } from "graphql";
-import { describe, expect, it, vi } from "vitest";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { EventEmitter, EventEmitterAsyncResource } from "node:events";
 
-import { createServer, gqlError } from "../src/index.ts";
+import { GraphQLError, legacyExecuteIncrementally } from "graphql";
+import type { ExecutionResult, GraphQLResolveInfo, OperationDefinitionNode } from "graphql";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+
+import { createServer, gqlError, incremental, signalOf } from "../src/index.ts";
 import type { Executor, Phase, Plugin, Server } from "../src/index.ts";
-import { gate, gql, post, send, URL_ } from "./support/http.ts";
+import { flush, gate, gql, post, send, URL_, waitFor } from "./support/http.ts";
 import type { Sent } from "./support/http.ts";
-import { basicSchema } from "./support/schema.ts";
+import { basicSchema, makeSchema } from "./support/schema.ts";
+import { readUntil } from "./support/stream.ts";
 
 const silent = { warn: () => {}, error: () => {} };
 const answer42: Executor = () => ({ data: { count: 42 } });
@@ -389,6 +393,903 @@ describe("onExecute", () => {
       onExecute: async () => undefined,
     };
     expect(plugin.onExecute).toBeDefined();
+  });
+});
+
+/** What a recording execution wrapper sets: the request it runs for. */
+interface Current {
+  request?: Request | undefined;
+}
+
+/** A wrapper that records the request it runs for, and its enter/exit order. */
+const recording = (name: string, log: Array<string>, current: Current): Plugin => ({
+  wrapExecution: (request, run) => {
+    const previous = current.request;
+    current.request = request;
+    log.push(`${name} enter`);
+    try {
+      return run();
+    } finally {
+      log.push(`${name} exit`);
+      current.request = previous;
+    }
+  },
+});
+
+/**
+ * A server whose resolvers record whether they ran in their own request's store (the context
+ * is the Request), and whose executor calls `next()` synchronously, inside the executor call,
+ * from a listener `emitterOf` gives (an EventEmitterAsyncResource calls its listeners in the
+ * async context it was created in, not the caller's).
+ */
+const nextFromEmitter = (emitterOf: () => EventEmitterAsyncResource) => {
+  const storage = new AsyncLocalStorage<Request>();
+  const seen: Array<boolean> = [];
+  const server = createServer({
+    schema: basicSchema({
+      Query: {
+        count: (_source, _args, request: unknown) => {
+          seen.push(storage.getStore() === request);
+          return 1;
+        },
+      },
+    }),
+    context: (request) => request,
+    plugins: [
+      {
+        onExecute: () => (next) => {
+          const emitter = emitterOf();
+          let result: ReturnType<typeof next> | undefined;
+          emitter.once("go", () => {
+            result = next();
+          });
+          emitter.emit("go");
+          return result ?? { errors: [new GraphQLError("no result")] };
+        },
+      },
+      { wrapExecution: (request, run) => storage.run(request, run) },
+    ],
+  });
+  return { server, seen };
+};
+
+describe("wrapExecution", () => {
+  it("wraps the executor call, nesting in list order, with the resolver's own context", async () => {
+    const log: Array<string> = [];
+    const current: Current = {};
+    const ctx = { app: true };
+    let seen: [Request | undefined, unknown] | undefined;
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          count: (_source, _args, context) => {
+            seen = [current.request, context];
+            return 1;
+          },
+        },
+      }),
+      context: () => ctx,
+      plugins: [recording("a", log, current), recording("b", log, current)],
+    });
+    const request = post({ query: "{ count }" });
+    expect((await send(server, request)).body).toEqual({ data: { count: 1 } });
+    expect(seen).toEqual([request, ctx]);
+    expect(log).toEqual(["a enter", "b enter", "b exit", "a exit"]);
+  });
+
+  it("wraps each subscription event's execution", async () => {
+    const log: Array<string> = [];
+    const current: Current = {};
+    const seen: Array<Request | undefined> = [];
+    const schema = basicSchema({}, "type Subscription { tick: Int }");
+    const tick = schema.getSubscriptionType()?.getFields()["tick"];
+    if (tick === undefined) {
+      throw new Error("no tick");
+    }
+    tick.subscribe = async function* () {
+      yield 1;
+      yield 2;
+    };
+    tick.resolve = (payload: number) => {
+      seen.push(current.request);
+      return payload;
+    };
+    const server = createServer({ schema, plugins: [recording("a", log, current)] });
+    const request = post({ query: "subscription { tick }" }, { accept: "text/event-stream" });
+    const response = await server.handle(request);
+    expect(await response.text()).toContain('"tick":2');
+    expect(seen).toEqual([request, request]);
+  });
+
+  it("carries an AsyncLocalStorage store into deferred work, and wraps each deferred pull", async () => {
+    const storage = new AsyncLocalStorage<Request>();
+    let entries = 0;
+    let seen: Request | undefined;
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          count: () => {
+            seen = storage.getStore();
+            return 1;
+          },
+        },
+      }),
+      plugins: [
+        incremental(),
+        {
+          wrapExecution: (request, run) => {
+            entries += 1;
+            return storage.run(request, run);
+          },
+        },
+      ],
+    });
+    // Every root field is deferred: graphql-js runs it after the executor call has returned.
+    const request = post({ query: "{ ... @defer { count } }" }, { accept: "multipart/mixed" });
+    const response = await server.handle(request);
+    expect(await response.text()).toContain('"count":1');
+    expect(seen).toBe(request);
+    // The executor call, then each pull of the subsequent payloads.
+    expect(entries).toBeGreaterThan(1);
+  });
+
+  it("enters the wrappers again when an executor calls next() from outside the request", async () => {
+    const storage = new AsyncLocalStorage<Request>();
+    // An EventEmitter calls its listeners in the emitter's context, not the listener's.
+    const emitter = new EventEmitter();
+    const listening = gate();
+    let seen: Request | undefined;
+    let resolved = false;
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          count: () => {
+            resolved = true;
+            seen = storage.getStore();
+            return 1;
+          },
+        },
+      }),
+      plugins: [
+        {
+          onExecute: () => (next) =>
+            new Promise((resolve) => {
+              emitter.once("go", () => {
+                resolve(next());
+              });
+              listening.resolve();
+            }),
+        },
+        { wrapExecution: (request, run) => storage.run(request, run) },
+      ],
+    });
+    const request = post({ query: "{ count }" });
+    const sending = send(server, request);
+    await listening.promise;
+    expect(storage.getStore()).toBeUndefined();
+    emitter.emit("go");
+    expect((await sending).body).toEqual({ data: { count: 1 } });
+    expect(resolved).toBe(true);
+    expect(seen).toBe(request);
+  });
+
+  it("enters the wrappers again, nested, when an executor calls next() inside the executor call", async () => {
+    const log: Array<string> = [];
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [{ onExecute: () => delegate }, recording("a", log, {})],
+    });
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
+    expect(log).toEqual(["a enter", "a enter", "a exit", "a exit"]);
+  });
+
+  it("runs a next() made from another request's context in its own request's wrappers", async () => {
+    let first: EventEmitterAsyncResource | undefined;
+    // Created in the first request's executor call (inside its wrappers, in its store): the
+    // second request's executor calls next() from a listener it calls in that store.
+    const { server, seen } = nextFromEmitter(
+      () => (first ??= new EventEmitterAsyncResource({ name: "first request" })),
+    );
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
+    expect(seen).toEqual([true, true]);
+  });
+
+  it("runs a next() made from an emitter created outside any request in the wrappers", async () => {
+    const emitter = new EventEmitterAsyncResource({ name: "outside" });
+    const { server, seen } = nextFromEmitter(() => emitter);
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
+    expect(seen).toEqual([true]);
+  });
+
+  it("wraps a subscription source's pulls and its cleanup", async () => {
+    const storage = new AsyncLocalStorage<Request>();
+    const seen: Array<string> = [];
+    const schema = basicSchema({}, "type Subscription { tick: Int }");
+    const tick = schema.getSubscriptionType()?.getFields()["tick"];
+    if (tick === undefined) {
+      throw new Error("no tick");
+    }
+    const request = post({ query: "subscription { tick }" }, { accept: "text/event-stream" });
+    const where = (): string => (storage.getStore() === request ? "in" : "out");
+    let pulls = 0;
+    tick.subscribe = () => ({
+      [Symbol.asyncIterator]: () => {
+        seen.push(`iterator ${where()}`);
+        return {
+          next: () => {
+            seen.push(`next ${where()}`);
+            pulls += 1;
+            // One event, then a pull that only the close settles (an idle source).
+            return pulls === 1
+              ? Promise.resolve({ done: false, value: 1 })
+              : new Promise<IteratorResult<number>>(() => {});
+          },
+          return: () => {
+            seen.push(`return ${where()}`);
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        };
+      },
+    });
+    tick.resolve = (payload: number) => payload;
+    const server = createServer({
+      schema,
+      plugins: [{ wrapExecution: (req, run) => storage.run(req, run) }],
+    });
+    const response = await server.handle(request);
+    const { reader } = await readUntil(response.body ?? new ReadableStream(), (text) =>
+      text.includes('"tick":1'),
+    );
+    // A second read, pending on the idle pull, which the cancel interrupts.
+    const pending = reader.read();
+    while (pulls < 2) {
+      await flush();
+    }
+    await reader.cancel();
+    expect(await pending).toEqual({ done: true, value: undefined });
+    expect(seen).toEqual(["iterator in", "next in", "next in", "return in"]);
+  });
+});
+
+/** A server with a @stream source, and what its source's `return()` saw. */
+interface StreamServer {
+  readonly server: Server;
+  readonly seen: Array<string>;
+  readonly pulls: () => number;
+}
+
+/**
+ * A server whose `items` field is a @stream source: one item, then an idle pull that only the
+ * cleanup settles. Its `return()` records whether the request's wrapper store is in effect.
+ * The executor is the default one, with the core's abort signal; with `outsideStore` it runs
+ * outside the wrappers' store, so nothing it starts carries the store.
+ */
+const streamServer = (request: Request, outsideStore = false): StreamServer => {
+  const storage = new AsyncLocalStorage<Request>();
+  const seen: Array<string> = [];
+  const where = (): string => (storage.getStore() === request ? "in" : "out");
+  let pulls = 0;
+  const server = createServer({
+    schema: makeSchema("type Query { items: [Int] }", {
+      Query: {
+        items: () => {
+          const release = Promise.withResolvers<IteratorResult<number>>();
+          return {
+            [Symbol.asyncIterator]: () => ({
+              next: () => {
+                pulls += 1;
+                return pulls === 1 ? Promise.resolve({ done: false, value: 1 }) : release.promise;
+              },
+              return: () => {
+                seen.push(`return ${where()}`);
+                release.resolve({ done: true, value: undefined });
+                return Promise.resolve({ done: true, value: undefined });
+              },
+            }),
+          };
+        },
+      },
+    }),
+    plugins: [
+      ...(outsideStore
+        ? [
+            {
+              onExecute: (_input, args) => () =>
+                storage.exit(() => legacyExecuteIncrementally(args)),
+            } satisfies Plugin,
+          ]
+        : []),
+      incremental(),
+      { wrapExecution: (req, run) => storage.run(req, run) },
+    ],
+    logger: silent,
+  });
+  return { server, seen, pulls: () => pulls };
+};
+
+/** Waits, bounded, for the source's `return()` to have been called (`returned` records each call). */
+const returnCalled = (returned: ReadonlyArray<string>): Promise<void> =>
+  waitFor(() => returned.length > 0, "the source's return() call");
+
+/** Reads the initial result, then leaves a read pending on the idle pull. */
+const readToIdlePull = async (
+  response: Response,
+  pulls: () => number,
+): Promise<{ reader: ReadableStreamDefaultReader<Uint8Array>; pending: Promise<unknown> }> => {
+  const { reader } = await readUntil(response.body ?? new ReadableStream(), (text) =>
+    text.includes('"hasNext":true'),
+  );
+  const pending = reader.read().catch(() => undefined);
+  while (pulls() < 2) {
+    await flush();
+  }
+  return { reader, pending };
+};
+
+describe("wrapExecution of a @stream source's cleanup", () => {
+  it("closes a cancelled @stream's source inside the request's wrappers", async () => {
+    // The executor runs without the abort signal (graphql-js would close the source from its
+    // abort listener, outside the wrappers): only the core's close of the results reaches it.
+    const storage = new AsyncLocalStorage<Request>();
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed" },
+    );
+    const seen: Array<string> = [];
+    const where = (): string => (storage.getStore() === request ? "in" : "out");
+    let pulls = 0;
+    const server = createServer({
+      schema: makeSchema("type Query { items: [Int] }", {
+        Query: {
+          // One item, then an idle pull that only the cleanup settles.
+          items: () => {
+            const release = Promise.withResolvers<IteratorResult<number>>();
+            return {
+              [Symbol.asyncIterator]: () => ({
+                next: () => {
+                  pulls += 1;
+                  return pulls === 1 ? Promise.resolve({ done: false, value: 1 }) : release.promise;
+                },
+                return: () => {
+                  seen.push(`return ${where()}`);
+                  release.resolve({ done: true, value: undefined });
+                  return Promise.resolve({ done: true, value: undefined });
+                },
+              }),
+            };
+          },
+        },
+      }),
+      plugins: [
+        {
+          onExecute: (_input, args) => () =>
+            legacyExecuteIncrementally({ ...args, abortSignal: undefined }),
+        },
+        incremental(),
+        { wrapExecution: (req, run) => storage.run(req, run) },
+      ],
+    });
+    const response = await server.handle(request);
+    const { reader } = await readUntil(response.body ?? new ReadableStream(), (text) =>
+      text.includes('"hasNext":true'),
+    );
+    // A second read, pending on the idle pull, which the cancel ends.
+    const pending = reader.read();
+    while (pulls < 2) {
+      await flush();
+    }
+    await reader.cancel();
+    await pending;
+    await returnCalled(seen);
+    expect(seen).toEqual(["return in"]);
+  });
+
+  it("closes a @stream source inside the wrappers on a body cancel, with the abort signal", async () => {
+    // graphql-js closes the source from its own listener on the core signal: the core aborts
+    // that signal inside the request's wrappers.
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed" },
+    );
+    const { server, seen, pulls } = streamServer(request);
+    const { reader, pending } = await readToIdlePull(await server.handle(request), pulls);
+    await reader.cancel();
+    await pending;
+    await returnCalled(seen);
+    expect(seen).toEqual(["return in"]);
+  });
+
+  it("closes a @stream source inside the wrappers when the request's signal aborts", async () => {
+    const client = new AbortController();
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed", signal: client.signal },
+    );
+    const { server, seen, pulls } = streamServer(request);
+    const { pending } = await readToIdlePull(await server.handle(request), pulls);
+    client.abort();
+    await pending;
+    await returnCalled(seen);
+    expect(seen).toEqual(["return in"]);
+  });
+
+  it("closes an unsent incremental result inside the wrappers (a 406)", async () => {
+    // The executor runs outside the wrappers' store, so nothing it started carries the store:
+    // only the core's own close, and its abort of the core signal, can enter the wrappers.
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "application/json" },
+    );
+    const { server, seen } = streamServer(request, true);
+    const response = await server.handle(request);
+    expect(response.status).toBe(406);
+    await returnCalled(seen);
+    expect(seen).toEqual(["return in"]);
+  });
+});
+
+/**
+ * A @stream server (see streamServer) whose wrapper throws once armed: by `arm()`, or, with
+ * `armOnExecute`, once the executor has returned (only the core's later entries fail). Its
+ * logger records errors, and throws on each one with `loggerThrows`.
+ */
+const throwingWrapperServer = (armOnExecute: boolean, withSignal = true, loggerThrows = false) => {
+  let armed = false;
+  let pulls = 0;
+  const returned: Array<string> = [];
+  const error = vi.fn((..._args: ReadonlyArray<unknown>): void => {
+    if (loggerThrows) {
+      throw new Error("logger failed");
+    }
+  });
+  const server = createServer({
+    schema: makeSchema("type Query { items: [Int] }", {
+      Query: {
+        items: () => {
+          const release = Promise.withResolvers<IteratorResult<number>>();
+          return {
+            [Symbol.asyncIterator]: () => ({
+              next: () => {
+                pulls += 1;
+                return pulls === 1 ? Promise.resolve({ done: false, value: 1 }) : release.promise;
+              },
+              return: () => {
+                returned.push("return");
+                release.resolve({ done: true, value: undefined });
+                return Promise.resolve({ done: true, value: undefined });
+              },
+            }),
+          };
+        },
+      },
+    }),
+    plugins: [
+      {
+        // Without the signal only the core's own close of the results reaches the source.
+        onExecute: (_input, args) => (next) => {
+          const result = withSignal
+            ? next()
+            : legacyExecuteIncrementally({ ...args, abortSignal: undefined });
+          armed ||= armOnExecute;
+          return result;
+        },
+      },
+      incremental(),
+      {
+        wrapExecution: (_request, run) => {
+          if (armed) {
+            throw new Error("wrapper failed");
+          }
+          return run();
+        },
+      },
+    ],
+    logger: { warn: () => {}, error },
+  });
+  const arm = (): void => {
+    armed = true;
+  };
+  return { server, returned, error, arm, pulls: () => pulls };
+};
+
+/**
+ * A subscription server over one source: each pull waits until `info.getAbortSignal()` aborts,
+ * then rejects; `return()` is recorded. Its wrapper throws, before or after calling `run`, on
+ * every entry once `arm()` has been called (or once the source's first pull has started, with
+ * `armOnPull`): only the core's later entries fail.
+ */
+const throwingSubscriptionServer = (when: "before" | "after", armOnPull = false) => {
+  const probe = { pulls: 0, returns: 0, armed: false };
+  const schema = makeSchema(
+    `
+      type Query { hello: String }
+      type Subscription { held: Int }
+    `,
+    { Subscription: { held: (payload: number) => payload } },
+  );
+  Object.assign(schema.getSubscriptionType()?.getFields()["held"] ?? {}, {
+    subscribe: (_root: unknown, _args: unknown, _ctx: unknown, info: GraphQLResolveInfo) => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          probe.pulls += 1;
+          probe.armed ||= armOnPull;
+          return new Promise<never>((_resolve, reject) => {
+            info.getAbortSignal()?.addEventListener(
+              "abort",
+              () => {
+                reject(new Error("pull aborted"));
+              },
+              { once: true },
+            );
+          });
+        },
+        return: () => {
+          probe.returns += 1;
+          return Promise.resolve({ done: true, value: undefined });
+        },
+      }),
+    }),
+  });
+  const error = vi.fn();
+  const server = createServer({
+    schema,
+    logger: { warn: () => {}, error },
+    plugins: [
+      {
+        wrapExecution: (_request, run) => {
+          if (probe.armed && when === "before") {
+            throw new Error("wrapper failed");
+          }
+          const result = run();
+          if (probe.armed && when === "after") {
+            throw new Error("wrapper failed");
+          }
+          return result;
+        },
+      },
+    ],
+  });
+  const arm = (): void => {
+    probe.armed = true;
+  };
+  return { server, probe, error, arm };
+};
+
+describe("a wrapper that throws on the core's own entries", () => {
+  it("still aborts the core signal and closes an unsent result (a 406)", async () => {
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "application/json" },
+    );
+    const { server, returned, error } = throwingWrapperServer(true);
+    const response = await server.handle(request);
+    expect(response.status).toBe(406);
+    expect(signalOf(request)?.aborted).toBe(true);
+    await returnCalled(returned);
+    expect(returned).toEqual(["return"]);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on an abort.",
+      expect.any(Error),
+    );
+  });
+
+  it("still closes an unsent result directly when the executor ignores the signal", async () => {
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "application/json" },
+    );
+    const { server, returned, error } = throwingWrapperServer(true, false);
+    const response = await server.handle(request);
+    expect(response.status).toBe(406);
+    await returnCalled(returned);
+    expect(returned).toEqual(["return"]);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on a close.",
+      expect.any(Error),
+    );
+  });
+
+  it("still aborts the core signal and releases the source when a stream's body is cancelled", async () => {
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed" },
+    );
+    const { server, returned, error, arm, pulls } = throwingWrapperServer(false);
+    const { reader, pending } = await readToIdlePull(await server.handle(request), pulls);
+    arm();
+    await expect(reader.cancel()).resolves.toBeUndefined();
+    await pending;
+    expect(signalOf(request)?.aborted).toBe(true);
+    await returnCalled(returned);
+    expect(returned).toEqual(["return"]);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on an abort.",
+      expect.any(Error),
+    );
+  });
+
+  it("still aborts the core signal and releases the source when the logger throws too", async () => {
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed" },
+    );
+    const { server, returned, error, arm, pulls } = throwingWrapperServer(false, true, true);
+    const { reader, pending } = await readToIdlePull(await server.handle(request), pulls);
+    arm();
+    await expect(reader.cancel()).resolves.toBeUndefined();
+    await pending;
+    expect(signalOf(request)?.aborted).toBe(true);
+    await returnCalled(returned);
+    expect(returned).toEqual(["return"]);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on an abort.",
+      expect.any(Error),
+    );
+  });
+
+  it("observes a pull that a wrapper started before it threw", async () => {
+    const unhandled: Array<unknown> = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    onTestFinished(() => {
+      process.off("unhandledRejection", onUnhandled);
+    });
+    let entries = 0;
+    const server = createServer({
+      schema: makeSchema("type Query { items: [Int] }"),
+      logger: silent,
+      plugins: [
+        {
+          // Incremental results whose pull waits on the core signal, and rejects once it aborts.
+          onExecute: (_input, args) => () => {
+            const { abortSignal } = args;
+            const subsequentResults = (async function* () {
+              await new Promise<never>((_resolve, reject) => {
+                abortSignal?.addEventListener(
+                  "abort",
+                  () => {
+                    reject(new Error("pull aborted"));
+                  },
+                  { once: true },
+                );
+              });
+              // Never reached: the pull rejects.
+              yield* [];
+            })();
+            return { initialResult: { data: { items: [] }, hasNext: true }, subsequentResults };
+          },
+        },
+        {
+          // The second entry is the first pull: it starts the pull, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const result = run();
+            if (entries === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await server.handle(
+      post({ query: "{ items }" }, { accept: "multipart/mixed" }),
+    );
+    // The wrapper's error is the stream's last payload.
+    expect(await response.text()).toContain('"message":"wrapper failed"');
+    await flush();
+    await flush();
+    expect(unhandled).toEqual([]);
+  });
+
+  it("still closes a subscription's source when a wrapper throws before its close runs", async () => {
+    const { server, probe, error, arm } = throwingSubscriptionServer("before");
+    const response = await server.handle(
+      post({ query: "subscription { held }" }, { accept: "text/event-stream" }),
+    );
+    const reader = (response.body ?? new ReadableStream()).getReader();
+    const pending = reader.read().catch(() => undefined);
+    await waitFor(() => probe.pulls === 1, "the source's first pull");
+    arm();
+    await reader.cancel();
+    await pending;
+    await waitFor(() => probe.returns === 1, "the source's return() call");
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on a close.",
+      expect.any(Error),
+    );
+  });
+
+  it("observes a subscription pull that a wrapper started before it threw", async () => {
+    const unhandled: Array<unknown> = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    onTestFinished(() => {
+      process.off("unhandledRejection", onUnhandled);
+    });
+    // The entry around the first pull starts it, then fails, and so does every later entry.
+    const { server, probe } = throwingSubscriptionServer("after", true);
+    const response = await server.handle(
+      post({ query: "subscription { held }" }, { accept: "text/event-stream" }),
+    );
+    // The wrapper's error is the stream's last payload; the pull rejects once the source stops.
+    expect(await response.text()).toContain('"message":"wrapper failed"');
+    expect(probe.pulls).toBe(1);
+    await flush();
+    await flush();
+    expect(unhandled).toEqual([]);
+  });
+});
+
+/** A server whose onRequest holds call `n` (from 1) on `holds[n - 1]`, counting the calls. */
+const heldServer = (holds: ReadonlyArray<PromiseWithResolvers<void>>) => {
+  const warn = vi.fn();
+  const calls = { entered: 0 };
+  const server = createServer({
+    schema: basicSchema(),
+    logger: { warn, error: () => {} },
+    plugins: [
+      {
+        onRequest: async () => {
+          calls.entered += 1;
+          await holds[calls.entered - 1]?.promise;
+        },
+      },
+    ],
+  });
+  return { server, warn, calls };
+};
+
+describe("a Request passed to handle() again", () => {
+  it("warns, without blocking, when an earlier call on it is still in flight", async () => {
+    const hold = gate();
+    const { server, warn, calls } = heldServer([hold]);
+    // No body: both calls get as far as they can (a 405) on the same Request.
+    const request = new Request(URL_, { method: "GET" });
+    const first = server.handle(request);
+    try {
+      const second = server.handle(request);
+      // The second call runs, and answers, while the first is still held.
+      await waitFor(() => calls.entered === 2, "the second call's onRequest");
+      expect((await second).status).toBe(405);
+    } finally {
+      hold.resolve();
+    }
+    expect((await first).status).toBe(405);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("request.clone()");
+  });
+
+  it("keeps counting a warned call: a third call that overlaps only the second warns", async () => {
+    const holdFirst = gate();
+    const holdSecond = gate();
+    const { server, warn, calls } = heldServer([holdFirst, holdSecond]);
+    const request = new Request(URL_, { method: "GET" });
+    try {
+      const first = server.handle(request);
+      const second = server.handle(request);
+      await waitFor(() => calls.entered === 2, "the second call's onRequest");
+      holdFirst.resolve();
+      await first;
+      // The first call has returned; the second is still in flight.
+      await server.handle(request);
+      expect(warn).toHaveBeenCalledTimes(2);
+      holdSecond.resolve();
+      await second;
+    } finally {
+      holdFirst.resolve();
+      holdSecond.resolve();
+    }
+    // None is in flight any more: no warning.
+    await server.handle(request);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("replays a POST from a clone taken before the first call; the used POST cannot be", async () => {
+    const server = createServer({ schema: basicSchema(), logger: silent });
+    const request = post({ query: "{ count }" });
+    const replay = request.clone();
+    expect((await send(server, request)).body).toEqual({ data: { count: 1 } });
+    // handle() read the body: the used POST cannot be cloned, and passed again it is a 400.
+    expect(() => request.clone()).toThrow(TypeError);
+    expect((await server.handle(request)).status).toBe(400);
+    expect((await send(server, replay)).body).toEqual({ data: { count: 1 } });
+  });
+
+  it("stops counting a warned call when it ends, even when the logger throws", async () => {
+    const hold = gate();
+    let warnings = 0;
+    const server = createServer({
+      schema: basicSchema(),
+      logger: {
+        warn: () => {
+          warnings += 1;
+          throw new Error("logger failed");
+        },
+        error: () => {},
+      },
+      context: () => hold.promise.then(() => ({})),
+    });
+    const request = new Request(URL_, { method: "GET" });
+    const first = server.handle(request);
+    const second = server.handle(request);
+    hold.resolve();
+    // The throwing warning neither fails the overlapping call nor leaves it counted.
+    expect((await second).status).toBe(405);
+    expect((await first).status).toBe(405);
+    expect(warnings).toBe(1);
+    await (await server.handle(request)).text();
+    expect(warnings).toBe(1);
+  });
+
+  it("does not warn when the Request is reused after the earlier call returned", async () => {
+    const warn = vi.fn();
+    const server = createServer({ schema: basicSchema(), logger: { warn, error: () => {} } });
+    const request = new Request(URL_, { method: "GET" });
+    await (await server.handle(request)).text();
+    await (await server.handle(request)).text();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("aborts of an unread JSON body", () => {
+  it("runs the core signal's listeners inside the wrappers when the body is cancelled", async () => {
+    const storage = new AsyncLocalStorage<Request>();
+    const request = post({ query: "{ count }" });
+    const seen: Array<string> = [];
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        {
+          wrapExecution: (wrapped, run) => storage.run(wrapped, run),
+          onResponse: (_response, req) => {
+            // A plugin listening on the core signal (as effect() does) sees its request's store.
+            signalOf(req)?.addEventListener("abort", () => {
+              seen.push(storage.getStore() === req ? "abort in" : "abort out");
+            });
+          },
+        },
+      ],
+    });
+    const response = await server.handle(request);
+    await response.body?.cancel();
+    await flush();
+    expect(seen).toEqual(["abort in"]);
+  });
+
+  it("aborts the core signal even when a wrapper throws on a client abort, and logs it", async () => {
+    const client = new AbortController();
+    const request = post({ query: "{ count }" }, { signal: client.signal });
+    const error = vi.fn();
+    let armed = false;
+    const server = createServer({
+      schema: basicSchema(),
+      logger: { warn: () => {}, error },
+      plugins: [
+        {
+          wrapExecution: (_wrapped, run) => {
+            if (armed) {
+              throw new Error("wrapper failed");
+            }
+            return run();
+          },
+        },
+      ],
+    });
+    const response = await server.handle(request);
+    armed = true;
+    client.abort();
+    expect(signalOf(request)?.aborted).toBe(true);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on a client abort.",
+      expect.any(Error),
+    );
+    await response.body?.cancel();
   });
 });
 

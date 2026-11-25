@@ -1,0 +1,13 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "codegen": {
+      "outputs": [
+        "$TURBO_EXTENDS$",
+        "test/app/src/generated/schema.ts",
+        "test/app/src/generated/schema.graphql"
+      ]
+    }
+  }
+}

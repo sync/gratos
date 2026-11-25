@@ -1,6 +1,6 @@
 // The core and its plugins never import `effect`, directly or transitively (docs/plan.html M4a):
 // the package entry, run under plain Node with every plugin installed, resolves no module from
-// the effect package. The Effect layer is planned as a separate entry (M5).
+// the effect package. Only the separate `@dblechoc/gratos-server/effect` entry (M5) imports it.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

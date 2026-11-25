@@ -7,9 +7,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   apq,
+  cancelled,
   CLIENT_CLOSED_REQUEST,
   createServer,
   gqlError,
+  isCancelled,
   jit,
   maskErrors,
   maxDepth,
@@ -177,6 +179,39 @@ describe("reportErrors(log)", () => {
     client.abort();
     expect((await pending).status).toBe(CLIENT_CLOSED_REQUEST);
     expect(log).not.toHaveBeenCalled();
+  });
+
+  it("skips cancelled() errors, thrown as they are or located by graphql-js", async () => {
+    const log = vi.fn();
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          hello: () => {
+            throw cancelled();
+          },
+          fails: () => Promise.reject(cancelled()),
+        },
+      }),
+      plugins: [reportErrors(log)],
+    });
+    const sent = await gql(server, "{ hello fails count }");
+    expect(sent.body?.errors?.map((error) => error.message)).toEqual([
+      "The client closed the request.",
+      "The client closed the request.",
+    ]);
+    expect(log).not.toHaveBeenCalled();
+  });
+});
+
+describe("cancelled()", () => {
+  it("is a GraphQLError that isCancelled tells apart, also as an originalError", () => {
+    const error = cancelled();
+    expect(error).toBeInstanceOf(GraphQLError);
+    expect(error.extensions).toEqual({ code: "CLIENT_CLOSED_REQUEST" });
+    expect(isCancelled(error)).toBe(true);
+    expect(isCancelled(new GraphQLError("located", { originalError: error }))).toBe(true);
+    expect(isCancelled(new GraphQLError("The client closed the request."))).toBe(false);
+    expect(isCancelled(undefined)).toBe(false);
   });
 });
 

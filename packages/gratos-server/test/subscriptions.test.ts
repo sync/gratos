@@ -1,6 +1,7 @@
 // Subscriptions (docs/plan.html M4b): always graphql-js subscribe(), encoded as GraphQL-over-SSE
 // "distinct connections"; errors from a failing source; disconnects over a standalone
 // handle(Request) and over real HTTP (node:http); and the plan's regression tests.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { on, once } from "node:events";
 import { EventEmitter } from "node:events";
 import { connect } from "node:net";
@@ -699,6 +700,77 @@ describe("a standalone handle(Request): cancelling the body", () => {
     },
   );
 
+  it("a client that leaves while a failed source's error is processed gets no closing frame", async () => {
+    const { schema } = fixture();
+    const client = new AbortController();
+    const server = createServer({
+      schema,
+      plugins: [
+        {
+          // The source failed: the core signal is already aborted to stop it, and the client
+          // leaves before the error and the closing frame are queued.
+          onResult: (payload) => {
+            if (payload.errors !== undefined) {
+              client.abort();
+            }
+            return undefined;
+          },
+        },
+      ],
+    });
+    const response = await server.handle(
+      post(
+        { query: 'subscription { failing(kind: "graphql") }' },
+        { accept: "text/event-stream", signal: client.signal },
+      ),
+    );
+    const { names, payloads } = readSse(await response.text());
+    expect(names).toEqual(["next"]);
+    expect(payloads).toEqual([{ data: { failing: 1 } }]);
+  });
+
+  it("a client that leaves inside the source's stop is not reported", async () => {
+    const reported: Array<string> = [];
+    const client = new AbortController();
+    const schema = makeSchema(
+      `
+        type Query { hello: String }
+        type Subscription { failing: Int }
+      `,
+      { Subscription: { failing: (payload: number) => payload } },
+    );
+    Object.assign(schema.getSubscriptionType()?.getFields()["failing"] ?? {}, {
+      async *subscribe(
+        _source: unknown,
+        _args: unknown,
+        _context: unknown,
+        info: GraphQLResolveInfo,
+      ) {
+        // The source's own abort listener makes the client leave as the core stops it.
+        info.getAbortSignal()?.addEventListener("abort", () => {
+          client.abort();
+        });
+        yield 1;
+        await Promise.resolve();
+        throw new GraphQLError("a deliberate source error");
+      },
+    });
+    const server = createServer({
+      schema,
+      plugins: [reportErrors((error) => reported.push(error.message))],
+    });
+    const response = await server.handle(
+      post(
+        { query: "subscription { failing }" },
+        { accept: "text/event-stream", signal: client.signal },
+      ),
+    );
+    const { names } = readSse(await response.text());
+    expect(names).toEqual(["next"]);
+    await flush();
+    expect(reported).toEqual([]);
+  });
+
   it("a result hook that throws on a later event fails the body and stops the source", async () => {
     const { schema, cleanups } = fixture();
     const errors: Array<unknown> = [];
@@ -1255,6 +1327,83 @@ interface StreamHolder {
 }
 
 describe("the response stream of a subscription", () => {
+  it("calls the source's throw() and return() inside enter", async () => {
+    const storage = new AsyncLocalStorage<string>();
+    const seen: Array<string> = [];
+    const schema = makeSchema(
+      `
+        type Query { hello: String }
+        type Subscription { entered: Int }
+      `,
+      { Subscription: { entered: (payload: number) => payload } },
+    );
+    Object.assign(schema.getSubscriptionType()?.getFields()["entered"] ?? {}, {
+      subscribe: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.resolve({ done: false, value: 1 }),
+          // A source that catches the error and goes on: it is closed with return() after.
+          throw: () => {
+            seen.push(`throw ${storage.getStore() ?? "outside"}`);
+            return Promise.resolve({ done: false, value: 2 });
+          },
+          return: () => {
+            seen.push(`return ${storage.getStore() ?? "outside"}`);
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        }),
+      }),
+    });
+    const result = await subscribeOnce(
+      { schema, document: parse("subscription { entered }") },
+      (run) => storage.run("request", run),
+    );
+    if (!(Symbol.asyncIterator in result)) {
+      throw new Error("no stream");
+    }
+    await expect(result.throw(new Error("stop"))).rejects.toThrow("stop");
+    expect(seen).toEqual(["throw request", "return request"]);
+  });
+
+  it("reads the source's throw() inside enter too", async () => {
+    const storage = new AsyncLocalStorage<string>();
+    const seen: Array<string> = [];
+    const schema = makeSchema(
+      `
+        type Query { hello: String }
+        type Subscription { entered: Int }
+      `,
+      { Subscription: { entered: (payload: number) => payload } },
+    );
+    Object.assign(schema.getSubscriptionType()?.getFields()["entered"] ?? {}, {
+      subscribe: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.resolve({ done: false, value: 1 }),
+          // An accessor that needs the request's store: it has no throw() to offer outside it.
+          get throw() {
+            seen.push(`read throw ${storage.getStore() ?? "outside"}`);
+            if (storage.getStore() === undefined) {
+              throw new Error("outside the request");
+            }
+            return undefined;
+          },
+          return: () => {
+            seen.push(`return ${storage.getStore() ?? "outside"}`);
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        }),
+      }),
+    });
+    const result = await subscribeOnce(
+      { schema, document: parse("subscription { entered }") },
+      (run) => storage.run("request", run),
+    );
+    if (!(Symbol.asyncIterator in result)) {
+      throw new Error("no stream");
+    }
+    await expect(result.throw(new Error("stop"))).rejects.toThrow("stop");
+    expect(seen).toEqual(["read throw request", "return request"]);
+  });
+
   it("return() before the first pull closes the source, once", async () => {
     const { stream, probe } = await streamOf(3);
     await stream.return();
