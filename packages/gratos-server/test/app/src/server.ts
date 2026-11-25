@@ -43,6 +43,8 @@ export interface AppOptions {
   readonly guardTimeout?: Duration.Input | undefined;
   /** Holds every request's derived context (the late-source test). */
   readonly derivedHold?: DerivedHold | undefined;
+  /** Holds Order.confirmation (the shutdown regression test). */
+  readonly confirmationHold?: ((id: string) => Promise<void>) | undefined;
   /** effect()'s context, for requests that do not come through effectRoute (handle() alone). */
   readonly context?: Context.Context<never> | undefined;
 }
@@ -82,6 +84,7 @@ export const makeServer = (services: Context.Context<Services>, options: AppOpti
             guard: guard.guard,
             guardStream: guard.guardStream,
             derivedHold: options.derivedHold,
+            confirmationHold: options.confirmationHold,
           };
         }),
         services,

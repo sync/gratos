@@ -23,6 +23,16 @@ export class Order {
     return Effect.succeed(`${this.id}:${this.status}`);
   }
 
+  /**
+   * A plain Promise field (no fiber): the shutdown test holds it to stop a mutation between its
+   * two serial fields, before the second field's Effect is forked.
+   */
+  /** @gqlField */
+  async confirmation(ctx: Ctx): Promise<string> {
+    await ctx.confirmationHold?.(this.id);
+    return `confirmed ${this.id}`;
+  }
+
   /** Never resolves: a deferred selection of it stays pending until it is interrupted. */
   /** @gqlField */
   slowNote(): Effect.Effect<string, never, JournalRef> {

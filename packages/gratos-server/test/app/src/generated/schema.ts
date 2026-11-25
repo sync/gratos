@@ -12,6 +12,13 @@ export function getSchema(): GraphQLSchema {
         name: "Order",
         fields() {
             return {
+                confirmation: {
+                    name: "confirmation",
+                    type: GraphQLString,
+                    resolve(source, _args, context) {
+                        return assertNonNull(source.confirmation(context));
+                    }
+                },
                 id: {
                     name: "id",
                     type: GraphQLString,

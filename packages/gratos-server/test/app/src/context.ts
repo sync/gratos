@@ -10,6 +10,8 @@ export interface Ctx {
   readonly guardStream: Guard<AppError>["guardStream"];
   /** Holds the derived context (a test opens it), after telling the test it got there. */
   readonly derivedHold: DerivedHold | undefined;
+  /** Holds Order.confirmation of an order id (a test opens it). */
+  readonly confirmationHold: ((id: string) => Promise<void>) | undefined;
 }
 
 export interface DerivedHold {

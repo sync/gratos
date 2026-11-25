@@ -3,16 +3,28 @@
 // the tracer layer are released. NodeHttpServer's graceful-shutdown wait runs before the drain
 // (appendix, M5): the tests use a short gracefulShutdownTimeout, and the regression test also
 // aborts the client socket, so the drain really runs while the mutation is held. The "warning
-// logged" assertion proves it did.
+// logged" assertion proves it did. The regression test holds the mutation between its two
+// serial fields, before the second field's Effect is forked (no resolver fiber is running), so
+// a drain that only waited for resolver fibers would release the layers too early.
 import { describe, expect, it } from "vitest";
 
+import type { Plugin } from "../../src/index.ts";
+import { scopeOfRequest } from "../../src/effect/state.ts";
+import type { Ctx } from "../app/src/context.ts";
 import { appLayer } from "../app/src/server.ts";
+import type { AppOptions } from "../app/src/server.ts";
 import { makeJournal } from "../app/src/services.ts";
 import { gate } from "../support/http.ts";
 import { buildServed, executors, recordingTracer, until } from "./support.ts";
 
 const MUTATION = `mutation Ship {
   first: setStatus(id: "o-1", status: "packed") { id }
+  second: setStatus(id: "o-2", status: "shipped") { id }
+}`;
+
+/** The same mutation, whose first field's selection includes the held Order.confirmation. */
+const HELD_MUTATION = `mutation Ship {
+  first: setStatus(id: "o-1", status: "packed") { id confirmation }
   second: setStatus(id: "o-2", status: "shipped") { id }
 }`;
 
@@ -28,7 +40,10 @@ const post = (url: string, query: string, signal?: AbortSignal) => {
   return fetch(url, init);
 };
 
-const start = async (plugins: ReturnType<(typeof executors)[number]["plugins"]>) => {
+const start = async (
+  plugins: ReadonlyArray<Plugin<Ctx>>,
+  options: Pick<AppOptions, "confirmationHold"> = {},
+) => {
   const journal = makeJournal();
   const tracer = recordingTracer();
   const warnings: Array<string> = [];
@@ -37,6 +52,7 @@ const start = async (plugins: ReturnType<(typeof executors)[number]["plugins"]>)
       journal,
       tracer: tracer.tracer,
       plugins,
+      ...options,
       warnAfterMs: 10,
       gracefulShutdownTimeout: "20 millis",
       logger: {
@@ -82,20 +98,41 @@ describe.each(executors)("shutdown ($name executor)", (executor) => {
     expect(indexOf(entries, "commit o-2=shipped")).toBeLessThan(indexOf(entries, "api released"));
   });
 
-  it("regression: a mutation held past warnAfterMs between two serial fields finishes, then its span ends, then the layers go", async () => {
-    const { journal, served, warnings, tracer } = await start(executor.plugins());
+  it("regression: a mutation held past warnAfterMs between two serial fields, before the second forks, finishes, then its span ends, then the layers go", async () => {
+    // Held in the first field's selection (Order.confirmation, a plain Promise): graphql-js
+    // has not called the second field's resolver yet, so no resolver fiber is running. Only a
+    // drain that waits for the whole mutation (control.drain) holds the layers here.
+    const reached = gate();
+    const hold = gate();
+    let holding = false;
+    const requests: Array<Request> = [];
+    const recorder: Plugin<Ctx> = {
+      onContext: (_ctx, request) => {
+        requests.push(request);
+      },
+    };
+    const { journal, served, warnings, tracer } = await start([recorder, ...executor.plugins()], {
+      confirmationHold: (id) => {
+        if (!holding || id !== "o-1") {
+          return Promise.resolve();
+        }
+        reached.resolve();
+        return hold.promise;
+      },
+    });
     for (let index = 0; index < executor.warmUp; index += 1) {
-      await (await post(served.url, MUTATION)).text();
+      await (await post(served.url, HELD_MUTATION)).text();
     }
     journal.entries.length = 0;
     tracer.clear();
-    // The first field commits; the second is held, so shutdown starts between the two writes.
-    const hold = gate();
-    journal.holds.set("o-2", hold.promise);
+    holding = true;
     const client = new AbortController();
-    const response = post(served.url, MUTATION, client.signal).catch(() => undefined);
-    await until(() => journal.entries.includes("held o-2"));
-    expect(journal.entries).toContain("commit o-1=packed");
+    const response = post(served.url, HELD_MUTATION, client.signal).catch(() => undefined);
+    await reached.promise;
+    // Between the two writes: the first committed, the second not started, no fiber running.
+    expect(journal.entries).toEqual(["commit o-1=packed"]);
+    const request = requests.at(-1);
+    expect(request === undefined ? undefined : scopeOfRequest(request)?.fibers.size).toBe(0);
     const closing = served.close();
     // The client leaves too: the transport stops waiting for it, and the drain runs.
     client.abort();
@@ -109,7 +146,9 @@ describe.each(executors)("shutdown ($name executor)", (executor) => {
     const { entries } = journal;
     const spanEnd = indexOf(entries, "span end graphql Ship");
     expect(entries.filter((entry) => entry === "span end graphql Ship")).toHaveLength(1);
-    expect(indexOf(entries, "commit o-1=packed")).toBeLessThan(spanEnd);
+    expect(indexOf(entries, "commit o-1=packed")).toBeLessThan(
+      indexOf(entries, "commit o-2=shipped"),
+    );
     expect(indexOf(entries, "commit o-2=shipped")).toBeLessThan(spanEnd);
     expect(spanEnd).toBeLessThan(indexOf(entries, "tracer released"));
     expect(indexOf(entries, "commit o-2=shipped")).toBeLessThan(indexOf(entries, "api released"));
