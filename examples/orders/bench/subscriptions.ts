@@ -337,15 +337,19 @@ export const measure = async (
   }
 };
 
+/** The most events one run may publish: a burst queues them all at once, without yielding. */
+export const MAX_EVENTS = 1_000_000;
+
 /**
- * The `--events` flag as a positive safe integer. Anything else is refused before the first run:
- * `Infinity` would publish forever without yielding, `NaN` would wait out the deadline, and a
- * negative count would report negative rates.
+ * The `--events` flag as an integer from 1 to `MAX_EVENTS`. Anything else is refused before the
+ * first run: `Infinity` would publish forever without yielding, a huge count would fill memory
+ * before the deadline is checked, `NaN` would wait out the deadline, and a negative count would
+ * report negative rates.
  */
 export const parseEvents = (value: string): number => {
   const events = Number(value);
-  if (!Number.isSafeInteger(events) || events <= 0) {
-    throw new Error(`--events must be a positive safe integer, got ${value}`);
+  if (!Number.isInteger(events) || events <= 0 || events > MAX_EVENTS) {
+    throw new Error(`--events must be an integer from 1 to ${MAX_EVENTS}, got ${value}`);
   }
   return events;
 };

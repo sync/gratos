@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   countEvents,
+  MAX_EVENTS,
   measure,
   openSubscription,
   parseEvents,
@@ -232,11 +233,21 @@ describe("bench:subscriptions", () => {
     });
   });
 
-  it("refuses an --events value that is not a positive safe integer", () => {
+  it("refuses an --events value that is not an integer from 1 to MAX_EVENTS", () => {
     expect(parseEvents("20000")).toBe(20_000);
-    for (const value of ["Infinity", "nope", "", "-5", "0", "1.5", "1e20"]) {
+    expect(parseEvents(String(MAX_EVENTS))).toBe(MAX_EVENTS);
+    for (const value of [
+      "Infinity",
+      "nope",
+      "",
+      "-5",
+      "0",
+      "1.5",
+      "1e20",
+      String(MAX_EVENTS + 1),
+    ]) {
       expect(() => parseEvents(value)).toThrow(
-        `--events must be a positive safe integer, got ${value}`,
+        `--events must be an integer from 1 to ${MAX_EVENTS}, got ${value}`,
       );
     }
   });
