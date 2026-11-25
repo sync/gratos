@@ -793,6 +793,48 @@ describe("control.drain", () => {
     expect((await pending).status).toBe(500);
   });
 
+  it("aborts a query a wrapper started before it threw, and answers its 500", async () => {
+    const started = gate();
+    let aborted = false;
+    const request = post({ query: "{ hello }" });
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          // Settles only once its abort signal aborts (the client stays connected).
+          hello: (_source, _args, _context, info: GraphQLResolveInfo) =>
+            new Promise<string>((resolve) => {
+              started.resolve();
+              info.getAbortSignal()?.addEventListener(
+                "abort",
+                () => {
+                  aborted = true;
+                  resolve("late");
+                },
+                { once: true },
+              );
+            }),
+        },
+      }),
+      logger: silent,
+      plugins: [
+        {
+          // Calls the executor, then fails: the query it started keeps waiting.
+          wrapExecution: (_request, run) => {
+            run();
+            throw new Error("wrapper failed");
+          },
+        },
+      ],
+    });
+    const sent = send(server, request);
+    await started.promise;
+    const answered = await Promise.race([sent, sleep(1000).then(() => "hung" as const)]);
+    expect(answered).not.toBe("hung");
+    expect(answered === "hung" ? undefined : answered.status).toBe(500);
+    expect(aborted).toBe(true);
+    expect(signalOf(request)?.aborted).toBe(true);
+  });
+
   it("a continuation on mutationOf(req).settled runs before drain() resolves", async () => {
     const { server, events, first, second, firstStarted } = twoFieldServer();
     const request = post({ query: "mutation { bump bump2 }" });

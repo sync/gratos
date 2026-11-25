@@ -799,16 +799,26 @@ const serve = <Ctx>(
   });
 
   /**
-   * Waits for the executions a throwing wrapper left running (see Dispatched), so a started
-   * mutation stays tracked (the drain waits) until its work has settled. A streamed result is
-   * closed, as any unsent one: a query's or subscription's with the core signal, a mutation's
-   * without it.
+   * Waits for the executions a throwing wrapper left running (see Dispatched). A started
+   * mutation never gets the core signal: it stays tracked (the drain waits) until its work has
+   * settled, and a streamed result is closed without the signal. A query or subscription is
+   * stopped first: the core signal aborts (one waiting on it settles only then, while its client
+   * may stay connected), and the answer that follows gets a controller of its own (see
+   * closeUnsent), so a connected client's error answer is not taken for a disconnect; a streamed
+   * result is then closed with the signal already aborted.
    */
   const settleAbandoned = async (
     run: Run,
     abandoned: ReadonlyArray<PromiseOrValue<ExecutorResult>>,
     mutationStarted: boolean,
   ): Promise<void> => {
+    if (abandoned.length === 0) {
+      return;
+    }
+    if (!mutationStarted) {
+      abortInside(run);
+      run.controller = linkedController(run.request.signal);
+    }
     await Promise.all(
       abandoned.map(async (pending) => {
         let result: ExecutorResult;
@@ -818,7 +828,7 @@ const serve = <Ctx>(
           return;
         }
         if (Symbol.asyncIterator in result || "initialResult" in result) {
-          await (mutationStarted ? closeStreamed(run, result) : closeUnsent(run, result));
+          await closeStreamed(run, result);
         }
       }),
     );
