@@ -188,13 +188,9 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     const response = await pending;
     await response.text();
     const [operation] = operations(built.tracer);
-    if (executor.name === "jit") {
-      // jit ignores the abort signal: its result comes back with the cancelled() field error.
-      expect(response.status).toBe(200);
-    } else {
-      expect(response.status).toBe(499);
-      expect(operation?.outcome).toBe("cancel");
-    }
+    // jit ignores the abort signal, but the core cancels its late result too.
+    expect(response.status).toBe(499);
+    expect(operation?.outcome).toBe("cancel");
     expect(operation?.endCalls).toBe(1);
     expect(built.ended).toEqual([operation]);
     expect(built.tracer.open()).toEqual([]);

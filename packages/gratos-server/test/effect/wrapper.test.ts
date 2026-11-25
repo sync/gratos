@@ -487,9 +487,9 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       controller.abort();
       const sent = await pending;
       expect(interrupted).toBe(1);
-      // graphql-js answers the abort with a 499; jit ignores the signal and still answers, with
-      // the cancelled() sentinel at the field, which reportErrors skips.
-      expect(sent.status).toBe(executor.name === "jit" ? 200 : 499);
+      // graphql-js answers the abort with a 499; jit ignores the signal, and the core cancels
+      // its late result.
+      expect(sent.status).toBe(499);
       expect(reported).toEqual([]);
       expect(built.tracer.open()).toEqual([]);
     });

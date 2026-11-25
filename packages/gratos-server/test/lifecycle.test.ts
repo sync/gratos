@@ -2,7 +2,7 @@
 // per-request AbortController, signalOf/startOf/mutationOf, the one synchronous gate step before
 // the executor, control.drain({ warnAfterMs }), 503 SERVER_DRAINING, and aborts.
 import { execute } from "graphql";
-import type { GraphQLResolveInfo } from "graphql";
+import type { ExecutionResult, GraphQLResolveInfo } from "graphql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -277,6 +277,36 @@ describe("aborted execution", () => {
     expect(response.status).toBe(CLIENT_CLOSED_REQUEST);
     expect(response.body).toBeNull();
     expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(onResult).not.toHaveBeenCalled();
+    expect(onResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it("a query's single result that settles after the client left is a 499, unprocessed", async () => {
+    const late = gate<ExecutionResult>();
+    const executed = gate();
+    const onResult = vi.fn();
+    const onResponse = vi.fn();
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        // An executor that ignores the abort signal (as graphql-jit does).
+        {
+          onExecute: () => () => {
+            executed.resolve();
+            return late.promise;
+          },
+        },
+        { onResult, onResponse },
+      ],
+    });
+    const client = new AbortController();
+    const pending = server.handle(post({ query: "{ count }" }, { signal: client.signal }));
+    await executed.promise;
+    client.abort();
+    late.resolve({ data: { count: 1 } });
+    const response = await pending;
+    expect(response.status).toBe(CLIENT_CLOSED_REQUEST);
+    expect(response.body).toBeNull();
     expect(onResult).not.toHaveBeenCalled();
     expect(onResponse).toHaveBeenCalledTimes(1);
   });

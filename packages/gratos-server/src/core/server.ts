@@ -714,11 +714,14 @@ const serve = <Ctx>(
       }
       return respond(run, errorResult([unexpected(undefined)]), 500);
     }
-    if ((streamed || operation.operation === "subscription") && run.controller.signal.aborted) {
-      // The client left before the stream started: a cancellation, with nothing reported or
-      // sent. A subscription source that was still being set up comes back from subscribe() as
-      // an errors-only result (graphql's AbortError at the field); a stream that already exists
-      // is closed (the signal is aborted, so `return()` cannot wait on a pull).
+    if (!mutationStarted && run.controller.signal.aborted) {
+      // The client left before the result was encoded: a cancellation, with nothing reported or
+      // sent, for a single result as for a stream. A query's executor that ignores the signal
+      // (graphql-jit) still settles with a result, which nobody reads. A subscription source
+      // that was still being set up comes back from subscribe() as an errors-only result
+      // (graphql's AbortError at the field); a stream that already exists is closed (the signal
+      // is aborted, so `return()` cannot wait on a pull). A started mutation is never cancelled:
+      // its writes happened, so its result is processed as usual.
       if (streamed) {
         await closeUnsent(run, result);
       }
