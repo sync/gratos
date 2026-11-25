@@ -29,7 +29,7 @@
 // Span times are nanoseconds from the Effect Clock. The core reports performance.now()
 // milliseconds; every such value goes through one per-request anchor, a (clock nanos, perf ms)
 // pair captured once, when the span is created: nanos = clockNanos + (perf − perfMs) × 10⁶.
-import { Clock, Context, Exit, Option, Tracer } from "effect";
+import { Clock, Context, Effect, Exit, Option, Tracer } from "effect";
 import { HttpServerError } from "effect/http";
 import type { ExecutionResult, OperationDefinitionNode } from "graphql";
 
@@ -48,7 +48,10 @@ export interface EffectPluginOptions {
    * the route fiber's context is used. Default: an empty context (the default Tracer and Clock).
    */
   readonly context?: Context.Context<never> | undefined;
-  /** Called after the operation span ends (tests count the calls). */
+  /**
+   * Called after the operation span ends (tests count the calls). A throw is logged (the Effect
+   * logger, run with the request's fork context) and never changes the response.
+   */
   readonly onSpanEnd?: ((span: Tracer.Span, request: Request) => void) | undefined;
 }
 
@@ -97,6 +100,11 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
   const base = options.context ?? Context.empty();
   const states = new WeakMap<Request, SpanState>();
 
+  /** Logs a failure of the span's own bookkeeping; the request never sees it. */
+  const report = (state: SpanState, message: string, error: unknown): void => {
+    Effect.runForkWith(state.context)(Effect.logError(message, error));
+  };
+
   const finish = (state: SpanState): void => {
     const { span } = state;
     if (state.ended || span === undefined) {
@@ -139,9 +147,13 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       if (cancelled && scope.scope.interruptOnAbort) {
         scope.interrupt();
       }
-      void settled(scope.scope).then(() => {
-        endSpan(state, span, exit);
-      });
+      void settled(scope.scope)
+        .then(() => {
+          endSpan(state, span, exit);
+        })
+        .catch((error: unknown) => {
+          report(state, "gratos-server: ending the operation span failed.", error);
+        });
       return;
     }
     endSpan(state, span, exit);
@@ -163,8 +175,16 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
         end = bound;
       }
     }
-    span.end(end, exit);
-    options.onSpanEnd?.(span, state.request);
+    try {
+      span.end(end, exit);
+    } catch (error) {
+      report(state, "gratos-server: ending the operation span failed.", error);
+    }
+    try {
+      options.onSpanEnd?.(span, state.request);
+    } catch (error) {
+      report(state, "gratos-server: an onSpanEnd callback failed.", error);
+    }
   };
 
   /** Ends the span once every condition holds: a trigger, a span, no mutation still running. */
@@ -403,10 +423,14 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
           }
           controller.enqueue(read.value);
         },
+        // The cancel always reaches the original body (the core stops its executor there).
         cancel: async (reason) => {
           done = true;
-          requestEnd(state, leftAs(state.request));
-          await reader.cancel(reason);
+          try {
+            requestEnd(state, leftAs(state.request));
+          } finally {
+            await reader.cancel(reason);
+          }
         },
       },
       { highWaterMark: 0 },

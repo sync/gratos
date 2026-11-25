@@ -2,7 +2,7 @@
 // when", Tracing): phase spans inside the operation span, cache hits, the early-exit span, the one
 // idempotent end (body wrapper, null body), streamed responses, mutations that outlive their
 // client, the jit phase, and plugin order with serverTiming.
-import { Clock, Context, Duration, Effect, Stream, Tracer } from "effect";
+import { Clock, Context, Duration, Effect, Logger, Stream, Tracer } from "effect";
 import type { ExecutionResult, GraphQLFieldResolver, GraphQLSchema } from "graphql";
 import { describe, expect, it } from "vitest";
 
@@ -12,7 +12,7 @@ import { effect, effectSchema } from "../../src/effect/index.ts";
 import { closeRoute, registerRoute } from "../../src/effect/state.ts";
 import { flush, gate, gql, post } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
-import { readSse } from "../support/stream.ts";
+import { readSse, readUntil } from "../support/stream.ts";
 import { executors, recordingTracer, until } from "./support.ts";
 import type { RecordedSpan, RecordingTracer } from "./support.ts";
 
@@ -1057,4 +1057,58 @@ describe("effect() tracing of a streamed response that fails", () => {
       expect((operation?.endedAtPerf ?? 0) >= (release?.endedAtPerf ?? 1)).toBe(true);
     },
   );
+});
+
+describe("effect() span bookkeeping", () => {
+  it("logs a throwing onSpanEnd, and a body cancel still reaches the source", async () => {
+    const tracer = recordingTracer();
+    const logged: Array<unknown> = [];
+    const logger = Logger.make(({ message }) => {
+      logged.push(message);
+    });
+    let closed = false;
+    const idle = Promise.withResolvers<IteratorResult<string>>();
+    let pulls = 0;
+    // A plain source (no Effect work to wait for): the span ends inside the body's cancel.
+    const source: AsyncIterableIterator<string> = {
+      [Symbol.asyncIterator]: () => source,
+      next: () => {
+        pulls += 1;
+        return pulls === 1 ? Promise.resolve({ done: false, value: "a" }) : idle.promise;
+      },
+      return: () => {
+        closed = true;
+        idle.resolve({ done: true, value: undefined });
+        return Promise.resolve({ done: true, value: undefined });
+      },
+    };
+    const server = createServer({
+      schema: effectSchema(
+        asSubscriptions(makeSchema(SDL, { Subscription: { events: () => source } })),
+        { failure, isFailure },
+      ),
+      context: () => ({}),
+      plugins: [
+        effect({
+          context: Context.add(tracer.context, Logger.CurrentLoggers, new Set([logger])),
+          onSpanEnd: () => {
+            throw new Error("observer failed");
+          },
+        }),
+      ],
+    });
+    const response = await server.handle(
+      post({ query: "subscription { events }" }, { accept: "text/event-stream" }),
+    );
+    const { reader } = await readUntil(response.body ?? new ReadableStream(), (text) =>
+      text.includes("event: next"),
+    );
+    await expect(reader.cancel()).resolves.toBeUndefined();
+    await until(() => closed);
+    const [operation] = operations(tracer);
+    expect(operation?.outcome).toBe("cancel");
+    expect(operation?.endCalls).toBe(1);
+    await until(() => logged.length > 0);
+    expect(logged[0]).toEqual(["gratos-server: an onSpanEnd callback failed.", expect.any(Error)]);
+  });
 });
