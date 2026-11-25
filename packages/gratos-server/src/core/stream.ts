@@ -141,16 +141,35 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           stream.close();
           await release();
         };
-        /** Fails the stream (a throwing result hook) and stops the executor. */
-        const fail = async (error: unknown): Promise<void> => {
+        /**
+         * Fails the stream (a throwing result hook, a payload that cannot be serialized) and stops
+         * the executor, as a cancel would: the core signal first, then `return()`.
+         */
+        const fail = async (message: string, error: unknown): Promise<void> => {
           finished = true;
-          logger.error("gratos-server: a result hook failed on a streamed payload.", error);
+          logger.error(message, error);
           stream.error(error);
           await stop();
         };
+        /** Runs the result hooks on a payload, or fails the stream when one throws. */
+        const processed = async (result: ExecutionResult): Promise<ExecutionResult | undefined> => {
+          try {
+            return process(result);
+          } catch (hookError) {
+            await fail("gratos-server: a result hook failed on a streamed payload.", hookError);
+            return undefined;
+          }
+        };
         /** Sends one payload, and ends the stream after the last one. */
         const sendPayload = async (payload: StreamPayload): Promise<void> => {
-          const framed = framing.frame(payload);
+          let framed: string;
+          try {
+            framed = framing.frame(payload);
+          } catch (error) {
+            // JSON.stringify throws on a bigint or a cycle (in extensions a hook added, say).
+            await fail("gratos-server: a streamed payload could not be serialized.", error);
+            return;
+          }
           if (rest === undefined || !payload.hasNext) {
             await end(framed + framing.end);
           } else {
@@ -182,14 +201,10 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
             return;
           }
           // The source failed: its error is the last payload, through the same result hooks.
-          let result: ExecutionResult;
-          try {
-            result = process({ errors: [failure(error)] });
-          } catch (hookError) {
-            await fail(hookError);
-            return;
+          const result = await processed({ errors: [failure(error)] });
+          if (result !== undefined) {
+            await sendPayload({ result, hasNext: false });
           }
-          await end(framing.frame({ result, hasNext: false }) + framing.end);
           return;
         }
         if (finished) {
@@ -199,14 +214,10 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           await end(framing.end);
           return;
         }
-        let result: ExecutionResult;
-        try {
-          result = process(pulled.value.result);
-        } catch (hookError) {
-          await fail(hookError);
-          return;
+        const result = await processed(pulled.value.result);
+        if (result !== undefined) {
+          await sendPayload({ result, hasNext: pulled.value.hasNext });
         }
-        await sendPayload({ result, hasNext: pulled.value.hasNext });
       },
       cancel: async () => {
         finished = true;

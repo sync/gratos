@@ -416,6 +416,31 @@ describe("a standalone handle(Request): cancelling the body", () => {
     await eventually(() => cleanups.includes("forever"));
   });
 
+  it("an event that cannot be serialized fails the body and stops the source", async () => {
+    const { schema, cleanups } = fixture();
+    const errors: Array<unknown> = [];
+    let events = 0;
+    const server = createServer({
+      schema,
+      logger: { warn: () => undefined, error: (_message, details) => errors.push(details) },
+      plugins: [
+        {
+          // A bigint in the extensions of the second event: JSON.stringify throws on it.
+          onResult: (payload) => {
+            events += 1;
+            return events === 2 ? { ...payload, extensions: { big: 1n } } : undefined;
+          },
+        },
+      ],
+    });
+    const request = post({ query: "subscription { forever }" }, { accept: "text/event-stream" });
+    const response = await server.handle(request);
+    await expect(response.text()).rejects.toThrow(/BigInt/);
+    expect(signalOf(request)?.aborted).toBe(true);
+    expect(errors).toHaveLength(1);
+    await eventually(() => cleanups.includes("forever"));
+  });
+
   it("a Request signal that aborts without a body cancel still stops the source", async () => {
     const { schema, cleanups, idleStarted } = fixture();
     const server = createServer({ schema });
