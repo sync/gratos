@@ -54,9 +54,13 @@ export type NextExecutor = () => PromiseOrValue<ExecutorResult>;
  * (jit during warm-up) delegates to it, and keeps its own bookkeeping (counting, compiling) in
  * the executor, so an operation that is refused never touches it. A mutation's result must be
  * a single result: a streamed one is closed unread and the request fails with a 500, since its
- * work would outlive `mutationOf(req).settled` and `drain()`.
+ * work would outlive `mutationOf(req).settled` and `drain()`. `signal` is the abort signal of the
+ * entry it runs in, for a query (a mutation gets none): the core signal for the executor the core
+ * calls, a signal of its own, linked to the calling entry's, for one a `next()` runs. The core
+ * aborts that one when a wrapper around the `next()` throws after running it, so an executor
+ * that watches it (rather than `args.abortSignal`, the core signal) stops its abandoned work.
  */
-export type Executor = (next: NextExecutor) => PromiseOrValue<ExecutorResult>;
+export type Executor = (next: NextExecutor, signal?: AbortSignal) => PromiseOrValue<ExecutorResult>;
 
 /** The phases the core reports to `onPhase`. Plugins may report their own (jit reports `jit`). */
 export type PhaseName = "parse" | "validate" | "jit" | (string & {});

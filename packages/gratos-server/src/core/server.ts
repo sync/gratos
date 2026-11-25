@@ -791,7 +791,7 @@ const serve = <Ctx>(
           const executed =
             claim === undefined
               ? defaultExecutor(input.operation, args, own, enter, logger)
-              : claim(() => enterExecutor(index + 1, own));
+              : claim(() => enterExecutor(index + 1, own), own);
           ran = { result: executed };
           return executed;
         });

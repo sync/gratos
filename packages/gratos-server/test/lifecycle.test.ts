@@ -1175,6 +1175,60 @@ describe("control.drain", () => {
     expect(signalOf(request)?.aborted).toBe(false);
   });
 
+  it("gives an executor a next() runs the signal of its own entry, aborted when the wrapper around that next() fails", async () => {
+    let stopped = false;
+    let entries = 0;
+    const request = post({ query: "{ hello }" });
+    const server = createServer({
+      schema: basicSchema(),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              return { data: { hello: "fallback" } };
+            }
+          },
+        },
+        {
+          // Settles only once its own signal aborts.
+          onExecute: () => (_next, signal) =>
+            new Promise<ExecutionResult>((resolve) => {
+              signal?.addEventListener(
+                "abort",
+                () => {
+                  stopped = true;
+                  resolve({ data: { hello: "late" } });
+                },
+                { once: true },
+              );
+            }),
+        },
+        {
+          // The second entry is the one around the first claim's next(): it runs the second
+          // claim, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await send(server, request);
+    expect(response.body).toEqual({ data: { hello: "fallback" } });
+    await waitFor(() => stopped, "the abandoned executor's signal aborting");
+    // The fallback's signal (the core's) is not aborted.
+    expect(signalOf(request)?.aborted).toBe(false);
+  });
+
   it("closes a stream a wrapper around next() left running, and sends the stream the executor answers with instead", async () => {
     let returns = 0;
     let calls = 0;
