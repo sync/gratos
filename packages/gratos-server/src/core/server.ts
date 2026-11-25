@@ -234,23 +234,23 @@ const linkedController = (
   return controller;
 };
 
-/**
- * What the executor call gave: its result (maybe a Promise), or what it threw. A wrapper that
- * threw after the executor had returned leaves that execution running: `abandoned` is its result,
- * which the request still waits for (a started mutation stays tracked until its work settles).
- */
+/** What the executor call gave: its result (maybe a Promise), or what it threw. */
 type Outcome =
   | { readonly ok: true; readonly result: PromiseOrValue<ExecutorResult> }
-  | {
-      readonly ok: false;
-      readonly error: unknown;
-      readonly abandoned?: PromiseOrValue<ExecutorResult> | undefined;
-    };
+  | { readonly ok: false; readonly error: unknown };
 
 /** An execution that went past the gate (or failed before it), with its completion. */
 interface Dispatched {
   readonly _tag: "dispatched";
   readonly outcome: Outcome;
+  /**
+   * The executions a wrapper left running: each entry into the wrappers that ran its executor
+   * (the core's executor call, or the entry around a claim's `next()`) and then threw. They are
+   * kept from inside the entry, before the wrapper can throw, and the request still waits for
+   * them (a started mutation stays tracked until its work settles). An executor may call
+   * `next()` later, so the list is read once the outcome has settled.
+   */
+  readonly abandoned: ReadonlyArray<PromiseOrValue<ExecutorResult>>;
   /** Whether a mutation's executor was called (false when it failed before dispatch). */
   readonly mutationStarted: boolean;
   /**
@@ -686,6 +686,7 @@ const serve = <Ctx>(
       return {
         _tag: "dispatched",
         outcome: { ok: false, error },
+        abandoned: [],
         mutationStarted: false,
         finish: noop,
       };
@@ -695,13 +696,34 @@ const serve = <Ctx>(
     // claim cannot answer it (an executor such as legacyExecuteIncrementally would return a
     // one-shot result), so its claims are ignored once every hook has had its say.
     const { enter } = run;
+    const abandoned: Array<PromiseOrValue<ExecutorResult>> = [];
+    /**
+     * Enters the wrappers to run `next`, keeping what it returned from inside the entry: a
+     * wrapper that throws after running it leaves that execution running (see `abandoned`). A
+     * successful entry's result is returned as is.
+     */
+    const enterKeeping = (next: NextExecutor): PromiseOrValue<ExecutorResult> => {
+      let ran: { readonly result: PromiseOrValue<ExecutorResult> } | undefined;
+      try {
+        return enter(() => {
+          const result = next();
+          ran = { result };
+          return result;
+        });
+      } catch (error) {
+        if (ran !== undefined) {
+          abandoned.push(ran.result);
+        }
+        throw error;
+      }
+    };
     let execute: NextExecutor = defaultExecutor(input.operation, args, enter);
     const chosen = input.operation.operation === "subscription" ? undefined : claims;
     for (const claim of chosen?.toReversed() ?? []) {
       const next = execute;
       // Bound to the request: an executor may call `next()` later, from outside the executor
       // call (an event emitter's callback, a queue), and the work still runs in the wrappers.
-      execute = () => claim(() => enter(next));
+      execute = () => claim(() => enterKeeping(next));
     }
     const { mutation } = run;
     if (mutation !== undefined && draining) {
@@ -727,27 +749,21 @@ const serve = <Ctx>(
       };
     }
     const mutationStarted = mutation !== undefined;
-    // What the executor returned, kept for a wrapper that throws after calling it: that
-    // execution still runs, and the request waits for it (see Outcome).
-    let returned: { readonly result: PromiseOrValue<ExecutorResult> } | undefined;
-    const executeOnce: NextExecutor = () => {
-      const result = execute();
-      returned = { result };
-      return result;
-    };
     try {
       return {
         _tag: "dispatched",
         // Inside the execution wrappers (`wrapExecution`), which carry request-local state
         // into the resolvers.
-        outcome: { ok: true, result: enter(executeOnce) },
+        outcome: { ok: true, result: enterKeeping(execute) },
+        abandoned,
         mutationStarted,
         finish,
       };
     } catch (error) {
       return {
         _tag: "dispatched",
-        outcome: { ok: false, error, abandoned: returned?.result },
+        outcome: { ok: false, error },
+        abandoned,
         mutationStarted,
         finish,
       };
@@ -783,34 +799,39 @@ const serve = <Ctx>(
   });
 
   /**
-   * Waits for an execution a throwing wrapper left running (see Outcome), so a started mutation
-   * stays tracked (the drain waits) until its work has settled. A streamed result is closed, as
-   * any unsent one: a query's or subscription's with the core signal, a mutation's without it.
+   * Waits for the executions a throwing wrapper left running (see Dispatched), so a started
+   * mutation stays tracked (the drain waits) until its work has settled. A streamed result is
+   * closed, as any unsent one: a query's or subscription's with the core signal, a mutation's
+   * without it.
    */
   const settleAbandoned = async (
     run: Run,
-    abandoned: PromiseOrValue<ExecutorResult>,
+    abandoned: ReadonlyArray<PromiseOrValue<ExecutorResult>>,
     mutationStarted: boolean,
   ): Promise<void> => {
-    let result: ExecutorResult;
-    try {
-      result = await settle(abandoned);
-    } catch {
-      return;
-    }
-    if (Symbol.asyncIterator in result || "initialResult" in result) {
-      await (mutationStarted ? closeStreamed(run, result) : closeUnsent(run, result));
-    }
+    await Promise.all(
+      abandoned.map(async (pending) => {
+        let result: ExecutorResult;
+        try {
+          result = await settle(pending);
+        } catch {
+          return;
+        }
+        if (Symbol.asyncIterator in result || "initialResult" in result) {
+          await (mutationStarted ? closeStreamed(run, result) : closeUnsent(run, result));
+        }
+      }),
+    );
   };
 
   /** execute (await the executor) and encode: the result hooks, then the Response. */
   const encode = async (
     run: Run,
-    outcome: Outcome,
+    dispatched: Dispatched,
     ctx: Ctx,
     operation: OperationDefinitionNode,
-    mutationStarted: boolean,
   ): Promise<Response> => {
+    const { outcome, abandoned, mutationStarted } = dispatched;
     let result: ExecutorResult | undefined;
     let failure: { readonly error: unknown } | undefined;
     if (outcome.ok) {
@@ -821,9 +842,12 @@ const serve = <Ctx>(
       }
     } else {
       failure = { error: outcome.error };
-      if (outcome.abandoned !== undefined) {
-        await settleAbandoned(run, outcome.abandoned, mutationStarted);
-      }
+    }
+    // What a throwing wrapper left running (see Dispatched): waited for when the request failed,
+    // and for a started mutation whatever its executor answered (one that caught the wrapper's
+    // error and answered anyway), so the mutation stays tracked until that work settles.
+    if (failure !== undefined || mutationStarted) {
+      await settleAbandoned(run, abandoned, mutationStarted);
     }
     if (failure !== undefined || result === undefined) {
       const error = failure?.error;
@@ -994,13 +1018,7 @@ const serve = <Ctx>(
     // A failure to build the answer (a throwing result hook) is a 500 (handle()'s catch).
     let status = 500;
     try {
-      const response = await encode(
-        run,
-        dispatched.outcome,
-        ctx,
-        operation,
-        dispatched.mutationStarted,
-      );
+      const response = await encode(run, dispatched, ctx, operation);
       status = response.status;
       return response;
     } finally {

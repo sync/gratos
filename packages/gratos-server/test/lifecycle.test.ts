@@ -749,6 +749,50 @@ describe("control.drain", () => {
     expect(sent.status).toBe(500);
   });
 
+  it("keeps a started mutation tracked when a wrapper around an executor's next() throws after it ran", async () => {
+    const events: Array<string> = [];
+    const hold = gate();
+    const started = gate();
+    let entries = 0;
+    const server = createServer({
+      schema: basicSchema({
+        Mutation: {
+          bump: async () => {
+            started.resolve();
+            await hold.promise;
+            events.push("committed");
+            return 1;
+          },
+        },
+      }),
+      logger: silent,
+      plugins: [
+        // Delegates: its next() enters the wrappers again, inside the executor call.
+        { onExecute: () => (next) => next() },
+        {
+          // The second entry is the one around next(): it starts the mutation, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const result = run();
+            if (entries === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const pending = gql(server, "mutation { bump }");
+    await started.promise;
+    const drained = server.control.drain().then(() => events.push("drained"));
+    await sleep(5);
+    expect(events).toEqual([]);
+    hold.resolve();
+    await drained;
+    expect(events).toEqual(["committed", "drained"]);
+    expect((await pending).status).toBe(500);
+  });
+
   it("a continuation on mutationOf(req).settled runs before drain() resolves", async () => {
     const { server, events, first, second, firstStarted } = twoFieldServer();
     const request = post({ query: "mutation { bump bump2 }" });
