@@ -157,7 +157,21 @@ const incrementalSource = (
   logger: Logger,
 ): PayloadSource => ({
   next: async () => {
-    const pulled = await enter(() => results.next());
+    let pull: ReturnType<typeof results.next> | undefined;
+    let entered: ReturnType<typeof results.next>;
+    try {
+      entered = enter(() => {
+        pull = results.next();
+        return pull;
+      });
+    } catch (error) {
+      // A wrapper that threw after starting the pull leaves it pending until the stream stops
+      // the source: its rejection then (an abort) is observed here, never unhandled, and the
+      // wrapper's error stays the failure.
+      void pull?.catch(() => {});
+      throw error;
+    }
+    const pulled = await entered;
     return pulled.done === true
       ? pulled
       : { done: false, value: { result: pulled.value, hasNext: pulled.value.hasNext } };

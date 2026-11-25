@@ -4,7 +4,7 @@ import { EventEmitter, EventEmitterAsyncResource } from "node:events";
 
 import { GraphQLError, legacyExecuteIncrementally } from "graphql";
 import type { ExecutionResult, OperationDefinitionNode } from "graphql";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createServer, gqlError, incremental, signalOf } from "../src/index.ts";
 import type { Executor, Phase, Plugin, Server } from "../src/index.ts";
@@ -973,6 +973,63 @@ describe("a wrapper that throws on the core's own entries", () => {
       "gratos-server: a wrapExecution wrapper failed on an abort.",
       expect.any(Error),
     );
+  });
+
+  it("observes a pull that a wrapper started before it threw", async () => {
+    const unhandled: Array<unknown> = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    onTestFinished(() => {
+      process.off("unhandledRejection", onUnhandled);
+    });
+    let entries = 0;
+    const server = createServer({
+      schema: makeSchema("type Query { items: [Int] }"),
+      logger: silent,
+      plugins: [
+        {
+          // Incremental results whose pull waits on the core signal, and rejects once it aborts.
+          onExecute: (_input, args) => () => {
+            const { abortSignal } = args;
+            const subsequentResults = (async function* () {
+              await new Promise<never>((_resolve, reject) => {
+                abortSignal?.addEventListener(
+                  "abort",
+                  () => {
+                    reject(new Error("pull aborted"));
+                  },
+                  { once: true },
+                );
+              });
+              // Never reached: the pull rejects.
+              yield* [];
+            })();
+            return { initialResult: { data: { items: [] }, hasNext: true }, subsequentResults };
+          },
+        },
+        {
+          // The second entry is the first pull: it starts the pull, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const result = run();
+            if (entries === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await server.handle(
+      post({ query: "{ items }" }, { accept: "multipart/mixed" }),
+    );
+    // The wrapper's error is the stream's last payload.
+    expect(await response.text()).toContain('"message":"wrapper failed"');
+    await flush();
+    await flush();
+    expect(unhandled).toEqual([]);
   });
 });
 
