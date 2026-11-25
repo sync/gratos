@@ -708,6 +708,20 @@ const streamServer = (request: Request, outsideStore = false): StreamServer => {
   return { server, seen, pulls: () => pulls };
 };
 
+/**
+ * Waits, at most `timeoutMs`, for the source's `return()` to have been called (`returned` records
+ * each call); a regression fails with a message naming the missing call instead of polling forever.
+ */
+const returnCalled = async (returned: ReadonlyArray<string>, timeoutMs = 2000): Promise<void> => {
+  const start = performance.now();
+  while (returned.length === 0) {
+    if (performance.now() - start > timeoutMs) {
+      throw new Error(`the source's return() was not called within ${timeoutMs} ms`);
+    }
+    await flush();
+  }
+};
+
 /** Reads the initial result, then leaves a read pending on the idle pull. */
 const readToIdlePull = async (
   response: Response,
@@ -777,9 +791,7 @@ describe("wrapExecution of a @stream source's cleanup", () => {
     }
     await reader.cancel();
     await pending;
-    while (seen.length === 0) {
-      await flush();
-    }
+    await returnCalled(seen);
     expect(seen).toEqual(["return in"]);
   });
 
@@ -794,9 +806,7 @@ describe("wrapExecution of a @stream source's cleanup", () => {
     const { reader, pending } = await readToIdlePull(await server.handle(request), pulls);
     await reader.cancel();
     await pending;
-    while (seen.length === 0) {
-      await flush();
-    }
+    await returnCalled(seen);
     expect(seen).toEqual(["return in"]);
   });
 
@@ -810,9 +820,7 @@ describe("wrapExecution of a @stream source's cleanup", () => {
     const { pending } = await readToIdlePull(await server.handle(request), pulls);
     client.abort();
     await pending;
-    while (seen.length === 0) {
-      await flush();
-    }
+    await returnCalled(seen);
     expect(seen).toEqual(["return in"]);
   });
 
@@ -826,9 +834,7 @@ describe("wrapExecution of a @stream source's cleanup", () => {
     const { server, seen } = streamServer(request, true);
     const response = await server.handle(request);
     expect(response.status).toBe(406);
-    while (seen.length === 0) {
-      await flush();
-    }
+    await returnCalled(seen);
     expect(seen).toEqual(["return in"]);
   });
 });
@@ -903,9 +909,7 @@ describe("a wrapper that throws on the core's own entries", () => {
     const response = await server.handle(request);
     expect(response.status).toBe(406);
     expect(signalOf(request)?.aborted).toBe(true);
-    while (returned.length === 0) {
-      await flush();
-    }
+    await returnCalled(returned);
     expect(returned).toEqual(["return"]);
     expect(error).toHaveBeenCalledWith(
       "gratos-server: a wrapExecution wrapper failed on an abort.",
@@ -921,9 +925,7 @@ describe("a wrapper that throws on the core's own entries", () => {
     const { server, returned, error } = throwingWrapperServer(true, false);
     const response = await server.handle(request);
     expect(response.status).toBe(406);
-    while (returned.length === 0) {
-      await flush();
-    }
+    await returnCalled(returned);
     expect(returned).toEqual(["return"]);
     expect(error).toHaveBeenCalledWith(
       "gratos-server: a wrapExecution wrapper failed on a close.",
@@ -942,9 +944,7 @@ describe("a wrapper that throws on the core's own entries", () => {
     await expect(reader.cancel()).resolves.toBeUndefined();
     await pending;
     expect(signalOf(request)?.aborted).toBe(true);
-    while (returned.length === 0) {
-      await flush();
-    }
+    await returnCalled(returned);
     expect(returned).toEqual(["return"]);
     expect(error).toHaveBeenCalledWith(
       "gratos-server: a wrapExecution wrapper failed on an abort.",
