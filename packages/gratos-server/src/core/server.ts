@@ -72,8 +72,12 @@ const DEFAULT_MAX_TOKENS = 10_000;
 /** The status of the response sent when the client has gone (it never reads it). */
 export const CLIENT_CLOSED_REQUEST = 499;
 
+/** A Promise as graphql-js tells one (isPromise): an object whose `then` is a function. */
 const isPromiseLike = <T>(value: PromiseOrValue<T>): value is Promise<T> =>
-  typeof value === "object" && value !== null && "then" in value;
+  typeof value === "object" &&
+  value !== null &&
+  "then" in value &&
+  typeof value.then === "function";
 
 /** Awaits a hook's result only when it is a Promise, so synchronous hooks cost no microtask. */
 const settle = async <T>(value: PromiseOrValue<T>): Promise<T> =>
