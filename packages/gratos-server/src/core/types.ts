@@ -319,13 +319,13 @@ export interface Server {
    * state the core and its plugins keep (`signalOf`, `startOf`, `mutationOf`, a plugin's own
    * `WeakMap<Request, …>`), so a Request object must not be passed to `handle()` again, on this
    * server or another, while an earlier call on it is still in flight, including a response body
-   * still being streamed. Parallel calls need distinct Request objects. A call is in flight
-   * until its response body has been read to its end, has failed or was cancelled (a response
-   * without a body, at once). The core reads a POST's body during `handle()`: a used POST can no
-   * longer be cloned (`clone()` throws a TypeError), and passed again it gets a 400. To replay a
-   * POST, clone it before the first call (or build a new Request with the same payload); reusing
-   * a Request with no body to read (a GET) after its call works. An overlapping call is not
-   * blocked: the core logs a warning.
+   * still being streamed. Parallel calls need distinct Request objects. The core reads a POST's
+   * body during `handle()`: a used POST can no longer be cloned (`clone()` throws a TypeError), and
+   * passed again it gets a 400. To replay a POST, clone it before the first call (or build a new
+   * Request with the same payload); reusing a Request with no body to read (a GET) after its
+   * response has finished works. An overlapping call is not blocked: the core logs a warning, which
+   * detects an overlap only until the earlier `handle()` call has returned (not while its body is
+   * still being streamed).
    */
   readonly handle: (request: Request) => Promise<Response>;
   readonly control: ServerControl;
