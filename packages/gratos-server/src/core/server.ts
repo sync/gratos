@@ -12,7 +12,6 @@ import {
   legacyExecuteIncrementally,
   parse,
   specifiedRules,
-  subscribe,
   validate,
 } from "graphql";
 import type {
@@ -42,9 +41,9 @@ import {
 import type { Accepted, MediaType } from "./http.ts";
 import { hasIncrementalDirectives, NoIncrementalMutationsRule } from "./incremental.ts";
 import { registerMutation, registerRequest } from "./requestState.ts";
-import { subscriptionSchema } from "./sources.ts";
 import type { MutationTracker } from "./requestState.ts";
 import { multipartResponse, sseResponse } from "./stream.ts";
+import { subscribeOnce } from "./subscribe.ts";
 import type { PayloadSource, StreamOptions, StreamPayload } from "./stream.ts";
 import type {
   BaseServerOptions,
@@ -112,7 +111,8 @@ const unexpected = (originalError: unknown): GraphQLError =>
 
 /**
  * The executor that runs when no plugin claims the operation. Subscriptions always go through
- * graphql-js `subscribe()`, on a copy of the schema whose sources are adapted (see sources.ts). Queries and mutations go through `execute()`, or through
+ * graphql-js's subscription pipeline, with the core holding the source's iterator (see
+ * subscribe.ts). Queries and mutations go through `execute()`, or through
  * `legacyExecuteIncrementally()` when the schema declares @defer or @stream: `execute()` throws
  * on such a schema, even for an operation that uses neither.
  */
@@ -120,7 +120,7 @@ const defaultExecutor =
   (operation: OperationDefinitionNode, args: ExecutionArgs): NextExecutor =>
   () => {
     if (operation.operation === "subscription") {
-      return subscribe({ ...args, schema: subscriptionSchema(args.schema) });
+      return subscribeOnce(args);
     }
     return hasIncrementalDirectives(args.schema) ? legacyExecuteIncrementally(args) : execute(args);
   };

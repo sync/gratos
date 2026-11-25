@@ -4,7 +4,7 @@
 import { on } from "node:events";
 import { EventEmitter } from "node:events";
 
-import { GraphQLError } from "graphql";
+import { GraphQLError, parse } from "graphql";
 import type { GraphQLResolveInfo } from "graphql";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -19,6 +19,7 @@ import {
   signalOf,
 } from "../src/index.ts";
 import type { JsonObject, Plugin, Server } from "../src/index.ts";
+import { subscribeOnce } from "../src/core/subscribe.ts";
 import { flush, gate, gql, post, sleep } from "./support/http.ts";
 import { makeSchema } from "./support/schema.ts";
 import { fetchGraphQL, listen, readSse, readUntil } from "./support/stream.ts";
@@ -40,8 +41,11 @@ const aborted = (signal: AbortSignal | undefined): Promise<void> =>
     });
   });
 
-/** A subscription schema with probes: source arguments, cleanups and an emitter for idle sources. */
-const fixture = () => {
+/**
+ * A subscription schema with probes: source arguments, cleanups and an emitter for idle sources.
+ * With `referenced`, another type refers to the Subscription type (`Query.root: Subscription`).
+ */
+const fixture = ({ referenced = false }: { readonly referenced?: boolean } = {}) => {
   const sourceArgs: Array<unknown> = [];
   const cleanups: Array<string> = [];
   const started: Array<string> = [];
@@ -49,7 +53,7 @@ const fixture = () => {
   const idleStarted = gate();
   const schema = makeSchema(
     `
-      type Query { hello: String later: String }
+      type Query { hello: String later: String${referenced ? " root: Subscription" : ""} }
       type Subscription {
         tick(n: Int!): Int
         changed(id: ID!): String
@@ -224,6 +228,12 @@ const eventually = async (check: () => boolean, ms = 2000): Promise<void> => {
     await sleep(2);
   }
 };
+
+/** The schemas every source-lifecycle test runs on. */
+const schemas = [
+  ["a schema", false],
+  ["a schema where Query.root is the Subscription type", true],
+] as const;
 
 const subscribe = (server: Server, query: string, extra: { variables?: JsonObject } = {}) =>
   server.handle(post({ query, ...extra }, { accept: "text/event-stream" }));
@@ -418,28 +428,31 @@ describe("a standalone handle(Request): cancelling the body", () => {
     await eventually(() => cleanups.includes("waits"));
   });
 
-  it("closes the iterator it reads, for a source that makes a new iterator on every call", async () => {
-    const { schema, fresh } = fixture();
-    const server = createServer({ schema });
-    const request = post({ query: "subscription { fresh }" }, { accept: "text/event-stream" });
-    const response = await server.handle(request);
-    const reader = response.body?.getReader();
-    if (reader === undefined) {
-      throw new Error("no body");
-    }
-    const read = reader.read();
-    await eventually(() => fresh.pulls === 1);
-    // subscribe() asked the source once: it reads and closes the same iterator.
-    expect(fresh.iterators).toBe(1);
-    // return() reaches the iterator whose pull is pending and releases it, so the cancel ends.
-    const timedOut = sleep(1000).then(() => "the body cancel hangs");
-    expect(await Promise.race([reader.cancel().then(() => "cancelled"), timedOut])).toBe(
-      "cancelled",
-    );
-    expect(await read).toEqual({ done: true, value: undefined });
-    expect(signalOf(request)?.aborted).toBe(true);
-    expect(fresh).toEqual({ iterators: 1, pulls: 1, returns: 1 });
-  });
+  it.each(schemas)(
+    "closes the iterator it reads, for a source that makes a new iterator on every call (%s)",
+    async (_name, referenced) => {
+      const { schema, fresh } = fixture({ referenced });
+      const server = createServer({ schema });
+      const request = post({ query: "subscription { fresh }" }, { accept: "text/event-stream" });
+      const response = await server.handle(request);
+      const reader = response.body?.getReader();
+      if (reader === undefined) {
+        throw new Error("no body");
+      }
+      const read = reader.read();
+      await eventually(() => fresh.pulls === 1);
+      // subscribe() asked the source once: it reads and closes the same iterator.
+      expect(fresh.iterators).toBe(1);
+      // return() reaches the iterator whose pull is pending and releases it, so the cancel ends.
+      const timedOut = sleep(1000).then(() => "the body cancel hangs");
+      expect(await Promise.race([reader.cancel().then(() => "cancelled"), timedOut])).toBe(
+        "cancelled",
+      );
+      expect(await read).toEqual({ done: true, value: undefined });
+      expect(signalOf(request)?.aborted).toBe(true);
+      expect(fresh).toEqual({ iterators: 1, pulls: 1, returns: 1 });
+    },
+  );
 
   it("stops a source that is mid-stream: its finally runs, nothing is reported", async () => {
     const { schema, cleanups } = fixture();
@@ -465,44 +478,47 @@ describe("a standalone handle(Request): cancelling the body", () => {
     expect(reported).toEqual([]);
   });
 
-  it("a client that leaves while the source is set up gets a 499, unreported; the late source is closed, never pulled", async () => {
-    const { schema, setup, setupStarted, setupPulls, setupReturns } = fixture();
-    const responses: Array<number> = [];
-    const reported: Array<GraphQLError> = [];
-    const server = createServer({
-      schema,
-      plugins: [
-        reportErrors((error) => {
-          reported.push(error);
-        }),
-        {
-          onResponse: (response) => {
-            responses.push(response.status);
+  it.each(schemas)(
+    "a client that leaves while the source is set up gets a 499, unreported; the late source is closed, never pulled (%s)",
+    async (_name, referenced) => {
+      const { schema, setup, setupStarted, setupPulls, setupReturns } = fixture({ referenced });
+      const responses: Array<number> = [];
+      const reported: Array<GraphQLError> = [];
+      const server = createServer({
+        schema,
+        plugins: [
+          reportErrors((error) => {
+            reported.push(error);
+          }),
+          {
+            onResponse: (response) => {
+              responses.push(response.status);
+            },
           },
-        },
-      ],
-    });
-    const client = new AbortController();
-    const pending = server.handle(
-      post(
-        { query: "subscription { slowSetup }" },
-        { accept: "text/event-stream", signal: client.signal },
-      ),
-    );
-    await setupStarted.promise;
-    client.abort();
-    setup.resolve();
-    const response = await pending;
-    expect(response.status).toBe(CLIENT_CLOSED_REQUEST);
-    expect(responses).toEqual([CLIENT_CLOSED_REQUEST]);
-    // graphql's subscribe() answered with an AbortError at the field, which is not reported.
-    expect(reported).toEqual([]);
-    // graphql 17.1 drops a source that resolves after the abort; the core closes it, once.
-    await eventually(() => setupReturns() > 0);
-    await flush();
-    expect(setupReturns()).toBe(1);
-    expect(setupPulls()).toBe(0);
-  });
+        ],
+      });
+      const client = new AbortController();
+      const pending = server.handle(
+        post(
+          { query: "subscription { slowSetup }" },
+          { accept: "text/event-stream", signal: client.signal },
+        ),
+      );
+      await setupStarted.promise;
+      client.abort();
+      setup.resolve();
+      const response = await pending;
+      expect(response.status).toBe(CLIENT_CLOSED_REQUEST);
+      expect(responses).toEqual([CLIENT_CLOSED_REQUEST]);
+      // graphql's subscribe() answered with an AbortError at the field, which is not reported.
+      expect(reported).toEqual([]);
+      // graphql 17.1 drops a source that resolves after the abort; the core closes it, once.
+      await eventually(() => setupReturns() > 0);
+      await flush();
+      expect(setupReturns()).toBe(1);
+      expect(setupPulls()).toBe(0);
+    },
+  );
 
   it("a result hook that throws on a later event fails the body and stops the source", async () => {
     const { schema, cleanups } = fixture();
@@ -804,11 +820,102 @@ describe("the default executor", () => {
     ]);
   });
 
+  it("runs on the pinned schema itself: a resolver changed before replaceSchema(same schema) runs", async () => {
+    const { schema } = fixture();
+    const server = createServer({ schema });
+    const first = await subscribe(server, "subscription { tick(n: 1) }");
+    expect(readSse(await first.text()).payloads).toEqual([{ data: { tick: 1 } }]);
+    const tick = schema.getSubscriptionType()?.getFields()["tick"];
+    if (tick === undefined) {
+      throw new Error("no Subscription.tick");
+    }
+    const seen: Array<GraphQLResolveInfo> = [];
+    Object.assign(tick, {
+      async *subscribe(_source: unknown, _args: unknown, _ctx: unknown, info: GraphQLResolveInfo) {
+        seen.push(info);
+        yield 42;
+      },
+      resolve: (payload: number, _args: unknown, _ctx: unknown, info: GraphQLResolveInfo) => {
+        seen.push(info);
+        return payload;
+      },
+    });
+    server.control.replaceSchema(schema);
+    const second = await subscribe(server, "subscription { tick(n: 1) }");
+    expect(readSse(await second.text()).payloads).toEqual([{ data: { tick: 42 } }]);
+    expect(seen).toHaveLength(2);
+    for (const info of seen) {
+      expect(info.schema).toBe(schema);
+      expect(info.parentType).toBe(schema.getSubscriptionType());
+    }
+  });
+
   it("runs a subscription through subscribe() even on a schema with @defer", async () => {
     const { schema } = fixture();
     const server = createServer({ schema, plugins: [incremental()] });
     const response = await subscribe(server, "subscription { tick(n: 2) }");
     expect(readSse(await response.text()).names).toEqual(["next", "next", "complete"]);
     await flush();
+  });
+});
+
+/** A schema whose `counted` source yields `n` events from one counting iterator. */
+const counted = (n: number) => {
+  const probe = { iterators: 0, pulls: 0, returns: 0 };
+  const schema = makeSchema(
+    `
+      type Query { hello: String }
+      type Subscription { counted: Int }
+    `,
+    { Subscription: { counted: (payload: number) => payload } },
+  );
+  Object.assign(schema.getSubscriptionType()?.getFields()["counted"] ?? {}, {
+    subscribe: () => ({
+      [Symbol.asyncIterator]: () => {
+        probe.iterators += 1;
+        let sent = 0;
+        return {
+          next: () => {
+            probe.pulls += 1;
+            sent += 1;
+            return Promise.resolve(
+              sent > n ? { done: true, value: undefined } : { done: false, value: sent },
+            );
+          },
+          return: () => {
+            probe.returns += 1;
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        };
+      },
+    }),
+  });
+  return { schema, probe };
+};
+
+const streamOf = async (n: number) => {
+  const { schema, probe } = counted(n);
+  const result = await subscribeOnce({ schema, document: parse("subscription { counted }") });
+  if (!(Symbol.asyncIterator in result)) {
+    throw new Error("no stream");
+  }
+  return { stream: result, probe };
+};
+
+describe("the response stream of a subscription", () => {
+  it("return() before the first pull closes the source, once", async () => {
+    const { stream, probe } = await streamOf(3);
+    await stream.return();
+    await stream.return();
+    expect(probe).toEqual({ iterators: 1, pulls: 0, returns: 1 });
+    expect(await stream.next()).toEqual({ done: true, value: undefined });
+  });
+
+  it("a source that ended is not closed again", async () => {
+    const { stream, probe } = await streamOf(1);
+    expect(await stream.next()).toEqual({ done: false, value: { data: { counted: 1 } } });
+    expect(await stream.next()).toEqual({ done: true, value: undefined });
+    await stream.return();
+    expect(probe).toEqual({ iterators: 1, pulls: 2, returns: 0 });
   });
 });
