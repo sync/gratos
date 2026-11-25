@@ -7,7 +7,8 @@
 // - converts the request with HttpServerRequest.toWeb(req, { signal }), where the signal belongs to
 //   a route AbortController that Effect.promise's signal aborts, which happens only on interrupt
 //   (the client left before the Response), never on completion; the core links its own
-//   controller to it. A Web-backed request, which toWeb returns as it is, is rebuilt once with a
+//   controller to it. A Web-backed request, which toWeb returns as it is, is rebuilt once from
+//   its current view (the URL and headers a middleware set with `modify`), with its body and a
 //   signal that follows both its own signal and the route's;
 // - registers the span backstop with the request Scope, which closes once the transport is done
 //   with the response (after the body is written, a discarded HEAD body, a transport failure or
@@ -27,19 +28,34 @@ import { closeRoute, registerRoute, routeOf } from "./state.ts";
 
 /**
  * The one Request the core gets, carrying the route's signal. toWeb builds a Request with it,
- * except for a Web-backed HttpServerRequest, which it returns as it is (ignoring the signal):
- * that one is rebuilt once, here, with a signal that aborts on either the incoming request's
- * own signal (its client left) or the route's (the route was interrupted). The core never
- * clones it, so it is the key of every per-request WeakMap.
+ * except for a Web-backed HttpServerRequest, which it returns as it is (ignoring the signal and
+ * any URL or headers a middleware set with `modify`): that one is rebuilt once, here, from the
+ * request's current URL and headers, with the source's body and a signal that aborts on either
+ * the incoming request's own signal (its client left) or the route's (the route was
+ * interrupted). The core never clones it, so it is the key of every per-request WeakMap.
  */
 const withRouteSignal = (
   req: HttpServerRequest.HttpServerRequest,
   converted: Request,
   signal: AbortSignal,
-): Request =>
-  converted === req.source
-    ? new Request(converted, { signal: AbortSignal.any([converted.signal, signal]) })
-    : converted;
+): Request => {
+  if (converted !== req.source) {
+    return converted;
+  }
+  const { origin } = new URL(converted.url);
+  // As HttpServerRequest.toURL: a path resolves below the origin, so a leading `//` keeps it.
+  const url = new URL(req.url.startsWith("/") ? `.${req.url}` : req.url, origin);
+  const init: RequestInit & { duplex?: "half" } = {
+    method: converted.method,
+    headers: req.headers,
+    signal: AbortSignal.any([converted.signal, signal]),
+  };
+  if (converted.body !== null) {
+    init.body = converted.body;
+    init.duplex = "half";
+  }
+  return new Request(url, init);
+};
 
 /** The route handler for the server. */
 export const effectRoute =

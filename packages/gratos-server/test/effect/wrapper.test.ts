@@ -4,7 +4,7 @@
 import { EventEmitter } from "node:events";
 
 import { Cause, Context, Data, Effect, Match, Predicate, Stream } from "effect";
-import { HttpServerRequest } from "effect/http";
+import { Headers, HttpServerRequest } from "effect/http";
 import {
   createSourceEventStream,
   execute,
@@ -1002,6 +1002,36 @@ const hanging = () => {
 };
 
 describe("effectRoute with a Web-backed request", () => {
+  it("hands the core the URL and headers a middleware set with modify, and the body", async () => {
+    let seen: { readonly url: string; readonly tenant: string | null } | undefined;
+    const server = createServer({
+      schema: effectSchema(
+        makeSchema("type Query { value: String }", { Query: { value: () => Effect.succeed("v") } }),
+        {
+          failure,
+          isFailure: isAppError,
+        },
+      ),
+      plugins: [
+        {
+          onRequest: (request) => {
+            seen = { url: request.url, tenant: request.headers.get("x-tenant") };
+            return undefined;
+          },
+        },
+        effect(),
+      ],
+    });
+    const source = HttpServerRequest.fromWeb(post({ query: "{ value }" }));
+    const modified = source.modify({
+      url: "/graphql?tenant=t1",
+      headers: Headers.set(source.headers, "x-tenant", "t1"),
+    });
+    const response = await Effect.runPromise(Effect.scoped(effectRoute(server)(modified)));
+    expect(response.status).toBe(200);
+    expect(seen).toEqual({ url: "http://localhost/graphql?tenant=t1", tenant: "t1" });
+  });
+
   it("interrupts the resolver's fiber when the route is interrupted", async () => {
     const { server, started, counts } = hanging();
     const request = HttpServerRequest.fromWeb(post({ query: "{ slow }" }));
