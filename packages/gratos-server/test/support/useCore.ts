@@ -7,6 +7,7 @@ import { buildSchema } from "graphql";
 import {
   apq,
   createServer,
+  incremental,
   jit,
   maskErrors,
   maxDepth,
@@ -26,6 +27,7 @@ const server = createServer({
     serverTiming(),
     maxDepth(5),
     readOnly(),
+    incremental(),
     jit({ after: 1 }),
   ],
 });

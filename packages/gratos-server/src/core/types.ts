@@ -7,6 +7,7 @@ import type {
   GraphQLSchema,
   LegacyExperimentalIncrementalExecutionResults,
   OperationDefinitionNode,
+  ValidationRule,
 } from "graphql";
 
 /** A value or a Promise of it. */
@@ -28,7 +29,10 @@ export interface Params {
   readonly extensions?: JsonObject | undefined;
 }
 
-/** The incremental (`@defer`/`@stream`) results an executor can return (encoded from M4b). */
+/**
+ * The incremental (`@defer`/`@stream`) results an executor can return, in graphql 17's legacy
+ * format (`legacyExecuteIncrementally`), sent as multipart/mixed; deferSpec=20220824.
+ */
 export type IncrementalResults = LegacyExperimentalIncrementalExecutionResults;
 
 /** What an executor produces: one result, incremental results, or a subscription's events. */
@@ -42,12 +46,15 @@ export type NextExecutor = () => PromiseOrValue<ExecutorResult>;
 
 /**
  * Runs the selected operation. `onExecute` hooks return one to claim the operation; the first
- * executor returned (in list order) wins, and the core's default runs when no hook claims it.
+ * executor returned (in list order) wins, and the core's default runs when no hook claims it. A
+ * subscription is never claimed: it always runs through graphql-js `subscribe()`.
  * The core calls it only once every onExecute hook has run without refusing and the gate (drain,
  * no late start) has passed. `next` runs the operation as it would run without this executor:
  * the next claim in list order, else the default. An executor that only sometimes takes over
  * (jit during warm-up) delegates to it, and keeps its own bookkeeping (counting, compiling) in
- * the executor, so an operation that is refused never touches it.
+ * the executor, so an operation that is refused never touches it. A mutation's result must be
+ * a single result: a streamed one is closed unread and the request fails with a 500, since its
+ * work would outlive `mutationOf(req).settled` and `drain()`.
  */
 export type Executor = (next: NextExecutor) => PromiseOrValue<ExecutorResult>;
 
@@ -107,6 +114,12 @@ export interface Plugin<Ctx = unknown> {
   readonly name?: string;
   /** Turns on `hideSuggestions` for validation and execution (`maskErrors()` sets it). */
   readonly hideSuggestions?: boolean;
+  /**
+   * Validation rules run with graphql's specified rules on every document the cache does not hold
+   * yet. Read once, at startup. (The core adds `NoIncrementalMutationsRule` itself on a schema that
+   * declares @defer or @stream.)
+   */
+  readonly validationRules?: ReadonlyArray<ValidationRule>;
   /** Once, at startup. May replace the schema through `control.replaceSchema`. */
   readonly onServer?: (init: ServerInit) => PromiseOrValue<void>;
   /** First, at `handle()` entry. Returning a Response answers the request (onResponse still runs). */
@@ -115,6 +128,8 @@ export interface Plugin<Ctx = unknown> {
    * After the body is read, before the "no query" check (so APQ hash-only requests get here).
    * Returns replacement params, or nothing. A throw becomes a 400 GraphQL error response
    * (always 400, even for a `gqlError` with another status; the error's extensions are kept).
+   * Like every request error, it goes to a client that accepts text/event-stream and no JSON
+   * type as a GraphQL-over-SSE `next` event, then `complete`, with a 200.
    */
   readonly onParams?: (
     params: Params,
@@ -140,7 +155,9 @@ export interface Plugin<Ctx = unknown> {
   /**
    * Claims the operation by returning an executor, or returns nothing. Synchronous. Every
    * onExecute hook runs, in list order, before anything executes; the first executor returned is
-   * called (see `Executor`). A thrown GraphQLError refuses the operation with that error (status
+   * called (see `Executor`). Subscriptions are the exception: they always run through graphql-js
+   * `subscribe()`, so an executor returned for one is never called (the hook still runs, and its
+   * refusal still refuses). A thrown GraphQLError refuses the operation with that error (status
    * from `gqlError`, else 400), whatever executors earlier hooks returned: no executor runs. Two
    * outcomes take precedence over the refusal, in this order: a mutation is refused with 503
    * SERVER_DRAINING once the drain has begun, and a request whose client has left gets 499.
@@ -149,8 +166,14 @@ export interface Plugin<Ctx = unknown> {
    */
   readonly onExecute?: (input: ExecuteInput, args: ExecutionArgs) => Executor | undefined | void;
   /**
-   * Every payload an executor produces: the initial result, a subsequent incremental payload, or
-   * a subscription event. Returns a replacement payload, or nothing. Synchronous.
+   * Every payload an executor produces: a single result, the initial result of an incremental
+   * response, a subsequent incremental payload, or a subscription event (including the error a
+   * failing source ends with). A subsequent payload keeps its errors in `incremental[].errors`:
+   * read and rewrite errors with `payloadErrors` and `mapPayloadErrors`. Returns a replacement
+   * payload, or nothing (`hasNext` stays the executor's). Synchronous. A streamed response
+   * skips the payloads that arrive after the client has left. A single result is not skipped:
+   * a started mutation that finishes after a disconnect still runs the hooks on its result (its
+   * writes happened), and so does a query whose custom executor ignores the abort signal.
    */
   readonly onResult?: (
     payload: ExecutionResult,

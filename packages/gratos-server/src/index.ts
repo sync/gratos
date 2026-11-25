@@ -1,10 +1,18 @@
-// @dblechoc/gratos-server: the GraphQL server core and its plugins (docs/plan.html M4a). The core
+// @dblechoc/gratos-server: the GraphQL server core and its plugins (docs/plan.html M4a, M4b). The core
 // never imports `effect`; the Effect layer is planned as a separate `@dblechoc/gratos-server/effect`
 // entry (M5), which package.json does not export yet.
 export { CLIENT_CLOSED_REQUEST, createServer } from "./core/server.ts";
 export { mutationOf, signalOf, startOf } from "./core/requestState.ts";
 export { gqlError, httpStatusOf } from "./core/errors.ts";
-export { APPLICATION_JSON, GRAPHQL_RESPONSE_JSON } from "./core/http.ts";
+export {
+  APPLICATION_JSON,
+  DEFER_SPEC,
+  GRAPHQL_RESPONSE_JSON,
+  MULTIPART_MIXED,
+  TEXT_EVENT_STREAM,
+} from "./core/http.ts";
+export { isIncrementalPayload, mapPayloadErrors, payloadErrors } from "./core/payload.ts";
+export type { IncrementalPayload, MappedPayload } from "./core/payload.ts";
 export type {
   BaseServerOptions,
   ContextFactory,
@@ -33,6 +41,12 @@ export type {
 } from "./core/types.ts";
 
 export { apq, sha256Hex } from "./plugins/apq.ts";
+export { NoIncrementalMutationsRule } from "./core/incremental.ts";
+export {
+  incremental,
+  usesIncrementalDelivery,
+  withIncrementalDirectives,
+} from "./plugins/incremental.ts";
 export type { ApqOptions, ApqStore } from "./plugins/apq.ts";
 export { isJitDisabled, isSelectionSafe, jit, usesOneOfVariable } from "./plugins/jit.ts";
 export type { FieldPredicate, JitOptions } from "./plugins/jit.ts";

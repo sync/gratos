@@ -2,6 +2,8 @@
 // (docs/plan.html M4a). It declines, so graphql-js runs the operation, when:
 // - the operation is a subscription (graphql-jit 0.10.1 passes wrong arguments to subscription
 //   source resolvers);
+// - the operation, or a fragment it reaches, uses @defer or @stream (graphql-jit inlines them, so
+//   the client would get one payload instead of an incremental response);
 // - a variable's type contains a @oneOf input, directly or nested (graphql-jit 0.10.1 accepts
 //   empty, null-valued and multi-field oneOf inputs that graphql-js rejects);
 // - the selection, including the fragments it reaches, touches a field marked
@@ -45,6 +47,7 @@ import { compileQuery, isCompiledQuery } from "graphql-jit";
 import type { CompiledQuery } from "graphql-jit";
 
 import type { Plugin } from "../core/types.ts";
+import { usesIncrementalDelivery } from "./incremental.ts";
 
 /** A field and the type it is read on. */
 export type FieldPredicate = (
@@ -240,7 +243,10 @@ export const jit = (options: JitOptions = {}): Plugin => {
     onExecute: ({ operation, document, operationName, operationKey, phase }, args) => {
       let state = states.get(operationKey);
       if (state === undefined) {
-        state = operation.operation === "subscription" ? DECLINED : { _tag: "counting", uses: 0 };
+        state =
+          operation.operation === "subscription" || usesIncrementalDelivery(document, operation)
+            ? DECLINED
+            : { _tag: "counting", uses: 0 };
         states.set(operationKey, state);
       }
       if (state._tag === "declined") {
