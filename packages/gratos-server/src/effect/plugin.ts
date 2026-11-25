@@ -15,8 +15,9 @@
 // - ends the span once, from one idempotent finalizer with three triggers: the response body (a
 //   pass-through wrapper that sees done, a read error or a cancel), a null body (ended in
 //   onResponse), and effectRoute's request Scope (the closed flag: a span created later ends
-//   with cancel at once). A mutation the core reports as started defers its end until the core's
-//   tracked mutation settles, and ends ok or error, never cancel.
+//   with cancel at once), plus, for a mutation, the request signal's abort (a standalone client
+//   that left, whose body nobody may read). A mutation the core reports as started defers its end
+//   until the core's tracked mutation settles, and ends ok or error, never cancel.
 //
 // Span times are nanoseconds from the Effect Clock. The core reports performance.now()
 // milliseconds; every such value goes through one per-request anchor, a (clock nanos, perf ms)
@@ -225,6 +226,21 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
           tryEnd(state);
         }
       });
+      // The client leaving is an end trigger too: a standalone request has no route scope, and
+      // nobody may ever read or cancel its body. The end is still deferred until the mutation
+      // settles (before drain() resolves), and is ok or error, never cancel.
+      const signal = signalOf(request);
+      if (signal?.aborted === true) {
+        requestEnd(state, "cancel");
+      } else {
+        signal?.addEventListener(
+          "abort",
+          () => {
+            requestEnd(state, "cancel");
+          },
+          { once: true },
+        );
+      }
     }
     const span = createSpan(state, `graphql ${operation.name?.value ?? "anonymous"}`);
     span.attribute("graphql.operation.type", type);

@@ -276,6 +276,42 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     expect(built.ended).toEqual([operation]);
   });
 
+  it("ends a started standalone mutation's span before drain() resolves, its client gone and its body unread", async () => {
+    const hold = gate();
+    const started = gate();
+    let holding = false;
+    const built = build(executor.plugins(), {
+      Mutation: {
+        first: () =>
+          Effect.gen(function* () {
+            if (holding) {
+              started.resolve();
+              yield* Effect.promise(() => hold.promise);
+            }
+            return "one";
+          }),
+      },
+    });
+    await warm(built.server, "mutation Write { first }");
+    built.tracer.clear();
+    holding = true;
+    const controller = new AbortController();
+    const pending = built.server.handle(
+      post({ query: "mutation Write { first }" }, { signal: controller.signal }),
+    );
+    await started.promise;
+    controller.abort();
+    const drained = built.server.control.drain();
+    hold.resolve();
+    await drained;
+    // Before anything touches the body: the span has ended, ok.
+    const [operation] = operations(built.tracer);
+    expect(operation?.endCalls).toBe(1);
+    expect(operation?.outcome).toBe("ok");
+    await (await pending).body?.cancel();
+    expect(operation?.endCalls).toBe(1);
+  });
+
   it("ends a failing mutation whose client left with error, never cancel", async () => {
     const hold = gate();
     const started = gate();
