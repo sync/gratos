@@ -22,7 +22,13 @@ import {
 import type { ExecuteInput, Plugin } from "../src/index.ts";
 import { flush, gate, gql, post } from "./support/http.ts";
 import { makeSchema } from "./support/schema.ts";
-import { readApolloMultipart, readMultipart, readUntil, wireErrors } from "./support/stream.ts";
+import {
+  readApolloMultipart,
+  readMultipart,
+  readSse,
+  readUntil,
+  wireErrors,
+} from "./support/stream.ts";
 
 const MULTIPART = 'multipart/mixed; boundary="-"; deferSpec=20220824';
 const APOLLO_ACCEPT =
@@ -423,6 +429,36 @@ describe("errors in incremental payloads", () => {
     expect(response.status).toBe(500);
     expect(signalOf(request)?.aborted).toBe(true);
     expect(errors).toHaveLength(1);
+  });
+
+  it("a client that accepts multipart and SSE but no JSON gets the failing hook's 500 as SSE events", async () => {
+    const { schema, hold } = fixture();
+    const server = createServer({
+      schema,
+      logger: { warn: () => undefined, error: () => undefined },
+      plugins: [
+        incremental(),
+        {
+          onResult: () => {
+            throw new Error("hook failure");
+          },
+        },
+      ],
+    });
+    const request = post(
+      { query: "{ hello ... @defer { slow } }" },
+      { accept: "multipart/mixed, text/event-stream" },
+    );
+    const response = await server.handle(request);
+    hold.resolve();
+    // The deferred work was stopped (the core signal aborted), but the client is still there.
+    expect(signalOf(request)?.aborted).toBe(true);
+    expect(response.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
+    const { names, payloads } = readSse(await response.text());
+    expect(names).toEqual(["next", "complete"]);
+    expect(payloads).toEqual([
+      { errors: [{ message: "Unexpected error.", extensions: { http: { status: 500 } } }] },
+    ]);
   });
 
   it("an onResult replacement cannot drop hasNext", async () => {

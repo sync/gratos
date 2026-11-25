@@ -162,6 +162,23 @@ interface TrackedMutation {
 
 const noop = (): void => {};
 
+/** A controller that aborts when `incoming` (the Request's signal: the client left) does. */
+const linkedController = (incoming: AbortSignal): AbortController => {
+  const controller = new AbortController();
+  if (incoming.aborted) {
+    controller.abort(incoming.reason);
+  } else {
+    incoming.addEventListener(
+      "abort",
+      () => {
+        controller.abort(incoming.reason);
+      },
+      { once: true, signal: controller.signal },
+    );
+  }
+  return controller;
+};
+
 /** What the executor call gave: its result (maybe a Promise), or what it threw. */
 type Outcome =
   | { readonly ok: true; readonly result: PromiseOrValue<ExecutorResult> }
@@ -315,7 +332,12 @@ const serve = <Ctx>(
   /** Everything one request carries between phases. */
   interface Run {
     readonly request: Request;
-    readonly controller: AbortController;
+    /**
+     * The controller of the core signal (`signalOf(req)`), which the response's body also aborts
+     * when the client leaves. Once closeUnsent has aborted it to stop an execution whose result
+     * is not sent, it is replaced by one for the answer alone (see closeUnsent).
+     */
+    controller: AbortController;
     /** The schema generation this request pinned; it finishes on it whatever replaceSchema does. */
     schema: GraphQLSchema;
     generation: number;
@@ -357,13 +379,8 @@ const serve = <Ctx>(
     });
   };
 
-  /**
-   * Closes a streamed result that is not sent (a refusal, a client that left, a failing result
-   * hook). The core signal aborts first, so a cleanup that waits on it, or on a pending pull,
-   * ends. A cleanup that fails is logged and never changes the answer.
-   */
-  const closeUnsent = async (run: Run, result: ExecutorResult): Promise<void> => {
-    run.controller.abort();
+  /** Closes a streamed result; a cleanup that fails is logged and never changes the answer. */
+  const closeStreamed = async (result: ExecutorResult): Promise<void> => {
     try {
       if (Symbol.asyncIterator in result) {
         await result.return();
@@ -373,6 +390,18 @@ const serve = <Ctx>(
     } catch (error) {
       logger.error("gratos-server: closing a streamed result failed.", error);
     }
+  };
+
+  /**
+   * Closes a streamed result that is not sent (a refusal, a client that left, a failing result
+   * hook). The core signal aborts first, so a cleanup that waits on it, or on a pending pull,
+   * ends. The answer that follows (a 406, a failing hook's 500) gets a controller of its own,
+   * aborted only when the client leaves: the core signal no longer says whether it is there.
+   */
+  const closeUnsent = async (run: Run, result: ExecutorResult): Promise<void> => {
+    run.controller.abort();
+    run.controller = linkedController(run.request.signal);
+    await closeStreamed(result);
   };
 
   /** Whether the request is a mutation (not started yet) and the drain has begun. */
@@ -785,19 +814,7 @@ const serve = <Ctx>(
 
   const handle = async (request: Request): Promise<Response> => {
     const start = performance.now();
-    const controller = new AbortController();
-    const incoming = request.signal;
-    if (incoming.aborted) {
-      controller.abort(incoming.reason);
-    } else {
-      incoming.addEventListener(
-        "abort",
-        () => {
-          controller.abort(incoming.reason);
-        },
-        { once: true, signal: controller.signal },
-      );
-    }
+    const controller = linkedController(request.signal);
     registerRequest(request, controller.signal, start);
     const run: Run = {
       request,
