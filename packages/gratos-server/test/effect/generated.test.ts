@@ -103,14 +103,23 @@ describe.each(executors)("a generated schema ($name executor)", (executor) => {
 
   it("runs the generated guarded query, and maps its typed failure and its refusal", async () => {
     const { server } = build();
-    expect((await gql(server, '{ order(id: "o-1") { id label } }')).body).toEqual({
+    const found = '{ order(id: "o-1") { id label } }';
+    const missing = '{ order(id: "nope") { id } }';
+    const refusedQuery = '{ order(id: "o-1") { id } }';
+    // Warmed with the default (authorized) session, so jit runs the measured requests.
+    for (let index = 0; index < executor.warmUp; index += 1) {
+      for (const query of [found, missing, refusedQuery]) {
+        await gql(server, query);
+      }
+    }
+    expect((await gql(server, found)).body).toEqual({
       data: { order: { id: "o-1", label: "o-1:open" } },
     });
-    expect((await gql(server, '{ order(id: "nope") { id } }')).error).toMatchObject({
+    expect((await gql(server, missing)).error).toMatchObject({
       message: "Order nope not found.",
       extensions: { code: "NOT_FOUND", http: { status: 404 } },
     });
-    const refused = post({ query: '{ order(id: "o-1") { id } }' });
+    const refused = post({ query: refusedQuery });
     refused.headers.set("x-scopes", "orders:write");
     expect((await send(server, refused)).error).toMatchObject({
       message: "Forbidden.",

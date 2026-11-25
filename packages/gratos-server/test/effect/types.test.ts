@@ -4,7 +4,7 @@
 // Error mapping).
 import { Effect, Match, Stream } from "effect";
 import type { GraphQLError } from "graphql";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { gqlError } from "../../src/index.ts";
 import { effectSchema, makeGuard } from "../../src/effect/index.ts";
@@ -66,7 +66,11 @@ describe("the failure mapper", () => {
   });
 });
 
-const order = (id: string): Effect.Effect<OrderRow, AppError, Api> =>
+/** True only when A and B are the same type (assignability alone is not enough). */
+type Exact<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+const order = (id: string) =>
   guard.guard({
     scopes: ["orders:read"],
     effect: Effect.gen(function* () {
@@ -74,7 +78,7 @@ const order = (id: string): Effect.Effect<OrderRow, AppError, Api> =>
       return yield* api.order(id);
     }),
   });
-const changes = (): Stream.Stream<number, AppError, Api> =>
+const changes = () =>
   guard.guardStream({
     stream: Effect.gen(function* () {
       yield* Api;
@@ -84,6 +88,16 @@ const changes = (): Stream.Stream<number, AppError, Api> =>
 
 describe("guarded resolvers", () => {
   it("keep the type Effect<A, AppError, R>: a timeout is never a typed failure", () => {
+    // Exact: a covariant `never` in the error or requirements slot would fail these.
+    expectTypeOf<
+      Exact<ReturnType<typeof order>, Effect.Effect<OrderRow, AppError, Api>>
+    >().toEqualTypeOf<true>();
+    expectTypeOf<
+      Exact<ReturnType<typeof changes>, Stream.Stream<1 | 2, AppError, Api>>
+    >().toEqualTypeOf<true>();
+    expectTypeOf<
+      Exact<ReturnType<typeof order>, Effect.Effect<OrderRow, never, never>>
+    >().toEqualTypeOf<false>();
     expect(Effect.isEffect(order("o-1"))).toBe(true);
     expect(Stream.isStream(changes())).toBe(true);
   });

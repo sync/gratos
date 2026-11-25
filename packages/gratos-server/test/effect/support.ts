@@ -6,6 +6,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { Context, Effect, Exit, Layer, Scope, Tracer } from "effect";
 import type { Duration } from "effect";
 import { HttpRouter, HttpServer } from "effect/http";
+import { expect } from "vitest";
 
 import { incremental, jit } from "../../src/index.ts";
 import type { Plugin } from "../../src/index.ts";
@@ -102,6 +103,8 @@ export const buildServed = async <E>(
   const context = await Effect.runPromise(Layer.buildWithScope(layer, scope));
   const { address } = Context.get(context, HttpServer.HttpServer);
   if (address._tag === "UnixPathAddress") {
+    // Not handed to the caller: release the server it bound before rejecting it.
+    await Effect.runPromise(Scope.close(scope, Exit.void));
     throw new Error("expected a TCP address");
   }
   let closed: Promise<void> | undefined;
@@ -132,6 +135,20 @@ export const serveApp = <E>(
       ),
     ),
   );
+
+/**
+ * Asserts that `child` is a child span of `parent`, on its trace: both must exist, so two
+ * missing spans never compare equal as `undefined`.
+ */
+export const expectChildOf = (
+  child: RecordedSpan | undefined,
+  parent: Tracer.AnySpan | undefined,
+): void => {
+  expect(child, "the child span").toBeDefined();
+  expect(parent, "the parent span").toBeDefined();
+  expect(child?.parentId).toBe(parent?.spanId);
+  expect(child?.traceId).toBe(parent?.traceId);
+};
 
 /** Resolves once `check()` holds, polling every millisecond (fails after `timeoutMs`). */
 export const until = async (check: () => boolean, timeoutMs = 2000): Promise<void> => {

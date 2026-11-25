@@ -1,7 +1,7 @@
 // effectSchema, fromCause, wrapSubscribe and the guard, on standalone handle(Request), once per
 // executor (docs/plan.html M5 "Done when": semantic non-null, return paths, error mapping,
 // aborts, fibers, timeouts, guard).
-import { EventEmitter } from "node:events";
+import { EventEmitter, EventEmitterAsyncResource } from "node:events";
 
 import { Cause, Context, Data, Effect, Match, Predicate, Stream } from "effect";
 import { Headers, HttpServerRequest } from "effect/http";
@@ -19,7 +19,7 @@ import type {
   GraphQLResolveInfo,
   GraphQLSchema,
 } from "graphql";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import {
   createServer,
@@ -44,7 +44,7 @@ import { currentScope, scopeOfRequest } from "../../src/effect/state.ts";
 import { flush, gate, gql, post, send } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
 import { readSse } from "../support/stream.ts";
-import { executors, recordingTracer, until } from "./support.ts";
+import { executors, expectChildOf, recordingTracer, until } from "./support.ts";
 
 const isAsyncIterable = (value: unknown): value is AsyncIterable<unknown> =>
   Predicate.hasProperty(value, Symbol.asyncIterator);
@@ -283,8 +283,7 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       expect(sent.body).toEqual({ data: { slow: "late" } });
       const [operation] = built.tracer.named("graphql Slow").slice(-1);
       const [resolver] = built.tracer.named("resolve Query.slow").slice(-1);
-      expect(resolver?.parentId).toBe(operation?.spanId);
-      expect(resolver?.traceId).toBe(operation?.traceId);
+      expectChildOf(resolver, operation);
     });
 
     it("classifies a thenable's value: a Promise of an Effect is run", async () => {
@@ -654,6 +653,10 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       built.tracer.clear();
       holding = true;
       const mutation = gql(built.server, MUTATION);
+      onTestFinished(async () => {
+        hold.resolve();
+        await mutation;
+      });
       await started.promise;
       // The query binds its own scope while the mutation is between its two fields.
       const query = await gql(built.server, "query Q { slow }");
@@ -663,7 +666,7 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       expect(sent.body).toEqual({ data: { first: "one", second: "two" } });
       const [operation] = built.tracer.named("graphql M");
       const [second] = built.tracer.named("resolve Mutation.writeTwo");
-      expect(second?.parentId).toBe(operation?.spanId);
+      expectChildOf(second, operation);
     });
 
     it.each([
@@ -678,7 +681,7 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       expect(sent.body).toEqual({ data: { slow: "late" } });
       const [operation] = built.tracer.named("graphql P").slice(-1);
       const [resolver] = built.tracer.named("resolve Query.slow").slice(-1);
-      expect(resolver?.parentId).toBe(operation?.spanId);
+      expectChildOf(resolver, operation);
     });
 
     it.runIf(executor.name === "incremental")(
@@ -693,7 +696,7 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
         expect(await response.text()).toContain('"slow":"late"');
         const [operation] = built.tracer.named("graphql D");
         const [resolver] = built.tracer.named("resolve Query.slow");
-        expect(resolver?.parentId).toBe(operation?.spanId);
+        expectChildOf(resolver, operation);
       },
     );
 
@@ -721,7 +724,39 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
         expect((await sending).body).toEqual({ data: { slow: "late" } });
         const [operation] = built.tracer.named("graphql E");
         const [resolver] = built.tracer.named("resolve Query.slow");
-        expect(resolver?.parentId).toBe(operation?.spanId);
+        expectChildOf(resolver, operation);
+      },
+    );
+
+    it.runIf(executor.name === "default")(
+      "finds the scope when next() re-enters from another async context during the executor call",
+      async () => {
+        // Created outside the request: it calls its listeners in the async context it was
+        // created in, not the request's, while the executor call is still running.
+        const emitter = new EventEmitterAsyncResource({ name: "outside the request" });
+        onTestFinished(() => {
+          emitter.emitDestroy();
+        });
+        const reentrant: Plugin = {
+          onExecute: () => (next) => {
+            let result: ReturnType<typeof next> | undefined;
+            emitter.once("go", () => {
+              result = next();
+            });
+            emitter.emit("go");
+            return result ?? { errors: [gqlError("no result", 500)] };
+          },
+        };
+        const built = build(
+          { Query: { slow: () => Effect.succeed("late").pipe(Effect.delay("1 millis")) } },
+          { plugins: [reentrant] },
+        );
+        expect((await gql(built.server, "query R { slow }")).body).toEqual({
+          data: { slow: "late" },
+        });
+        const [operation] = built.tracer.named("graphql R");
+        const [resolver] = built.tracer.named("resolve Query.slow");
+        expectChildOf(resolver, operation);
       },
     );
 
@@ -788,7 +823,7 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       }
       const [operation] = tracer.named("graphql P").slice(-1);
       const [resolver] = tracer.named("resolve Query.slow").slice(-1);
-      expect(resolver?.parentId).toBe(operation?.spanId);
+      expectChildOf(resolver, operation);
     });
   });
 
@@ -959,7 +994,7 @@ describe("an executor that runs a document of its own", () => {
     });
     const [operation] = tracer.named("graphql Rewritten");
     const [resolver] = tracer.named("resolve Query.value");
-    expect(resolver?.parentId).toBe(operation?.spanId);
+    expectChildOf(resolver, operation);
   });
 
   it("gives them no request scope when it does not bind it", async () => {

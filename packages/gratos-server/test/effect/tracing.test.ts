@@ -13,7 +13,7 @@ import { closeRoute, registerRoute } from "../../src/effect/state.ts";
 import { flush, gate, gql, post, URL_ } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
 import { readSse, readUntil } from "../support/stream.ts";
-import { executors, recordingTracer, until } from "./support.ts";
+import { executors, expectChildOf, recordingTracer, until } from "./support.ts";
 import type { RecordedSpan, RecordingTracer } from "./support.ts";
 
 type Resolver = GraphQLFieldResolver<never, unknown>;
@@ -172,6 +172,7 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     built.tracer.clear();
     await gql(built.server, "{ value }");
     const [operation] = operations(built.tracer);
+    expect(operation?.outcome).toBe("ok");
     const names = childrenOf(built.tracer, operation).map((span) => span.name);
     expect(names).not.toContain("parse");
     expect(names).not.toContain("validate");
@@ -278,7 +279,7 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     expect(response.status).toBe(499);
     await until(() => built.tracer.open().length === 0);
     const [resolver] = built.tracer.named("resolve Query.slow");
-    expect(resolver?.parentId).toBe(operation?.spanId);
+    expectChildOf(resolver, operation);
     expect(operation?.outcome).toBe("cancel");
     expect(operation?.endCalls).toBe(1);
     expect(built.ended).toEqual([operation]);
@@ -646,18 +647,34 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
 
   it("ends a mutation whose response body fails with error", async () => {
     let failing = false;
+    // Wraps the original body (the plugin rule: reuse it, never discard it), and fails the read
+    // after its first chunk, cancelling the original reader.
     const failingBody: Plugin = {
-      onResponse: (response) =>
-        !failing
-          ? undefined
-          : new Response(
-              new ReadableStream({
-                pull: (controller) => {
-                  controller.error(new Error("body failed"));
-                },
-              }),
-              { status: response.status, headers: response.headers },
-            ),
+      onResponse: (response) => {
+        if (!failing || response.body === null) {
+          return undefined;
+        }
+        const reader = response.body.getReader();
+        let read = 0;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull: async (controller) => {
+              read += 1;
+              if (read === 1) {
+                const chunk = await reader.read();
+                if (!chunk.done) {
+                  controller.enqueue(chunk.value);
+                  return;
+                }
+              }
+              await reader.cancel("injected failure");
+              controller.error(new Error("body failed"));
+            },
+            cancel: (reason) => reader.cancel(reason),
+          }),
+          { status: response.status, headers: response.headers },
+        );
+      },
     };
     const built = build([...executor.plugins(), failingBody], {
       Mutation: { first: () => Effect.succeed("one") },
@@ -844,7 +861,7 @@ describe("effect() tracing with a Clock that is not performance.now()", () => {
     expect((await gql(server, "{ value }")).body).toEqual({ data: { value: "v" } });
     const [operation] = operations(tracer);
     const [compile] = tracer.named("jit");
-    expect(compile?.parentId).toBe(operation?.spanId);
+    expectChildOf(compile, operation);
     expect((compile?.startTime ?? -1n) >= (operation?.startTime ?? 0n)).toBe(true);
     expect((compile?.endTime ?? 0n) <= (operation?.endTime ?? -1n)).toBe(true);
   });
@@ -865,7 +882,7 @@ describe("effect() tracing with a Clock that is not performance.now()", () => {
     expect((await gql(server, "{ value }")).body).toEqual({ data: { value: "v" } });
     const [operation] = operations(tracer);
     const [resolver] = tracer.named("resolve Query.value");
-    expect(resolver?.parentId).toBe(operation?.spanId);
+    expectChildOf(resolver, operation);
     expect((resolver?.endTime ?? 0n) <= (operation?.endTime ?? -1n)).toBe(true);
   });
 
@@ -1013,8 +1030,8 @@ describe("effect() tracing of a streamed response that fails", () => {
     await until(() => built.tracer.open().length === 0);
     const [resolver] = built.tracer.named("resolve Item.later");
     const [release] = built.tracer.named("release held");
-    expect(resolver?.parentId).toBe(operation?.spanId);
-    expect(release?.parentId).toBe(resolver?.spanId);
+    expectChildOf(resolver, operation);
+    expectChildOf(release, resolver);
     expect(operation?.outcome).toBe("error");
     expect(operation?.endCalls).toBe(1);
     expect(built.ended).toEqual([operation]);

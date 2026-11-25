@@ -14,7 +14,7 @@ import { appLayer } from "../app/src/server.ts";
 import { makeJournal } from "../app/src/services.ts";
 import type { Journal } from "../app/src/services.ts";
 import { readUntil } from "../support/stream.ts";
-import { buildServed, executors, recordingTracer, until } from "./support.ts";
+import { buildServed, executors, expectChildOf, recordingTracer, until } from "./support.ts";
 import type { ExecutorCase, RecordingTracer, Served } from "./support.ts";
 
 interface Running {
@@ -106,10 +106,10 @@ describe.each(executors)("over NodeHttpServer ($name executor)", (executor) => {
     const [resolver] = tracer.named("resolve Query.order");
     const [rpc] = tracer.named("rpc Api.order");
     expect(new Set(tracer.spans.map((span) => span.traceId)).size).toBe(1);
-    expect(operation?.parentId).toBe(http?.spanId);
-    expect(session?.parentId).toBe(http?.spanId);
-    expect(resolver?.parentId).toBe(operation?.spanId);
-    expect(rpc?.parentId).toBe(resolver?.spanId);
+    expectChildOf(operation, http);
+    expectChildOf(session, http);
+    expectChildOf(resolver, operation);
+    expectChildOf(rpc, resolver);
     expect(operation?.endCalls).toBe(1);
   });
 
@@ -160,8 +160,9 @@ describe.each(executors)("over NodeHttpServer ($name executor)", (executor) => {
       accept: "text/event-stream",
       signal: controller.signal,
     });
-    // The stream's setup has run (it reads the order) once the transport pulls the body.
-    await until(() => tracer.named("rpc Api.order").length > 0);
+    // The stream's setup has subscribed to the bus once the transport pulls the body: an event
+    // published before it would be lost (the bus keeps no replay).
+    await until(() => journal.entries.includes("orderChanged subscribed o-1"));
     const write = await graphql(
       served.url,
       'mutation { setStatus(id: "o-1", status: "shipped") { id } }',
@@ -224,7 +225,7 @@ describe.each(executors)("over NodeHttpServer ($name executor)", (executor) => {
     hold.resolve();
     await until(() => tracer.open().length === 0);
     const [release] = tracer.named("release heldWatch");
-    expect(release?.parentId).toBe(operation?.spanId);
+    expectChildOf(release, operation);
     expect(operation?.endCalls).toBe(1);
     expect(operation?.outcome).toBe("cancel");
     expect((operation?.endTime ?? 0n) >= (release?.endTime ?? 1n)).toBe(true);
@@ -337,8 +338,8 @@ describe("over NodeHttpServer, incremental delivery", () => {
     await until(() => tracer.open().length === 0);
     const [resolver] = tracer.named("resolve Order.heldNote");
     const [release] = tracer.named("release note o-1");
-    expect(resolver?.parentId).toBe(operation?.spanId);
-    expect(release?.parentId).toBe(resolver?.spanId);
+    expectChildOf(resolver, operation);
+    expectChildOf(release, resolver);
     expect(resolver?.outcome).toBe("cancel");
     expect(operation?.endCalls).toBe(1);
     expect(operation?.outcome).toBe("cancel");

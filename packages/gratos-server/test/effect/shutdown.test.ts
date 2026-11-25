@@ -6,7 +6,7 @@
 // logged" assertion proves it did. The regression test holds the mutation between its two
 // serial fields, before the second field's Effect is forked (no resolver fiber is running), so
 // a drain that only waited for resolver fibers would release the layers too early.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 import type { Plugin } from "../../src/index.ts";
 import { scopeOfRequest } from "../../src/effect/state.ts";
@@ -83,6 +83,11 @@ describe.each(executors)("shutdown ($name executor)", (executor) => {
     journal.entries.length = 0;
     const hold = gate();
     journal.holds.set("o-1", hold.promise);
+    // Registered before the mutation is held: the drain can finish once the hold is open.
+    onTestFinished(async () => {
+      hold.resolve();
+      await served.close();
+    });
     const response = post(served.url, MUTATION).catch(() => undefined);
     await until(() => journal.entries.includes("held o-1"));
     const closing = served.close();
@@ -125,6 +130,10 @@ describe.each(executors)("shutdown ($name executor)", (executor) => {
     }
     journal.entries.length = 0;
     tracer.clear();
+    onTestFinished(async () => {
+      hold.resolve();
+      await served.close();
+    });
     holding = true;
     const client = new AbortController();
     const response = post(served.url, HELD_MUTATION, client.signal).catch(() => undefined);

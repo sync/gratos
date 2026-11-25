@@ -162,7 +162,10 @@ export function orderChanged(
         }),
       );
       const bus = yield* Bus;
-      return bus.changes.pipe(
+      // Subscribed in the setup, so the tests can publish once it is recorded.
+      const changes = yield* bus.subscribe;
+      journal.entries.push(`orderChanged subscribed ${id}`);
+      return changes.pipe(
         Stream.filter((row) => row.id === id),
         Stream.map((row) => new Order(row)),
       );

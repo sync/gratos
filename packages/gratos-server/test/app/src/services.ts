@@ -2,6 +2,7 @@
 // Their layers record when they are built and released, so the shutdown tests can order the
 // drain against the release.
 import { Context, Effect, Layer, PubSub, Stream } from "effect";
+import type { Scope } from "effect";
 
 import { NotFound } from "./errors.ts";
 
@@ -74,6 +75,8 @@ export class Bus extends Context.Service<
   {
     readonly publish: (row: OrderRow) => Effect.Effect<void>;
     readonly changes: Stream.Stream<OrderRow>;
+    /** Subscribes now (in the caller's scope): the stream gets every event published after. */
+    readonly subscribe: Effect.Effect<Stream.Stream<OrderRow>, never, Scope.Scope>;
   }
 >()("test/app/Bus") {
   static readonly layer = Layer.effect(
@@ -83,6 +86,7 @@ export class Bus extends Context.Service<
       return Bus.of({
         publish: (row) => PubSub.publish(pubsub, row).pipe(Effect.asVoid),
         changes: Stream.fromPubSub(pubsub),
+        subscribe: Effect.map(PubSub.subscribe(pubsub), Stream.fromSubscription),
       });
     }),
   );
