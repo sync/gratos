@@ -1,8 +1,8 @@
 // effectSchema, fromCause, wrapSubscribe and the guard, on standalone handle(Request), once per
 // executor (docs/plan.html M5 "Done when": semantic non-null, return paths, error mapping,
 // aborts, fibers, timeouts, guard).
-import { Cause, Context, Data, Effect, Match, Stream } from "effect";
-import { execute, parse } from "graphql";
+import { Cause, Context, Data, Effect, Match, Predicate, Stream } from "effect";
+import { createSourceEventStream, execute, parse, validateSubscriptionArgs } from "graphql";
 import type { GraphQLError, GraphQLFieldResolver, GraphQLSchema } from "graphql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -14,13 +14,20 @@ import {
   makeGuard,
   OperationType,
   ResolverDefect,
+  wrapSubscribe,
 } from "../../src/effect/index.ts";
 import { internals } from "../../src/effect/schema.ts";
 import { scopeOf } from "../../src/effect/state.ts";
 import { flush, gate, gql, post, send } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
 import { readSse } from "../support/stream.ts";
-import { executors, recordingTracer } from "./support.ts";
+import { executors, recordingTracer, until } from "./support.ts";
+
+const isAsyncIterable = (value: unknown): value is AsyncIterable<unknown> =>
+  Predicate.hasProperty(value, Symbol.asyncIterator);
+
+const isIterator = (value: unknown): value is AsyncIterator<unknown> =>
+  Predicate.hasProperty(value, "next") && Predicate.isFunction(value.next);
 
 class NotFound extends Data.TaggedError("NotFound")<{ readonly id: string }> {}
 class Forbidden extends Data.TaggedError("Forbidden")<{ readonly scopes: ReadonlyArray<string> }> {}
@@ -534,6 +541,57 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       });
       expect(mapper).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("wrapSubscribe", () => {
+  it("returns a request-local iterable whose iterator is always the same one", async () => {
+    const events: Array<string> = [];
+    const schema = makeSchema("type Query { a: String } type Subscription { never: String }");
+    const field = schema.getSubscriptionType()?.getFields()["never"];
+    if (field === undefined) {
+      throw new Error("no field");
+    }
+    field.subscribe = wrapSubscribe(
+      () =>
+        Stream.unwrap(
+          Effect.acquireRelease(
+            Effect.sync(() => {
+              events.push("acquired");
+            }),
+            () =>
+              Effect.sync(() => {
+                events.push("released");
+              }),
+          ).pipe(Effect.as(Stream.never)),
+        ),
+      { failure },
+    );
+    // graphql-js hands back the source iterable the subscribe resolver returned.
+    const validated = validateSubscriptionArgs({
+      schema,
+      document: parse("subscription { never }"),
+    });
+    if (!("schema" in validated)) {
+      throw new Error("invalid subscription");
+    }
+    const source = await createSourceEventStream(validated);
+    if (!isAsyncIterable(source)) {
+      throw new Error("not an AsyncIterable");
+    }
+    expect(events).toEqual([]);
+    const pulling: unknown = source[Symbol.asyncIterator]();
+    const closing: unknown = source[Symbol.asyncIterator]();
+    expect(closing).toBe(pulling);
+    if (!isIterator(pulling)) {
+      throw new Error("not an AsyncIterator");
+    }
+    // A pull that never settles by itself; return() on "another" iterator closes this one.
+    const pending = pulling.next();
+    await until(() => events.includes("acquired"));
+    await pulling.return?.();
+    expect(await pending).toEqual({ done: true, value: undefined });
+    expect(events).toEqual(["acquired", "released"]);
   });
 });
 
