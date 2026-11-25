@@ -204,10 +204,11 @@ const subscription = (signal: AbortSignal) =>
   });
 
 /**
- * Sends the subscription through `handle` and resolves with its response. The response comes
- * with the first event (the app's source sends the order as it is first; the plain one, the
- * first warm-up event), so a warm-up event is published at each turn of the event loop until it
- * answers. When `deadline` passes (or `publish` throws) first, the client leaves: the request is
+ * Sends the subscription through `handle` and resolves with its response. A warm-up event is
+ * published at each turn of the event loop until it answers (a server may hold the response until
+ * the source has sent something; the app's source sends the order as it is first, the plain one
+ * the first warm-up event). The pending response is subscribed to once, whatever the number of
+ * turns. When `deadline` passes (or `publish` throws) first, the client leaves: the request is
  * aborted, and a response that still comes later has its body cancelled, so no subscription
  * outlives the run.
  */
@@ -218,20 +219,31 @@ export const openSubscription = async (
 ): Promise<Response> => {
   const controller = new AbortController();
   const pending = handle(subscription(controller.signal));
+  let settled = false;
+  const answered = pending.then(
+    (response) => {
+      settled = true;
+      return response;
+    },
+    (error: unknown) => {
+      settled = true;
+      throw error;
+    },
+  );
+  // Handled now: a rejection while the loop waits for its next turn is not an unhandled one.
+  answered.catch(() => undefined);
   try {
-    for (;;) {
+    while (!settled) {
       if (performance.now() > deadline) {
         throw new Error("timed out waiting for the subscription to answer");
       }
       publish();
-      const response = await Promise.race([pending, immediate()]);
-      if (response !== undefined) {
-        return response;
-      }
+      await immediate();
     }
+    return await answered;
   } catch (error) {
     controller.abort(error);
-    void pending.then(
+    void answered.then(
       (late) => late.body?.cancel().catch(() => undefined),
       () => undefined,
     );

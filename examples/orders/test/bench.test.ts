@@ -139,11 +139,22 @@ describe("bench:subscriptions", () => {
     let sent: Request | undefined;
     const late = Promise.withResolvers<Response>();
     let published = 0;
+    // Counts the handlers attached to the pending response: one per turn would grow without bound.
+    let subscribed = 0;
+    const pending = late.promise;
+    const then = pending.then.bind(pending);
+    pending.then = <A = Response, B = never>(
+      onFulfilled?: ((value: Response) => A | PromiseLike<A>) | null,
+      onRejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
+    ): Promise<A | B> => {
+      subscribed += 1;
+      return then(onFulfilled, onRejected);
+    };
 
     const error = await openSubscription(
       (request) => {
         sent = request;
-        return late.promise;
+        return pending;
       },
       () => {
         published += 1;
@@ -155,7 +166,8 @@ describe("bench:subscriptions", () => {
     );
 
     expect(error).toMatchObject({ message: "timed out waiting for the subscription to answer" });
-    expect(published).toBeGreaterThan(0);
+    expect(published).toBeGreaterThan(10);
+    expect(subscribed).toBe(1);
     // The client left: the server sees the request aborted.
     expect(sent?.signal.aborted).toBe(true);
     // A response that comes anyway has its body cancelled: none of its events is read.

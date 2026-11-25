@@ -215,10 +215,11 @@ report sees unmasked errors. Plugins that only observe or refuse (`effect()`, `s
   not throw, before or after `run`. An executor must not throw after it has called `next()`
   (report failure through its result or a rejected Promise). Breaking this is handled on a
   best-effort basis only, and work started in that instant may not be stopped. What the client
-  gets depends on when it throws: around the executor call, before the response has started, the
-  error is logged and the request fails with a 500. A streamed response (SSE, `@defer`,
-  `@stream`) has sent its status already: a throw on one of its later pulls ends the stream with
-  an error as its last payload, and one while it closes or aborts is only logged.
+  gets depends on the response format and on when it throws. A JSON response fails with a 500. A
+  streamed response (SSE, `@defer`, `@stream`) has its 200 status already: a throw around the
+  executor call, or on any pull of its body (the first one included), ends the stream with an
+  error as its last payload. None of these is logged by the core: the client's error payload is
+  the only trace. A throw while a stream closes or aborts is only logged.
 - **Subscriptions run graphql-js's own steps in the core**: `createSourceEventStream`, then
   `executeSubscriptionEvent` per event, with the core holding the one source iterator it reads
   and closes (graphql 17.1's `subscribe()` may read and close different iterators of a plain
