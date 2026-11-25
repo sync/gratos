@@ -48,6 +48,8 @@ export interface StreamOptions {
   /** The core's request signal, and the controller that aborts it. */
   readonly controller: AbortController;
   readonly logger: Logger;
+  /** Called once the stream has ended normally: its closing frame is in the body. */
+  readonly onEnd: () => void;
 }
 
 const encoder = new TextEncoder();
@@ -99,7 +101,7 @@ const sseFraming: Framing = {
 };
 
 const streamResponse = (framing: Framing, options: StreamOptions): Response => {
-  const { first, rest, process, failure, controller, logger } = options;
+  const { first, rest, process, failure, controller, logger, onEnd } = options;
   const { signal } = controller;
   /** Set once the stream has ended or was cancelled: nothing more may touch its controller. */
   let finished = false;
@@ -169,6 +171,7 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           finished = true;
           stream.enqueue(chunk(text));
           stream.close();
+          onEnd();
           await release();
         };
         /**

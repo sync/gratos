@@ -40,7 +40,7 @@ import {
 } from "./http.ts";
 import type { Accepted, MediaType } from "./http.ts";
 import { hasIncrementalDirectives, NoIncrementalMutationsRule } from "./incremental.ts";
-import { registerMutation, registerRequest } from "./requestState.ts";
+import { endStream, registerMutation, registerRequest } from "./requestState.ts";
 import type { MutationTracker } from "./requestState.ts";
 import { multipartResponse, sseResponse } from "./stream.ts";
 import { subscribeOnce } from "./subscribe.ts";
@@ -414,6 +414,9 @@ const serve = <Ctx>(
         failure: sourceFailure,
         controller: run.controller,
         logger,
+        onEnd: () => {
+          endStream(run.request);
+        },
       });
     }
     return jsonResponse(result, status ?? statusOf(result, run.mediaType), run.mediaType, () => {
@@ -683,6 +686,9 @@ const serve = <Ctx>(
     failure: sourceFailure,
     controller: run.controller,
     logger,
+    onEnd: () => {
+      endStream(run.request);
+    },
   });
 
   /** execute (await the executor) and encode: the result hooks, then the Response. */

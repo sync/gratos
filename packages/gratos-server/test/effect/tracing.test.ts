@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { createServer, gqlError, jit, serverTiming } from "../../src/index.ts";
 import type { Plugin, Server } from "../../src/index.ts";
 import { effect, effectSchema } from "../../src/effect/index.ts";
+import { closeRoute, registerRoute } from "../../src/effect/state.ts";
 import { flush, gate, gql, post } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
 import { readSse } from "../support/stream.ts";
@@ -119,6 +120,21 @@ const readBody = async (response: Response, onEvent: (text: string) => void = ()
     text += decoder.decode(value, { stream: true });
     onEvent(text);
   }
+};
+
+/** Reads an SSE body until its `complete` event, and returns the reader, the end still unread. */
+const readToComplete = async (response: Response) => {
+  const reader = (response.body ?? new ReadableStream<Uint8Array>()).getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while (!text.includes("event: complete")) {
+    const { done, value } = await reader.read();
+    if (done) {
+      throw new Error("EOF before complete");
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return reader;
 };
 
 describe.each(executors)("effect() tracing ($name executor)", (executor) => {
@@ -298,6 +314,66 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     const [operation] = operations(built.tracer);
     expect(operation?.outcome).toBe("error");
     expect(operation?.endCalls).toBe(1);
+  });
+
+  it.each([
+    { source: "ended", events: () => Stream.make("a"), outcome: "ok", then: "reads EOF" },
+    { source: "ended", events: () => Stream.make("a"), outcome: "ok", then: "cancels" },
+    {
+      source: "failed",
+      events: () => Stream.make("a").pipe(Stream.concat(Stream.die(new Error("boom")))),
+      outcome: "error",
+      then: "reads EOF",
+    },
+    {
+      source: "failed",
+      events: () => Stream.make("a").pipe(Stream.concat(Stream.die(new Error("boom")))),
+      outcome: "error",
+      then: "cancels",
+    },
+  ])(
+    "keeps the outcome of an SSE subscription whose source $source once complete is sent, though its client leaves before EOF and $then",
+    async ({ events, outcome, then }) => {
+      const built = build(executor.plugins(), { Subscription: { events } }, { quiet: true });
+      const controller = new AbortController();
+      const response = await built.server.handle(
+        post(
+          { query: "subscription Done { events }" },
+          { accept: "text/event-stream", signal: controller.signal },
+        ),
+      );
+      const reader = await readToComplete(response);
+      // The core has sent its closing event; the client leaves before it reads the end.
+      controller.abort();
+      if (then === "cancels") {
+        await reader.cancel();
+      } else {
+        expect((await reader.read()).done).toBe(true);
+      }
+      await flush();
+      const [operation] = operations(built.tracer);
+      expect(operation?.outcome).toBe(outcome);
+      expect(operation?.endCalls).toBe(1);
+    },
+  );
+
+  it("keeps the outcome of an SSE stream the core ended when its route closes after the client left", async () => {
+    const built = build(executor.plugins(), { Subscription: { events: () => Stream.make("a") } });
+    const controller = new AbortController();
+    const request = post(
+      { query: "subscription Routed { events }" },
+      { accept: "text/event-stream", signal: controller.signal },
+    );
+    // As effectRoute registers it; its Scope closes once the transport is done with the body.
+    const route = registerRoute(request, performance.now(), built.tracer.context);
+    const reader = await readToComplete(await built.server.handle(request));
+    controller.abort();
+    closeRoute(route);
+    await flush();
+    const [operation] = operations(built.tracer);
+    expect(operation?.outcome).toBe("ok");
+    expect(operation?.endCalls).toBe(1);
+    await reader.cancel();
   });
 
   it("ends a mutation whose client left after its first resolver started after its last resolver, ok", async () => {

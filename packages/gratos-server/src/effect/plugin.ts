@@ -16,7 +16,8 @@
 //   pass-through wrapper that sees done, a read error or a cancel; done after the request's own
 //   signal aborted, the client leaving a stream, is a cancel), a null body (ended in
 //   onResponse), and effectRoute's request Scope (the closed flag: a span created later ends
-//   with cancel at once), plus, for a mutation, the request signal's abort (a standalone client
+//   with cancel at once); a client that leaves once the core has ended its stream itself (its
+//   closing frame sent, `streamEnded`) keeps the stream's outcome, never a cancel; plus, for a mutation, the request signal's abort (a standalone client
 //   that left, whose body nobody may read). A mutation the core reports as started defers its end
 //   until the core's tracked mutation settles, and ends ok or error (its errors, its answer's
 //   status, a failing body), never cancel.
@@ -30,7 +31,7 @@ import type { ExecutionResult, OperationDefinitionNode } from "graphql";
 
 import { isCancelled } from "../core/errors.ts";
 import { payloadErrors } from "../core/payload.ts";
-import { mutationOf, signalOf, startOf } from "../core/requestState.ts";
+import { mutationOf, signalOf, startOf, streamEnded } from "../core/requestState.ts";
 import type { Phase, Plugin } from "../core/types.ts";
 import { OperationType } from "./guard.ts";
 import { bindScope, enterScope, routeOf } from "./state.ts";
@@ -49,6 +50,13 @@ export interface EffectPluginOptions {
 
 /** What ended the request, for the span's status. */
 type Trigger = "complete" | "error" | "cancel";
+
+/**
+ * The end trigger of a client that left: a cancel, unless the core had ended its streamed
+ * response itself (the closing frame sent), whose outcome stays (ok, or a failed source's
+ * error, through its error payload).
+ */
+const leftAs = (request: Request): Trigger => (streamEnded(request) ? "complete" : "cancel");
 
 /** The per-request finalizer state. */
 interface SpanState {
@@ -169,7 +177,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     if (route !== undefined) {
       const onClose = (): void => {
         created.closed = true;
-        requestEnd(created, "cancel");
+        requestEnd(created, leftAs(request));
       };
       if (route.closed) {
         created.closed = true;
@@ -343,16 +351,17 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
             done = true;
             controller.close();
             // The core ends the body at once when the client leaves (the incoming signal aborts
-            // the core one): that end is a cancel. A source failure also aborts the core signal,
+            // the core one): that end is a cancel, unless the core had ended the stream itself
+            // before (its closing frame sent). A source failure also aborts the core signal,
             // never the incoming one, and keeps its error outcome (its error payload).
-            requestEnd(state, state.request.signal.aborted ? "cancel" : "complete");
+            requestEnd(state, state.request.signal.aborted ? leftAs(state.request) : "complete");
             return;
           }
           controller.enqueue(read.value);
         },
         cancel: async (reason) => {
           done = true;
-          requestEnd(state, "cancel");
+          requestEnd(state, leftAs(state.request));
           await reader.cancel(reason);
         },
       },

@@ -5,6 +5,7 @@ import type { MutationState } from "./types.ts";
 const signals = new WeakMap<Request, AbortSignal>();
 const starts = new WeakMap<Request, number>();
 const mutations = new WeakMap<Request, MutationState>();
+const endedStreams = new WeakSet<Request>();
 
 /**
  * The core's abort signal for a request: linked to `Request.signal` and aborted when the response
@@ -17,6 +18,19 @@ export const startOf = (request: Request): number | undefined => starts.get(requ
 
 /** The mutation state of a request whose selected operation is a mutation, else `undefined`. */
 export const mutationOf = (request: Request): MutationState | undefined => mutations.get(request);
+
+/**
+ * Whether the core has ended the request's streamed response itself (GraphQL-over-SSE or
+ * multipart/mixed): its last payload and closing frame (`event: complete`, the close delimiter)
+ * are in the body, which is closed after them. That is how the response ended, also when the
+ * client leaves before it reads them to the end.
+ */
+export const streamEnded = (request: Request): boolean => endedStreams.has(request);
+
+/** Records that the core has ended the request's streamed response (see streamEnded). */
+export const endStream = (request: Request): void => {
+  endedStreams.add(request);
+};
 
 /** A mutation's started/settled signals, with the functions that publish them. */
 export interface MutationTracker {
