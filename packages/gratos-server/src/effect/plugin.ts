@@ -101,6 +101,12 @@ interface SpanState {
   mutation: "none" | "pending" | "started" | "skipped" | "settled";
   /** A settled mutation's answer status (mutationOf(req).status()). */
   answered: number | undefined;
+  /**
+   * The status of the answer the core built for this call (answerStatusOf), read when the call
+   * observes its response (onResponse, or its mutation's settlement): the Request-level value
+   * belongs to its latest handle() call, which may be a later one by the time this span ends.
+   */
+  answerStatus: number | undefined;
   /** The latest end time of a child span (a phase, a resolver), in Clock nanoseconds. */
   childEnd: bigint;
   /** The request scope onContext bound, with what interrupts its fibers (a client abort). */
@@ -130,7 +136,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     const status = state.status === 0 ? (state.answered ?? 0) : state.status;
     // The status of the answer the core built, which an SSE-only client gets as an event with a
     // 200 (a request error, a failure's 500): it counts, and the attribute keeps the 200 it got.
-    const answered = answerStatusOf(state.request) ?? 0;
+    const answered = state.answerStatus ?? 0;
     if (state.mutation === "settled") {
       // A started mutation always finished: ok or error, never cancel. Its answer failing (a
       // throwing result hook's 500) or its body failing is an error too.
@@ -255,6 +261,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       errors: 0,
       mutation: "none",
       answered: undefined,
+      answerStatus: undefined,
       childEnd: 0n,
       scope: undefined,
       ended: false,
@@ -351,6 +358,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
         if (state.mutation === "started" || state.mutation === "pending") {
           state.mutation = "settled";
           state.answered = mutation.status();
+          state.answerStatus ??= answerStatusOf(request);
           tryEnd(state);
         }
       });
@@ -491,6 +499,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     onResponse: (response, request) => {
       const state = stateOf(request);
       state.status = response.status;
+      state.answerStatus ??= answerStatusOf(request);
       if (state.span === undefined) {
         createSpan(state, "graphql anonymous");
       }

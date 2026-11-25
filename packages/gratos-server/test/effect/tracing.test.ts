@@ -1179,6 +1179,38 @@ describe("effect() span bookkeeping", () => {
     expect(operation?.endCalls).toBe(1);
   });
 
+  it("ends each call's span with its own answer when a Request is handed to handle() again before the first body is read", async () => {
+    let calls = 0;
+    const built = build(
+      [
+        {
+          // Answers the first call, and fails the second (the core answers it with a 500).
+          onRequest: () => {
+            calls += 1;
+            if (calls === 1) {
+              return new Response("ok", { status: 200 });
+            }
+            throw new Error("onRequest failed");
+          },
+        },
+      ],
+      {},
+      { quiet: true },
+    );
+    const request = new Request(URL_, { method: "HEAD" });
+    const first = await built.server.handle(request);
+    const second = await built.server.handle(request);
+    expect(second.status).toBe(500);
+    await second.text();
+    expect(first.status).toBe(200);
+    expect(await first.text()).toBe("ok");
+    const [ok, failed] = operations(built.tracer);
+    expect(ok?.outcome).toBe("ok");
+    expect(ok?.attributes.get("http.response.status_code")).toBe(200);
+    expect(failed?.outcome).toBe("error");
+    expect(failed?.attributes.get("http.response.status_code")).toBe(500);
+  });
+
   it("gives a Request handed to handle() twice a span for each call", async () => {
     const built = build([]);
     const request = new Request(URL_, { method: "HEAD" });
