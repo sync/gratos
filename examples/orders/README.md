@@ -243,3 +243,9 @@ pnpm bench:subscriptions   # SSE throughput of orderChanged: the Effect Stream v
 Both print JSON and take `--record`, which writes `bench/orders.json` and
 `bench/subscriptions.json` at the repo root (with the machine they ran on). The dev loop's
 save-to-first-good-response times are printed by `test/dev.test.ts`.
+
+`bench:subscriptions` compares two complete source paths, from a publish to an SSE event through
+the app's own server: the app's (`Bus.publish` into a PubSub, the topic's subscription behind
+`ctx.guardStream`, each pull through `Stream.toAsyncIterableWith`) and a hand-written async
+iterator over an in-memory FIFO. Its ratio is the cost of the whole Effect path against a minimal
+one, not of one mechanism in isolation.
