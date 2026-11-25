@@ -3,60 +3,60 @@
 // `pnpm dev` runs this file under `GRATS_DEV=1 node --watch-path=src/models
 // --watch-path=src/services`: GRATS_DEV is explicit because Node removes --watch and --watch-path
 // from the child's process.execArgv. In dev, the boot step from @dblechoc/gratos/dev, imported
-// only then, regenerates src/generated/ from the models before the schema module is imported;
-// when the models do not build, every GraphQL request answers 500 GRATS_ERROR with the
-// diagnostics until the next good save restarts the process. A production start imports the
-// committed src/generated/schema.ts and never loads the compiler or TypeScript.
+// only then, regenerates src/generated/ from the models, then loads the app: the generated schema
+// module and the wiring in graphql.ts (which imports the services). When either does not build or
+// load, every /graphql request answers 500 GRATS_ERROR with the diagnostics until the next
+// good save restarts the process. This file therefore imports nothing from the watched folders.
+// A production start loads the same two modules and never loads the compiler or TypeScript.
 import { createServer as createHttpServer } from "node:http";
 
 import type { GratsDevError } from "@dblechoc/gratos/dev";
-import { effectRouteLayer } from "@dblechoc/gratos-server/effect";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Config, Effect, Layer, Result } from "effect";
 import type { FileSystem } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 
-import { makeServer } from "./graphql.ts";
-import type { Services } from "./graphql.ts";
-import { Bus } from "./services/Bus.ts";
-import { FakeApi } from "./services/FakeApi.ts";
-
 const dev = process.env["GRATS_DEV"] === "1";
 
-/** Imported, never statically: in dev it exists only once the boot step has written it. */
-const loadSchemaModule = () => import("./generated/schema.ts");
+/**
+ * The app: the generated schema served by the wiring in graphql.ts. Imported, never
+ * statically: in dev the schema exists only once the boot step has written it, and a module that
+ * fails to load must fail inside the boot step's error boundary, not before it.
+ */
+const loadApp = async () => {
+  const [schema, app] = await Promise.all([
+    import("./generated/schema.ts"),
+    import("./graphql.ts"),
+  ]);
+  return app.appLayer(schema.getSchema());
+};
 
-/** The generated schema module, or (in dev) why the models do not build. */
-const schemaModule: Effect.Effect<
-  Result.Result<Awaited<ReturnType<typeof loadSchemaModule>>, GratsDevError>,
-  never,
-  FileSystem.FileSystem
-> = dev
+type AppLayer = Awaited<ReturnType<typeof loadApp>>;
+
+/** The app, or (in dev) why the models or the app do not build or load. */
+const app: Effect.Effect<Result.Result<AppLayer, GratsDevError>, never, FileSystem.FileSystem> = dev
   ? Effect.promise(() => import("@dblechoc/gratos/dev")).pipe(
       Effect.flatMap((gratos) =>
-        gratos.devSchema({
-          tsconfig: new URL("tsconfig.json", import.meta.url),
-          load: loadSchemaModule,
-        }),
+        gratos.devSchema({ tsconfig: new URL("tsconfig.json", import.meta.url), load: loadApp }),
       ),
       Effect.result,
     )
-  : Effect.map(Effect.promise(loadSchemaModule), Result.succeed);
+  : Effect.map(Effect.promise(loadApp), Result.succeed);
 
-/** POST /graphql (and the core's answers to other methods), or GRATS_ERROR for every request. */
-const graphqlLayer = Layer.unwrap(
-  Effect.gen(function* () {
-    const loaded = yield* schemaModule;
-    if (Result.isFailure(loaded)) {
-      const error = loaded.failure;
-      return HttpRouter.add(
+/** The app, or a route answering GRATS_ERROR to every /graphql request. */
+const appLayer = Layer.unwrap(
+  Effect.map(app, (loaded) => {
+    if (Result.isSuccess(loaded)) {
+      return loaded.success;
+    }
+    const error = loaded.failure;
+    return HttpRouter.serve(
+      HttpRouter.add(
         "*",
         "/graphql",
         Effect.sync(() => HttpServerResponse.fromWeb(error.response())),
-      );
-    }
-    const services = yield* Effect.context<Services>();
-    return effectRouteLayer(makeServer(loaded.success.getSchema(), services));
+      ),
+    );
   }),
 );
 
@@ -74,8 +74,8 @@ const httpServerLayer = Layer.unwrap(
   }),
 );
 
-HttpRouter.serve(graphqlLayer).pipe(
-  Layer.provide([FakeApi.layer, Bus.layer, NodeServices.layer]),
+appLayer.pipe(
+  Layer.provide(NodeServices.layer),
   Layer.provide(httpServerLayer),
   Layer.launch,
   NodeRuntime.runMain,

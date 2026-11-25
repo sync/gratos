@@ -5,7 +5,7 @@
 // production start never loads the compiler (or TypeScript). On boot, loadSchema() runs
 // generate() for the app's tsconfig, which writes only the generated files whose content changed
 // (src/generated/ is not watched, so writing it never restarts the process), and then imports
-// the generated schema module through the app's own `load` callback.
+// the generated schema module (and the app's wiring) through the app's own `load` callback.
 //
 // When the models do not build, loadSchema() does not throw: it returns a failed Result whose
 // GratsDevError answers every request with a 500 and `extensions.code: "GRATS_ERROR"` plus the
@@ -61,7 +61,7 @@ const devError = (error: GratsError): GratsDevError => {
 };
 
 const loadError = (cause: unknown): GratsDevError => {
-  const message = `Gratos could not load the generated schema: ${String(cause)}`;
+  const message = `Gratos could not load the app: ${String(cause)}`;
   return new GratsDevError({
     message,
     diagnostics: [{ message: String(cause) }],

@@ -125,9 +125,7 @@ describe("devSchema", () => {
           log,
         }),
       );
-      expect(error.message).toBe(
-        "Gratos could not load the generated schema: SyntaxError: Unexpected token",
-      );
+      expect(error.message).toBe("Gratos could not load the app: SyntaxError: Unexpected token");
       expect(error.diagnostics).toEqual([{ message: "SyntaxError: Unexpected token" }]);
     }).pipe(Effect.provide(NodeServices.layer), Effect.ensuring(Effect.sync(project.remove)));
   });

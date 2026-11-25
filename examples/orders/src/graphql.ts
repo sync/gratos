@@ -1,17 +1,29 @@
-// The GraphQL server: the generated schema wrapped by effectSchema, a context factory that reads
-// the session with runInRequest and builds the guard, and the plugins (APQ and JIT keep their
-// caches in this process's memory only, so each dev restart starts them over).
+// The app's wiring: the GraphQL server (the generated schema wrapped by effectSchema, a context
+// factory that reads the session with runInRequest and builds the guard, and the plugins; APQ and
+// JIT keep their caches in this process's memory only, so each dev restart starts them over),
+// served on an HttpServer with the app's services.
+//
+// The server imports this module dynamically, with the generated schema: in dev, inside the boot
+// step's error boundary, so a service that does not load answers GRATS_ERROR like a broken model.
 import { apq, createServer, gqlError, jit } from "@dblechoc/gratos-server";
 import type { Server } from "@dblechoc/gratos-server";
-import { effect, effectSchema, makeGuard, runInRequest } from "@dblechoc/gratos-server/effect";
-import { Effect, Match } from "effect";
+import {
+  effect,
+  effectRouteLayer,
+  effectSchema,
+  makeGuard,
+  runInRequest,
+} from "@dblechoc/gratos-server/effect";
+import { Effect, Layer, Match } from "effect";
 import type { Context } from "effect";
+import { HttpRouter } from "effect/http";
 import type { GraphQLSchema } from "graphql";
 
 import type { Ctx } from "./models/context.ts";
 import type { Api } from "./services/Api.ts";
-import type { Bus } from "./services/Bus.ts";
+import { Bus } from "./services/Bus.ts";
 import { Forbidden, isAppError } from "./services/errors.ts";
+import { FakeApi } from "./services/FakeApi.ts";
 import type { AppError } from "./services/errors.ts";
 
 export type Services = Api | Bus;
@@ -51,3 +63,16 @@ export const makeServer = (schema: GraphQLSchema, services: Context.Context<Serv
       ),
     plugins: [apq(), jit(), effect()],
   });
+
+/**
+ * The app on an HttpServer: POST /graphql (and the core's answers to other methods) for `schema`,
+ * served with the app's services (provided outside the router, so resolvers fork with them).
+ */
+export const appLayer = (schema: GraphQLSchema) =>
+  HttpRouter.serve(
+    Layer.unwrap(
+      Effect.map(Effect.context<Services>(), (services) =>
+        effectRouteLayer(makeServer(schema, services)),
+      ),
+    ),
+  ).pipe(Layer.provide([FakeApi.layer, Bus.layer]));

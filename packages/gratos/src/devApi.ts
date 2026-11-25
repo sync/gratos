@@ -20,7 +20,7 @@ export interface DevDiagnostic {
   readonly column?: number;
 }
 
-/** The models do not build, or the generated schema module could not be loaded. */
+/** The models do not build, or the app (`load`) could not be loaded. */
 export class GratsDevError extends Data.TaggedError("GratsDevError")<{
   readonly message: string;
   readonly diagnostics: ReadonlyArray<DevDiagnostic>;
@@ -55,7 +55,9 @@ export interface DevOptions<M> {
   readonly tsconfig: string | URL;
   /**
    * Imports the generated schema module, once generate() has written it, for example
-   * `() => import("./generated/schema.ts")`. Called only when the models build.
+   * `() => import("./generated/schema.ts")`. Called only when the models build. Import here
+   * everything that comes from the watched folders (the app's wiring and services too): a module
+   * that fails to load here is a GratsDevError, one imported statically stops the server.
    */
   readonly load: () => Promise<M>;
   /** Where the boot step reports, a line at a time. Default: standard error. */

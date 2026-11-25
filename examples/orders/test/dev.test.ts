@@ -165,6 +165,67 @@ describe("pnpm dev", () => {
     expect(dev.restarts()).toBe(3);
   });
 
+  it("breaks a service, answers GRATS_ERROR, and recovers on the fix", async () => {
+    const { app, dev } = await startDev();
+    await firstGood(dev, ORDER, { order: { id: "o-1", status: "open" } }, BOOT_MS);
+
+    /** The first GRATS_ERROR answer whose body mentions `text`. */
+    const gratsError = (text: string) =>
+      until(
+        async () => {
+          const answer = await post(dev.url, ORDER);
+          return answer?.status === 500 && JSON.stringify(answer.body).includes(text)
+            ? answer
+            : undefined;
+        },
+        { timeoutMs: BOOT_MS, message: `no GRATS_ERROR mentioning ${text}`, app: dev },
+      );
+
+    // A syntax error in a service the models import.
+    save(app, "src/services/Bus.ts", (source) =>
+      source.replace("PubSub.unbounded<OrderRow>();", "PubSub.unbounded<OrderRow>(;"),
+    );
+    const syntax = await gratsError("Expression expected");
+    expect(syntax.body).toMatchObject({
+      errors: [
+        {
+          message: expect.stringContaining("Gratos could not load the app: SyntaxError"),
+          extensions: { code: "GRATS_ERROR" },
+        },
+      ],
+    });
+
+    // A service only the app's wiring imports, which builds but throws when it is loaded.
+    save(app, "src/services/Bus.ts", (source) =>
+      source.replace("PubSub.unbounded<OrderRow>(;", "PubSub.unbounded<OrderRow>();"),
+    );
+    save(
+      app,
+      "src/services/FakeApi.ts",
+      (source) => `${source}\nthrow new Error("FakeApi is broken");\n`,
+    );
+    const thrown = await gratsError("FakeApi is broken");
+    expect(thrown.body).toEqual({
+      errors: [
+        {
+          message: "Gratos could not load the app: Error: FakeApi is broken",
+          extensions: {
+            code: "GRATS_ERROR",
+            diagnostics: [{ message: "Error: FakeApi is broken" }],
+          },
+        },
+      ],
+    });
+
+    const fixedAt = save(app, "src/services/FakeApi.ts", (source) =>
+      source.replace('\nthrow new Error("FakeApi is broken");\n', ""),
+    );
+    await firstGood(dev, ORDER, { order: { id: "o-1", status: "open" } }, BOOT_MS);
+    const elapsed = performance.now() - fixedAt;
+    timings.push(`service fix → recovered: ${Math.round(elapsed)} ms`);
+    expect(elapsed).toBeLessThanOrEqual(BUDGET_MS);
+  });
+
   it("starts the APQ cache and open subscriptions over on each save", async () => {
     const { app, dev } = await startDev();
     await firstGood(dev, ORDER, { order: { id: "o-1", status: "open" } }, BOOT_MS);
