@@ -495,9 +495,12 @@ const serve = <Ctx>(
       };
     }
     // The first claim runs; its `next` is the executor that would have run without it (the next
-    // claim in list order, else the default).
+    // claim in list order, else the default). A subscription always runs through subscribe(): a
+    // claim cannot answer it (an executor such as legacyExecuteIncrementally would return a
+    // one-shot result), so its claims are ignored once every hook has had its say.
     let execute: NextExecutor = defaultExecutor(input.operation, args);
-    for (const claim of claims?.toReversed() ?? []) {
+    const chosen = input.operation.operation === "subscription" ? undefined : claims;
+    for (const claim of chosen?.toReversed() ?? []) {
       const next = execute;
       execute = () => claim(next);
     }

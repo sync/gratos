@@ -46,7 +46,8 @@ export type NextExecutor = () => PromiseOrValue<ExecutorResult>;
 
 /**
  * Runs the selected operation. `onExecute` hooks return one to claim the operation; the first
- * executor returned (in list order) wins, and the core's default runs when no hook claims it.
+ * executor returned (in list order) wins, and the core's default runs when no hook claims it. A
+ * subscription is never claimed: it always runs through graphql-js `subscribe()`.
  * The core calls it only once every onExecute hook has run without refusing and the gate (drain,
  * no late start) has passed. `next` runs the operation as it would run without this executor:
  * the next claim in list order, else the default. An executor that only sometimes takes over
@@ -150,7 +151,9 @@ export interface Plugin<Ctx = unknown> {
   /**
    * Claims the operation by returning an executor, or returns nothing. Synchronous. Every
    * onExecute hook runs, in list order, before anything executes; the first executor returned is
-   * called (see `Executor`). A thrown GraphQLError refuses the operation with that error (status
+   * called (see `Executor`). Subscriptions are the exception: they always run through graphql-js
+   * `subscribe()`, so an executor returned for one is never called (the hook still runs, and its
+   * refusal still refuses). A thrown GraphQLError refuses the operation with that error (status
    * from `gqlError`, else 400), whatever executors earlier hooks returned: no executor runs. Two
    * outcomes take precedence over the refusal, in this order: a mutation is refused with 503
    * SERVER_DRAINING once the drain has begun, and a request whose client has left gets 499.

@@ -589,6 +589,56 @@ describe("regression: subscription source arguments past the jit threshold", () 
   });
 });
 
+describe("onExecute and subscriptions", () => {
+  it("a claim cannot answer a subscription: it still streams through subscribe()", async () => {
+    const { schema } = fixture();
+    const hooks: Array<string> = [];
+    let claimed = 0;
+    const oneShot: Plugin = {
+      onExecute: ({ operation }) => {
+        hooks.push(operation.operation);
+        return () => {
+          claimed += 1;
+          return { data: { tick: null } };
+        };
+      },
+    };
+    const server = createServer({ schema, plugins: [oneShot] });
+    const response = await subscribe(server, "subscription { tick(n: 2) }");
+    const { names, payloads } = readSse(await response.text());
+    expect(names).toEqual(["next", "next", "complete"]);
+    expect(payloads.map((payload) => payload.data)).toEqual([{ tick: 1 }, { tick: 2 }]);
+    expect(hooks).toEqual(["subscription"]);
+    expect(claimed).toBe(0);
+  });
+
+  it("a refusal still refuses a subscription, after an earlier claim", async () => {
+    const { schema, started } = fixture();
+    const server = createServer({
+      schema,
+      plugins: [
+        { onExecute: () => () => ({ data: null }) },
+        {
+          onExecute: () => {
+            throw new GraphQLError("no subscriptions here", { extensions: { code: "REFUSED" } });
+          },
+        },
+      ],
+    });
+    const response = await server.handle(
+      post(
+        { query: "subscription { tick(n: 2) }" },
+        { accept: "text/event-stream, application/graphql-response+json" },
+      ),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      errors: [{ message: "no subscriptions here", extensions: { code: "REFUSED" } }],
+    });
+    expect(started).toEqual([]);
+  });
+});
+
 describe("the default executor", () => {
   it("runs a subscription through subscribe() even on a schema with @defer", async () => {
     const { schema } = fixture();
