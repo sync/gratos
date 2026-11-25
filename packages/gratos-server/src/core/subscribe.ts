@@ -57,11 +57,13 @@ const CLOSED: unique symbol = Symbol("closed");
 
 /**
  * The response stream of one source: each event executed as subscribe() executes it. It is an
- * explicit iterator, not an async generator, whose calls a generator would queue behind a pending
- * pull (or skip its `finally` before the first one). Closing it (`return()`, `throw()`, an event
- * that fails to execute) reaches the source's iterator once and at once, even while a pull is
- * pending or before the first pull, and settles a pending pull as done even when the source's
- * own `next()` never settles. As in graphql's mapAsyncIterable, pulls are not queued.
+ * explicit iterator, not an async generator, because a generator would queue `return()` and
+ * `throw()` behind a pending read (or skip its `finally` before the first one). Reads are
+ * serialized, as a generator's are: a `next()` waits for the previous read, event execution
+ * included. Closing it (`return()`, `throw()`, an event that fails to execute) reaches the
+ * source's iterator once and at once, even while a read is pending or before the first one, and
+ * interrupts the active read (settled as done even when the source's `next()` or the event's
+ * resolvers never settle); reads queued behind it then find the stream finished.
  */
 const responseStream = (
   validated: ValidatedSubscriptionArgs,
