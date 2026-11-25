@@ -68,6 +68,9 @@ export interface Phase {
   readonly end: number;
 }
 
+/** A plugin's `wrapExecution`: runs `run` once, synchronously, and returns its result. */
+export type ExecutionWrapper = <T>(request: Request, run: () => T) => T;
+
 /** The first argument of `onExecute`. */
 export interface ExecuteInput {
   /** The selected operation, resolved by the core after the document cache and before context. */
@@ -180,6 +183,17 @@ export interface Plugin<Ctx = unknown> {
     ctx: Ctx,
     request: Request,
   ) => ExecutionResult | undefined | void;
+  /**
+   * Wraps each synchronous entry into the operation's execution: the executor call (a query's or
+   * mutation's root fields, a subscription's source setup), each subscription event's execution,
+   * and each pull of an incremental response's subsequent payloads (graphql-js runs deferred work
+   * from there). It calls `run` once, synchronously, and returns what it returns. A plugin
+   * carries request-local state into the resolvers this way, which keep receiving the
+   * application's own context value: the Effect layer enters an `AsyncLocalStorage`, whose store
+   * the async continuations of that work inherit. Wrappers nest in list order (the first is the
+   * outermost). Synchronous, and in the hot loop.
+   */
+  readonly wrapExecution?: ExecutionWrapper;
   /**
    * Exactly once per request, on the Response before it goes to the transport (also for streamed
    * responses, whose headers it can still change). Not a "stream finished" hook. Returns a

@@ -112,10 +112,10 @@ const unexpected = (originalError: unknown): GraphQLError =>
  * on such a schema, even for an operation that uses neither.
  */
 const defaultExecutor =
-  (operation: OperationDefinitionNode, args: ExecutionArgs): NextExecutor =>
+  (operation: OperationDefinitionNode, args: ExecutionArgs, enter: Enter): NextExecutor =>
   () => {
     if (operation.operation === "subscription") {
-      return subscribeOnce(args);
+      return subscribeOnce(args, enter);
     }
     return hasIncrementalDirectives(args.schema) ? legacyExecuteIncrementally(args) : execute(args);
   };
@@ -145,10 +145,19 @@ const subscriptionSource = (
   },
 });
 
-/** The subsequent payloads of an incremental result as stream payloads. */
-const incrementalSource = (results: IncrementalResults["subsequentResults"]): PayloadSource => ({
+/** Runs a synchronous entry into execution inside the request's execution wrappers. */
+type Enter = <T>(run: () => T) => T;
+
+/**
+ * The subsequent payloads of an incremental result as stream payloads. Each pull runs inside the
+ * request's execution wrappers (`wrapExecution`): graphql-js runs deferred work from it.
+ */
+const incrementalSource = (
+  results: IncrementalResults["subsequentResults"],
+  enter: Enter,
+): PayloadSource => ({
   next: async () => {
-    const pulled = await results.next();
+    const pulled = await enter(() => results.next());
     return pulled.done === true
       ? pulled
       : { done: false, value: { result: pulled.value, hasNext: pulled.value.hasNext } };
@@ -253,6 +262,18 @@ const serve = <Ctx>(
   const onExecute = hooksOf(plugins, "onExecute");
   const onResult = hooksOf(plugins, "onResult");
   const onResponse = hooksOf(plugins, "onResponse");
+  // The first wrapper is the outermost.
+  const wrapExecution = hooksOf(plugins, "wrapExecution").toReversed();
+
+  /** Runs `run` inside every plugin's execution wrapper (directly when there is none). */
+  const enterExecution = <T>(request: Request, run: () => T): T => {
+    let wrapped = run;
+    for (const hook of wrapExecution) {
+      const inner = wrapped;
+      wrapped = () => hook(request, inner);
+    }
+    return wrapped();
+  };
 
   const tracked = new Set<TrackedMutation>();
   let draining = false;
@@ -577,7 +598,8 @@ const serve = <Ctx>(
     // claim in list order, else the default). A subscription always runs through subscribe(): a
     // claim cannot answer it (an executor such as legacyExecuteIncrementally would return a
     // one-shot result), so its claims are ignored once every hook has had its say.
-    let execute: NextExecutor = defaultExecutor(input.operation, args);
+    const enter: Enter = (inner) => enterExecution(run.request, inner);
+    let execute: NextExecutor = defaultExecutor(input.operation, args, enter);
     const chosen = input.operation.operation === "subscription" ? undefined : claims;
     for (const claim of chosen?.toReversed() ?? []) {
       const next = execute;
@@ -610,7 +632,9 @@ const serve = <Ctx>(
     try {
       return {
         _tag: "dispatched",
-        outcome: { ok: true, result: execute() },
+        // Inside the execution wrappers (`wrapExecution`), which carry request-local state
+        // into the resolvers.
+        outcome: { ok: true, result: enter(execute) },
         mutationStarted,
         finish,
       };
@@ -727,7 +751,12 @@ const serve = <Ctx>(
         throw error;
       }
       return multipartResponse(
-        streamOptions(run, ctx, first, incrementalSource(subsequentResults)),
+        streamOptions(
+          run,
+          ctx,
+          first,
+          incrementalSource(subsequentResults, (inner) => enterExecution(run.request, inner)),
+        ),
       );
     }
     const payload = processPayload(run, ctx, result);

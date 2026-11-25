@@ -3,7 +3,8 @@
 // Each return value takes the cheapest path:
 // - a plain value is returned after one Effect.isEffect check;
 // - an Exit (Effect.succeed, Effect.fail, a guard refusal) is answered at once, with no fiber;
-// - an Effect is forked with runForkWith(the request's fork context); when pollUnsafe already has
+// - an Effect is forked with runForkWith(the request's fork context, from the execution scope
+//   effect()'s wrapExecution enters; never from the context value); when pollUnsafe already has
 //   its exit (a synchronous Effect), the value is returned with no Promise, else the fiber is
 //   tracked in the request scope until it completes (addObserver) and a Promise is returned.
 // A thenable (Grats' async adapters for an async derived context) keeps its fast path, but its
@@ -24,7 +25,7 @@ import type { GraphQLField, GraphQLFieldResolver, GraphQLSchema } from "graphql"
 import type { PromiseOrValue } from "../core/types.ts";
 import { fromCause } from "./errors.ts";
 import type { FromCauseOptions } from "./errors.ts";
-import { scopeOf, servicesFor, typedCause } from "./state.ts";
+import { currentScope, servicesFor, typedCause } from "./state.ts";
 import type { RequestScope } from "./state.ts";
 
 export type EffectSchemaOptions<E> = FromCauseOptions<E>;
@@ -85,14 +86,12 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
     throw fromCause(typedCause<E>(exit.cause), options);
   };
 
-  const run = (
-    effect: Effect.Effect<unknown, unknown, unknown>,
-    ctx: unknown,
-  ): PromiseOrValue<unknown> => {
+  const run = (effect: Effect.Effect<unknown, unknown, unknown>): PromiseOrValue<unknown> => {
     if (Exit.isExit(effect)) {
       return settleExit(effect);
     }
-    const scope = scopeOf(ctx) ?? emptyScope;
+    // The execution scope (effect()'s wrapExecution): a thenable's continuation inherits it.
+    const scope = currentScope() ?? emptyScope;
     const fiber = internals.runForkWith(servicesFor<unknown>(scope.context))(
       Effect.withSpan(effect, spanName),
     );
@@ -113,12 +112,12 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
   };
 
   /** Classifies a resolve's return value. */
-  const resolveValue = (value: unknown, ctx: unknown): PromiseOrValue<unknown> => {
+  const resolveValue = (value: unknown): PromiseOrValue<unknown> => {
     if (Effect.isEffect(value)) {
-      return run(value, ctx);
+      return run(value);
     }
     if (isThenable(value)) {
-      return Promise.resolve(value).then((fulfilled) => resolveValue(fulfilled, ctx));
+      return Promise.resolve(value).then((fulfilled) => resolveValue(fulfilled));
     }
     if (nonNull && (value === null || value === undefined)) {
       throw new Error(NON_NULL_MESSAGE);
@@ -127,12 +126,12 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
   };
 
   /** Classifies a subscribe's return value. */
-  const sourceValue = (value: unknown, ctx: unknown): PromiseOrValue<unknown> => {
+  const sourceValue = (value: unknown): PromiseOrValue<unknown> => {
     if (Stream.isStream(value)) {
-      return streamSource(value, ctx, options);
+      return streamSource(value, currentScope() ?? emptyScope, options);
     }
     if (isThenable(value)) {
-      return Promise.resolve(value).then((fulfilled) => sourceValue(fulfilled, ctx));
+      return Promise.resolve(value).then((fulfilled) => sourceValue(fulfilled));
     }
     return value;
   };
@@ -149,12 +148,11 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
  * (one that settles after the client left, a known graphql 17.1 limitation) never acquires
  * anything, so it has nothing to leak.
  */
-export const streamSource = <A, E, R, F>(
+const streamSource = <A, E, R, F>(
   stream: Stream.Stream<A, E, R>,
-  ctx: unknown,
+  scope: RequestScope,
   options: EffectSchemaOptions<F>,
 ): AsyncIterable<A> => {
-  const scope = scopeOf(ctx) ?? emptyScope;
   const iterable = stream.pipe(
     Stream.catchCause((cause) => Stream.die(fromCause(typedCause<F>(cause), options))),
     Stream.toAsyncIterableWith(servicesFor<R>(scope.context)),
@@ -172,7 +170,7 @@ export const wrapSubscribe = <TSource, TContext, TArgs, E>(
   spanName = "subscribe",
 ): GraphQLFieldResolver<TSource, TContext, TArgs> => {
   const { sourceValue } = makeRunner(options, spanName, false);
-  return (source, args, ctx, info) => sourceValue(subscribe(source, args, ctx, info), ctx);
+  return (source, args, ctx, info) => sourceValue(subscribe(source, args, ctx, info));
 };
 
 const wrappedSchemas = new WeakSet<GraphQLSchema>();
@@ -199,11 +197,11 @@ export const effectSchema = <E>(
       const { resolve, subscribe } = field;
       if (resolve !== undefined) {
         field.resolve = (source, args, ctx, info) =>
-          runner.resolveValue(resolve(source, args, ctx, info), ctx);
+          runner.resolveValue(resolve(source, args, ctx, info));
       }
       if (subscribe !== undefined) {
         field.subscribe = (source, args, ctx, info) =>
-          runner.sourceValue(subscribe(source, args, ctx, info), ctx);
+          runner.sourceValue(subscribe(source, args, ctx, info));
       }
     }
   }

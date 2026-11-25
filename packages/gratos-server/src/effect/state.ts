@@ -1,6 +1,8 @@
-// Per-request state shared by the Effect layer's parts (docs/plan.html M5), in WeakMaps keyed by
-// objects the core never clones: the incoming Request (the route's state) and the request's
-// context value (the fork context resolvers run in).
+// Per-request state shared by the Effect layer's parts (docs/plan.html M5): WeakMaps keyed by
+// the incoming Request, which the core never clones (the route's state, the request scope), and
+// the execution scope a resolver call finds its request scope in (an AsyncLocalStorage).
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import type { Cause, Context, Fiber } from "effect";
 
 /** What effectRoute records for a request it serves. */
@@ -54,20 +56,34 @@ export interface RequestScope {
   aborted: boolean;
 }
 
-const scopes = new WeakMap<object, RequestScope>();
+const requestScopes = new WeakMap<Request, RequestScope>();
 
-/** The request scope bound to a context value by effect()'s onContext, if any. */
-export const scopeOf = (ctx: unknown): RequestScope | undefined =>
-  typeof ctx === "object" && ctx !== null ? scopes.get(ctx) : undefined;
-
-/** Binds a request scope to the request's context value (an object). */
-export const bindScope = (ctx: unknown, scope: RequestScope): boolean => {
-  if (typeof ctx !== "object" || ctx === null) {
-    return false;
-  }
-  scopes.set(ctx, scope);
-  return true;
+/** Binds a request scope to the request, from effect()'s onContext. */
+export const bindScope = (request: Request, scope: RequestScope): void => {
+  requestScopes.set(request, scope);
 };
+
+/** The request scope effect()'s onContext bound to a request, if any. */
+export const scopeOfRequest = (request: Request): RequestScope | undefined =>
+  requestScopes.get(request);
+
+/**
+ * The request scope of the execution running now. effect()'s `wrapExecution` enters it around
+ * every synchronous entry into the request's execution (the executor call, each subscription
+ * event, each pull of deferred payloads), and the async continuations of that work (a resolver
+ * called after an await, deferred work graphql-js schedules) inherit it. The context value plays
+ * no part, so the app's resolvers receive it unchanged, shared between requests or not an object.
+ */
+const executionScope = new AsyncLocalStorage<RequestScope>();
+
+/** Runs `run` with the request's scope as the execution scope (directly when it has none). */
+export const enterScope = <T>(request: Request, run: () => T): T => {
+  const scope = requestScopes.get(request);
+  return scope === undefined ? run() : executionScope.run(scope, run);
+};
+
+/** The request scope of the execution a resolver is called in, if any. */
+export const currentScope = (): RequestScope | undefined => executionScope.getStore();
 
 /**
  * The request's fork context as providing what an app's resolvers require. graphql-js hands the

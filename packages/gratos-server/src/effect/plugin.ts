@@ -2,7 +2,9 @@
 // - creates the operation span `graphql <op>` in onContext, once the operation is known and before
 //   any resolver forks, through the Tracer service's own span() (the only way to backdate a span),
 //   as a child of the HTTP span, starting at t0 (the route's entry, else the core's startOf);
-// - binds the request scope to the context value: the fork context (the route's context, or the
+// - binds the request scope to the request, and enters it around the request's execution
+//   (wrapExecution, an AsyncLocalStorage the resolver wrapper reads), never through the context
+//   value, which may be shared between requests or not an object: the fork context (the route's context, or the
 //   plugin's `context`) with the operation span as Tracer.ParentSpan and the OperationType, plus
 //   the fibers a client abort interrupts (never a mutation's);
 // - buffers the phase spans the core reports before onContext and emits them then; later phases
@@ -28,7 +30,7 @@ import { payloadErrors } from "../core/payload.ts";
 import { mutationOf, signalOf, startOf } from "../core/requestState.ts";
 import type { Phase, Plugin } from "../core/types.ts";
 import { OperationType } from "./guard.ts";
-import { bindScope, routeOf } from "./state.ts";
+import { bindScope, enterScope, routeOf } from "./state.ts";
 import type { RequestScope } from "./state.ts";
 
 export interface EffectPluginOptions {
@@ -197,7 +199,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     return span;
   };
 
-  const onContext = (ctx: unknown, request: Request, operation: OperationDefinitionNode): void => {
+  const onContext = (_ctx: unknown, request: Request, operation: OperationDefinitionNode): void => {
     const state = stateOf(request);
     if (state.span !== undefined) {
       return;
@@ -240,7 +242,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       interruptOnAbort: type !== "mutation",
       aborted: false,
     };
-    bindScope(ctx, scope);
+    bindScope(request, scope);
     const signal = signalOf(request);
     if (scope.interruptOnAbort && signal !== undefined) {
       const interrupt = (): void => {
@@ -313,6 +315,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       return undefined;
     },
     onContext,
+    wrapExecution: enterScope,
     onResult: (payload: ExecutionResult, _ctx, request) => {
       const state = stateOf(request);
       for (const error of payloadErrors(payload)) {

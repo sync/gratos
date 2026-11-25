@@ -1,9 +1,11 @@
 // The hook contract (docs/plan.html M4a, "Contract types"): a test for each hook.
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { GraphQLError } from "graphql";
 import type { ExecutionResult, OperationDefinitionNode } from "graphql";
 import { describe, expect, it, vi } from "vitest";
 
-import { createServer, gqlError } from "../src/index.ts";
+import { createServer, gqlError, incremental } from "../src/index.ts";
 import type { Executor, Phase, Plugin, Server } from "../src/index.ts";
 import { gate, gql, post, send, URL_ } from "./support/http.ts";
 import type { Sent } from "./support/http.ts";
@@ -389,6 +391,107 @@ describe("onExecute", () => {
       onExecute: async () => undefined,
     };
     expect(plugin.onExecute).toBeDefined();
+  });
+});
+
+/** What a recording execution wrapper sets: the request it runs for. */
+interface Current {
+  request?: Request | undefined;
+}
+
+/** A wrapper that records the request it runs for, and its enter/exit order. */
+const recording = (name: string, log: Array<string>, current: Current): Plugin => ({
+  wrapExecution: (request, run) => {
+    const previous = current.request;
+    current.request = request;
+    log.push(`${name} enter`);
+    try {
+      return run();
+    } finally {
+      log.push(`${name} exit`);
+      current.request = previous;
+    }
+  },
+});
+
+describe("wrapExecution", () => {
+  it("wraps the executor call, nesting in list order, with the resolver's own context", async () => {
+    const log: Array<string> = [];
+    const current: Current = {};
+    const ctx = { app: true };
+    let seen: [Request | undefined, unknown] | undefined;
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          count: (_source, _args, context) => {
+            seen = [current.request, context];
+            return 1;
+          },
+        },
+      }),
+      context: () => ctx,
+      plugins: [recording("a", log, current), recording("b", log, current)],
+    });
+    const request = post({ query: "{ count }" });
+    expect((await send(server, request)).body).toEqual({ data: { count: 1 } });
+    expect(seen).toEqual([request, ctx]);
+    expect(log).toEqual(["a enter", "b enter", "b exit", "a exit"]);
+  });
+
+  it("wraps each subscription event's execution", async () => {
+    const log: Array<string> = [];
+    const current: Current = {};
+    const seen: Array<Request | undefined> = [];
+    const schema = basicSchema({}, "type Subscription { tick: Int }");
+    const tick = schema.getSubscriptionType()?.getFields()["tick"];
+    if (tick === undefined) {
+      throw new Error("no tick");
+    }
+    tick.subscribe = async function* () {
+      yield 1;
+      yield 2;
+    };
+    tick.resolve = (payload: number) => {
+      seen.push(current.request);
+      return payload;
+    };
+    const server = createServer({ schema, plugins: [recording("a", log, current)] });
+    const request = post({ query: "subscription { tick }" }, { accept: "text/event-stream" });
+    const response = await server.handle(request);
+    expect(await response.text()).toContain('"tick":2');
+    expect(seen).toEqual([request, request]);
+  });
+
+  it("carries an AsyncLocalStorage store into deferred work, and wraps each deferred pull", async () => {
+    const storage = new AsyncLocalStorage<Request>();
+    let entries = 0;
+    let seen: Request | undefined;
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          count: () => {
+            seen = storage.getStore();
+            return 1;
+          },
+        },
+      }),
+      plugins: [
+        incremental(),
+        {
+          wrapExecution: (request, run) => {
+            entries += 1;
+            return storage.run(request, run);
+          },
+        },
+      ],
+    });
+    // Every root field is deferred: graphql-js runs it after the executor call has returned.
+    const request = post({ query: "{ ... @defer { count } }" }, { accept: "multipart/mixed" });
+    const response = await server.handle(request);
+    expect(await response.text()).toContain('"count":1');
+    expect(seen).toBe(request);
+    // The executor call, then each pull of the subsequent payloads.
+    expect(entries).toBeGreaterThan(1);
   });
 });
 

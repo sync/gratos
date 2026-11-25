@@ -72,6 +72,7 @@ const CLOSED: unique symbol = Symbol("closed");
 const responseStream = (
   validated: ValidatedSubscriptionArgs,
   source: AsyncIterable<unknown>,
+  enter: <T>(run: () => T) => T,
 ): AsyncGenerator<ExecutionResult, void, void> => {
   const iterator = source[Symbol.asyncIterator]();
   const signal = validated.externalAbortSignal;
@@ -161,7 +162,7 @@ const responseStream = (
       let executed: ExecutionResult | typeof CLOSED;
       try {
         executed = await Promise.race([
-          executeSubscriptionEvent({ ...validated, rootValue: pulled.value }),
+          enter(() => executeSubscriptionEvent({ ...validated, rootValue: pulled.value })),
           closed.promise,
         ]);
       } catch (error) {
@@ -208,10 +209,12 @@ const responseStream = (
 
 /**
  * Runs a subscription as graphql-js subscribe() does, returning its response stream, or the
- * errors-only result of a subscription that could not start.
+ * errors-only result of a subscription that could not start. Each event executes inside `enter`
+ * (the request's execution wrappers, `wrapExecution`), as the executor call itself does.
  */
 export const subscribeOnce = (
   args: ExecutionArgs,
+  enter: <T>(run: () => T) => T = (run) => run(),
 ): PromiseOrValue<AsyncGenerator<ExecutionResult, void, void> | ExecutionResult> => {
   const validated = validateSubscriptionArgs(args);
   if (!("schema" in validated)) {
@@ -221,7 +224,7 @@ export const subscribeOnce = (
     resultOrStream: AsyncIterable<unknown> | ExecutionResult,
   ): AsyncGenerator<ExecutionResult, void, void> | ExecutionResult =>
     Symbol.asyncIterator in resultOrStream
-      ? responseStream(validated, resultOrStream)
+      ? responseStream(validated, resultOrStream, enter)
       : resultOrStream;
   const resultOrStream = createSourceEventStream(validated);
   return isPromiseLike(resultOrStream) ? resultOrStream.then(adopt) : adopt(resultOrStream);

@@ -17,7 +17,7 @@ import {
   wrapSubscribe,
 } from "../../src/effect/index.ts";
 import { internals } from "../../src/effect/schema.ts";
-import { scopeOf } from "../../src/effect/state.ts";
+import { currentScope, scopeOfRequest } from "../../src/effect/state.ts";
 import { flush, gate, gql, post, send } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
 import { readSse } from "../support/stream.ts";
@@ -58,6 +58,9 @@ const SDL = `
 type Resolver = GraphQLFieldResolver<never, unknown>;
 type Overrides = Readonly<Record<string, Readonly<Record<string, Resolver>>>>;
 
+/** The context values the tests use: an object (shared or fresh), a primitive, or nothing. */
+type TestContext = object | string | undefined;
+
 /** The `extensions.gratos` marker of an Effect field whose success must not be null. */
 const NON_NULL = { gratos: { semanticNonNull: true } };
 
@@ -65,7 +68,8 @@ interface Built {
   readonly server: Server;
   readonly schema: GraphQLSchema;
   readonly tracer: ReturnType<typeof recordingTracer>;
-  readonly contexts: Array<object>;
+  /** The requests that reached onContext, in order. */
+  readonly requests: Array<Request>;
 }
 
 const resolvers = (overrides: Overrides) => ({
@@ -105,28 +109,32 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       readonly extensions?: Readonly<Record<string, Readonly<Record<string, typeof NON_NULL>>>>;
       readonly onDefect?: ((defect: ResolverDefect) => void) | undefined;
       readonly mapper?: (error: AppError) => GraphQLError;
+      /** The context factory (default: a fresh object per request). */
+      readonly context?: () => TestContext;
     } = {},
   ): Built => {
     const tracer = recordingTracer();
-    const contexts: Array<object> = [];
+    const requests: Array<Request> = [];
+    const recorder: Plugin = {
+      onContext: (_ctx, request) => {
+        requests.push(request);
+      },
+    };
     const schema = effectSchema(
       asSubscriptions(makeSchema(SDL, resolvers(overrides), options.extensions ?? {})),
       { failure: options.mapper ?? failure, onDefect: options.onDefect },
     );
     const server = createServer({
       schema,
-      context: () => {
-        const ctx = {};
-        contexts.push(ctx);
-        return ctx;
-      },
+      context: options.context ?? (() => ({})),
       plugins: [
+        recorder,
         ...executor.plugins(),
         ...(options.plugins ?? []),
         effect({ context: tracer.context }),
       ],
     });
-    return { server, schema, tracer, contexts };
+    return { server, schema, tracer, requests };
   };
 
   /** Sends the warm-up requests (jit compiles on the second use), then the measured one. */
@@ -436,6 +444,111 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
     });
   });
 
+  describe("request scopes", () => {
+    it("keeps a mutation's scope when a concurrent query shares its context object", async () => {
+      const shared = {};
+      const hold = gate();
+      const started = gate();
+      let holding = false;
+      const guard = makeGuard<AppError>({
+        authorize: () => true,
+        refuse: () => new Forbidden({ scopes: [] }),
+        timeout: "20 millis",
+      });
+      const built = build(
+        {
+          Query: { slow: () => Effect.succeed("q").pipe(Effect.delay("1 millis")) },
+          Mutation: {
+            write: () =>
+              Effect.gen(function* () {
+                if (holding) {
+                  started.resolve();
+                  yield* Effect.promise(() => hold.promise);
+                }
+                return "one";
+              }),
+            // Past the query timeout: only a mutation's scope (no timeout) lets it commit.
+            writeTwo: () =>
+              guard.guard({ effect: Effect.succeed("two").pipe(Effect.delay("40 millis")) }),
+          },
+        },
+        { context: () => shared },
+      );
+      const MUTATION = "mutation M { first: write second: writeTwo }";
+      for (let index = 0; index < executor.warmUp; index += 1) {
+        await gql(built.server, MUTATION);
+        await gql(built.server, "query Q { slow }");
+      }
+      built.tracer.clear();
+      holding = true;
+      const mutation = gql(built.server, MUTATION);
+      await started.promise;
+      // The query binds its own scope while the mutation is between its two fields.
+      const query = await gql(built.server, "query Q { slow }");
+      expect(query.body).toEqual({ data: { slow: "q" } });
+      hold.resolve();
+      const sent = await mutation;
+      expect(sent.body).toEqual({ data: { first: "one", second: "two" } });
+      const [operation] = built.tracer.named("graphql M");
+      const [second] = built.tracer.named("resolve Mutation.writeTwo");
+      expect(second?.parentId).toBe(operation?.spanId);
+    });
+
+    it.each([
+      ["a primitive context", () => "ctx"],
+      ["an undefined context", () => undefined],
+    ])("finds the scope with %s", async (_name, context) => {
+      const built = build(
+        { Query: { slow: () => Effect.succeed("late").pipe(Effect.delay("1 millis")) } },
+        { context },
+      );
+      const sent = await run(built, "query P { slow }");
+      expect(sent.body).toEqual({ data: { slow: "late" } });
+      const [operation] = built.tracer.named("graphql P").slice(-1);
+      const [resolver] = built.tracer.named("resolve Query.slow").slice(-1);
+      expect(resolver?.parentId).toBe(operation?.spanId);
+    });
+
+    it.runIf(executor.name === "incremental")(
+      "finds the scope of deferred work when every root field is deferred",
+      async () => {
+        const built = build({
+          Query: { slow: () => Effect.succeed("late").pipe(Effect.delay("1 millis")) },
+        });
+        const response = await built.server.handle(
+          post({ query: "query D { ... @defer { slow } }" }, { accept: "multipart/mixed" }),
+        );
+        expect(await response.text()).toContain('"slow":"late"');
+        const [operation] = built.tracer.named("graphql D");
+        const [resolver] = built.tracer.named("resolve Query.slow");
+        expect(resolver?.parentId).toBe(operation?.spanId);
+      },
+    );
+
+    it("finds the scope with no context factory", async () => {
+      const tracer = recordingTracer();
+      const schema = effectSchema(
+        makeSchema(
+          SDL,
+          resolvers({
+            Query: { slow: () => Effect.succeed("late").pipe(Effect.delay("1 millis")) },
+          }),
+        ),
+        { failure },
+      );
+      const server = createServer({
+        schema,
+        plugins: [...executor.plugins(), effect({ context: tracer.context })],
+      });
+      for (let index = 0; index <= executor.warmUp; index += 1) {
+        expect((await gql(server, "query P { slow }")).body).toEqual({ data: { slow: "late" } });
+      }
+      const [operation] = tracer.named("graphql P").slice(-1);
+      const [resolver] = tracer.named("resolve Query.slow").slice(-1);
+      expect(resolver?.parentId).toBe(operation?.spanId);
+    });
+  });
+
   describe("fibers", () => {
     it("leaves the request scope with no fiber after N subscription events", async () => {
       let maxFibers = 0;
@@ -444,9 +557,9 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
           events: () => Stream.make({ value: "a" }, { value: "b" }, { value: "c" }),
         },
         Item: {
-          value: (source: { value: string }, _args, ctx) =>
+          value: (source: { value: string }) =>
             Effect.sync(() => {
-              maxFibers = Math.max(maxFibers, scopeOf(ctx)?.fibers.size ?? 0);
+              maxFibers = Math.max(maxFibers, currentScope()?.fibers.size ?? 0);
               return source.value;
             }).pipe(Effect.delay("1 millis")),
         },
@@ -460,9 +573,9 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
         { events: { value: "b" } },
         { events: { value: "c" } },
       ]);
-      const ctx = built.contexts.at(-1);
+      const request = built.requests.at(-1);
       expect(maxFibers).toBe(1);
-      expect(scopeOf(ctx)?.fibers.size).toBe(0);
+      expect(request === undefined ? undefined : scopeOfRequest(request)?.fibers.size).toBe(0);
     });
   });
 

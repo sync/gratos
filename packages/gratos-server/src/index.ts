@@ -20,6 +20,7 @@ export type {
   ContextServerOptions,
   DrainOptions,
   ExecuteInput,
+  ExecutionWrapper,
   Executor,
   ExecutorResult,
   IncrementalResults,
