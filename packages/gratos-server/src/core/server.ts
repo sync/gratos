@@ -79,15 +79,6 @@ const isPromiseLike = <T>(value: PromiseOrValue<T>): value is Promise<T> =>
 const settle = async <T>(value: PromiseOrValue<T>): Promise<T> =>
   isPromiseLike(value) ? await value : value;
 
-/** Closes a streamed result the JSON path cannot send. */
-const closeStreamed = async (result: ExecutorResult): Promise<void> => {
-  if (Symbol.asyncIterator in result) {
-    await result.return();
-  } else if ("initialResult" in result) {
-    await result.subsequentResults.return();
-  }
-};
-
 /** A hook with its plugin, so it is called with the plugin as `this`-free closure. */
 const hooksOf = <Ctx, K extends keyof Plugin<Ctx>>(
   plugins: ReadonlyArray<Plugin<Ctx>>,
@@ -366,6 +357,24 @@ const serve = <Ctx>(
     });
   };
 
+  /**
+   * Closes a streamed result that is not sent (a refusal, a client that left, a failing result
+   * hook). The core signal aborts first, so a cleanup that waits on it, or on a pending pull,
+   * ends. A cleanup that fails is logged and never changes the answer.
+   */
+  const closeUnsent = async (run: Run, result: ExecutorResult): Promise<void> => {
+    run.controller.abort();
+    try {
+      if (Symbol.asyncIterator in result) {
+        await result.return();
+      } else if ("initialResult" in result) {
+        await result.subsequentResults.return();
+      }
+    } catch (error) {
+      logger.error("gratos-server: closing a streamed result failed.", error);
+    }
+  };
+
   /** Whether the request is a mutation (not started yet) and the drain has begun. */
   const drainRefuses = (run: Run): boolean => run.mutation !== undefined && draining;
 
@@ -641,21 +650,21 @@ const serve = <Ctx>(
       // an errors-only result (graphql's AbortError at the field); a stream that already exists
       // is closed (the signal is aborted, so `return()` cannot wait on a pull).
       if (streamed) {
-        await closeStreamed(result);
+        await closeUnsent(run, result);
       }
       return new Response(null, { status: CLIENT_CLOSED_REQUEST });
     }
     if (Symbol.asyncIterator in result) {
       // A subscription (process() refused one whose client does not accept text/event-stream).
       if (!run.accepted.eventStream) {
-        await closeStreamed(result);
+        await closeUnsent(run, result);
         return transportError(run, `A subscription needs Accept: ${TEXT_EVENT_STREAM}.`, 406);
       }
       return sseResponse(streamOptions(run, ctx, undefined, subscriptionSource(result)));
     }
     if ("initialResult" in result) {
       if (!run.accepted.multipart) {
-        await closeStreamed(result);
+        await closeUnsent(run, result);
         return transportError(
           run,
           `This operation uses @defer or @stream, which needs Accept: ${MULTIPART_MIXED}.`,
@@ -668,8 +677,7 @@ const serve = <Ctx>(
         first = { result: processPayload(run, ctx, initialResult), hasNext: true };
       } catch (error) {
         // A failing result hook: stop the deferred work before the request fails.
-        run.controller.abort();
-        await closeStreamed(result);
+        await closeUnsent(run, result);
         throw error;
       }
       return multipartResponse(

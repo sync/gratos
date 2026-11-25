@@ -41,6 +41,25 @@ const aborted = (signal: AbortSignal | undefined): Promise<void> =>
     });
   });
 
+/** An executor whose incremental result closes with `close` (given the core's signal). */
+const closingWith = (
+  close: (signal: AbortSignal | undefined) => Promise<IteratorResult<never, undefined>>,
+): Plugin => ({
+  onExecute: (_input, args) => () => ({
+    initialResult: { data: { hello: "world" }, hasNext: true },
+    subsequentResults: {
+      // A pull that never settles: only return() ends this result.
+      next: () => gate<never>().promise,
+      return: () => close(args.abortSignal ?? undefined),
+      throw: (error: unknown) => Promise.reject(error),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      [Symbol.asyncDispose]: () => Promise.resolve(),
+    },
+  }),
+});
+
 /**
  * A subscription schema with probes: source arguments, cleanups and an emitter for idle sources.
  * With `referenced`, another type refers to the Subscription type (`Query.root: Subscription`).
@@ -484,6 +503,46 @@ describe("GraphQL-over-SSE", () => {
       "This operation uses @defer or @stream, which needs Accept: multipart/mixed.",
     );
   });
+
+  it.each([
+    ["rejects", (): Promise<never> => Promise.reject(new Error("cleanup failed"))],
+    [
+      "waits on the core's signal",
+      async (signal: AbortSignal | undefined) => {
+        await aborted(signal);
+        return { done: true, value: undefined } as const;
+      },
+    ],
+  ] as const)(
+    "an SSE-only client gets the JSON 406 for an incremental response whose cleanup %s",
+    async (name, close) => {
+      const { schema } = fixture();
+      const logged: Array<string> = [];
+      const server = createServer({
+        schema,
+        plugins: [incremental(), closingWith(close)],
+        logger: { warn: () => undefined, error: (message) => logged.push(message) },
+      });
+      const sent = await Promise.race([
+        send(server, post({ query: "{ hello }" }, { accept: "text/event-stream" })),
+        sleep(1000).then(() => "hung" as const),
+      ]);
+      expect(sent).not.toBe("hung");
+      if (sent === "hung") {
+        return;
+      }
+      expect(sent.status).toBe(406);
+      expect(sent.headers.get("content-type")).toBe(
+        "application/graphql-response+json; charset=utf-8",
+      );
+      expect(sent.error?.message).toBe(
+        "This operation uses @defer or @stream, which needs Accept: multipart/mixed.",
+      );
+      expect(logged).toEqual(
+        name === "rejects" ? ["gratos-server: closing a streamed result failed."] : [],
+      );
+    },
+  );
 
   it("a client that accepts JSON too still gets request errors as JSON", async () => {
     const { schema } = fixture();
