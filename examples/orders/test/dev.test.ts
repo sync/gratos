@@ -306,11 +306,22 @@ describe("pnpm dev", () => {
       return performance.now();
     })();
 
+    // A change to the fake backend's in-memory rows, which the restart must undo.
+    expect(
+      dataOf(await post(dev.url, { query: 'mutation { cancelOrder(id: "o-1") { status } }' }), {
+        cancelOrder: { status: "cancelled" },
+      }),
+    ).toBeDefined();
+    expect(
+      dataOf(await post(dev.url, ORDER), { order: { id: "o-1", status: "cancelled" } }),
+    ).toBeDefined();
+
     // A save that changes no schema: the restart alone starts everything over.
     const savedAt = save(app, MODEL, (source) => `${source}\n// saved\n`);
     // The subscription is dropped promptly (not after the 20 s graceful-shutdown default), and
     // the new process answers within the budget although a subscription was open. The old
-    // process answers this query too until it stops: wait for the new one to listen.
+    // process answers this query too until it stops (o-1 cancelled): wait for the new one to
+    // listen, and to answer with o-1 open.
     await until(async () => (dev.boots() === 2 ? true : undefined), {
       timeoutMs: BOOT_MS,
       message: "the server never restarted",
@@ -328,7 +339,11 @@ describe("pnpm dev", () => {
     expect(await post(dev.url, persisted)).toMatchObject({
       body: { errors: [{ extensions: { code: "PERSISTED_QUERY_NOT_FOUND" } }] },
     });
-    // The new process starts from the fake API's initial rows.
+    // The new process starts from the fake API's initial rows: the order cancelled before the
+    // save is open again, and the shipped one is still shipped.
+    expect(
+      dataOf(await post(dev.url, ORDER), { order: { id: "o-1", status: "open" } }),
+    ).toBeDefined();
     expect(
       dataOf(await post(dev.url, { query: '{ order(id: "o-2") { status } }' }), {
         order: { status: "shipped" },
