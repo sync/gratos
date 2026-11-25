@@ -7,7 +7,8 @@
 // - converts the request with HttpServerRequest.toWeb(req, { signal }), where the signal belongs to
 //   a route AbortController that Effect.promise's signal aborts, which happens only on interrupt
 //   (the client left before the Response), never on completion; the core links its own
-//   controller to it;
+//   controller to it. A Web-backed request, which toWeb returns as it is, is rebuilt once with a
+//   signal that follows both its own signal and the route's;
 // - registers the span backstop with the request Scope, which closes once the transport is done
 //   with the response (after the body is written, a discarded HEAD body, a transport failure or
 //   an interrupt): it sets the closed flag effect() reads;
@@ -24,6 +25,22 @@ import type { HttpServerError } from "effect/http";
 import type { Server } from "../core/types.ts";
 import { closeRoute, registerRoute, routeOf } from "./state.ts";
 
+/**
+ * The one Request the core gets, carrying the route's signal. toWeb builds a Request with it,
+ * except for a Web-backed HttpServerRequest, which it returns as it is (ignoring the signal):
+ * that one is rebuilt once, here, with a signal that aborts on either the incoming request's
+ * own signal (its client left) or the route's (the route was interrupted). The core never
+ * clones it, so it is the key of every per-request WeakMap.
+ */
+const withRouteSignal = (
+  req: HttpServerRequest.HttpServerRequest,
+  converted: Request,
+  signal: AbortSignal,
+): Request =>
+  converted === req.source
+    ? new Request(converted, { signal: AbortSignal.any([converted.signal, signal]) })
+    : converted;
+
 /** The route handler for the server. */
 export const effectRoute =
   (server: Server) =>
@@ -39,6 +56,7 @@ export const effectRoute =
       const controller = new AbortController();
       const context = Context.omit(Scope.Scope)(fiber.context);
       return HttpServerRequest.toWeb(req, { signal: controller.signal }).pipe(
+        Effect.map((converted) => withRouteSignal(req, converted, controller.signal)),
         Effect.flatMap((request) => {
           const route = routeOf(request) ?? registerRoute(request, t0, context);
           return Effect.addFinalizer(() =>

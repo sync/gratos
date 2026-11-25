@@ -2,6 +2,7 @@
 // executor (docs/plan.html M5 "Done when": semantic non-null, return paths, error mapping,
 // aborts, fibers, timeouts, guard).
 import { Cause, Context, Data, Effect, Match, Predicate, Stream } from "effect";
+import { HttpServerRequest } from "effect/http";
 import { createSourceEventStream, execute, parse, validateSubscriptionArgs } from "graphql";
 import type { GraphQLError, GraphQLFieldResolver, GraphQLSchema } from "graphql";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +17,7 @@ import {
 import type { Plugin, Server } from "../../src/index.ts";
 import {
   effect,
+  effectRoute,
   effectSchema,
   makeGuard,
   OperationType,
@@ -792,6 +794,58 @@ describe("effectSchema", () => {
     expect(shared.getQueryType()?.getFields()["value"]).toBe(field);
     effectSchema(shared, { failure });
     expect(field?.resolve).toBe(once);
+  });
+});
+
+/** A server whose query never settles until it is interrupted, counting the interrupts. */
+const hanging = () => {
+  const started = gate();
+  const counts = { interrupted: 0 };
+  const server = createServer({
+    schema: effectSchema(
+      makeSchema("type Query { slow: String }", {
+        Query: {
+          slow: () =>
+            Effect.sync(() => {
+              started.resolve();
+            }).pipe(
+              Effect.andThen(Effect.never),
+              Effect.onInterrupt(() =>
+                Effect.sync(() => {
+                  counts.interrupted += 1;
+                }),
+              ),
+            ),
+        },
+      }),
+      { failure },
+    ),
+    plugins: [effect()],
+  });
+  return { server, started, counts };
+};
+
+describe("effectRoute with a Web-backed request", () => {
+  it("interrupts the resolver's fiber when the route is interrupted", async () => {
+    const { server, started, counts } = hanging();
+    const request = HttpServerRequest.fromWeb(post({ query: "{ slow }" }));
+    const fiber = Effect.runFork(Effect.scoped(effectRoute(server)(request)));
+    await started.promise;
+    fiber.interruptUnsafe();
+    await until(() => counts.interrupted === 1);
+  });
+
+  it("interrupts the resolver's fiber when the Web request's own signal aborts", async () => {
+    const { server, started, counts } = hanging();
+    const client = new AbortController();
+    const request = HttpServerRequest.fromWeb(
+      post({ query: "{ slow }" }, { signal: client.signal }),
+    );
+    const fiber = Effect.runFork(Effect.scoped(effectRoute(server)(request)));
+    await started.promise;
+    client.abort();
+    await until(() => counts.interrupted === 1);
+    fiber.interruptUnsafe();
   });
 });
 
