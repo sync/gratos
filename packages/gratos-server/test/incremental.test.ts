@@ -435,6 +435,45 @@ describe("aborts", () => {
     expect(rejections[0]).toBeInstanceOf(AbortedGraphQLExecutionError);
   });
 
+  it("a client that leaves while onResponse runs gets nothing: no initial result, no closing delimiter", async () => {
+    const { schema, hold } = fixture();
+    const inResponse = gate();
+    const leave = gate();
+    const seen: Array<unknown> = [];
+    const server = createServer({
+      schema,
+      plugins: [
+        incremental(),
+        {
+          onResult: (payload) => {
+            seen.push(payload);
+          },
+          onResponse: async () => {
+            inResponse.resolve();
+            await leave.promise;
+          },
+        },
+      ],
+    });
+    const client = new AbortController();
+    const request = post(
+      { query: "{ hello ... @defer { slow } }" },
+      { accept: APOLLO_ACCEPT, signal: client.signal },
+    );
+    const pending = server.handle(request);
+    await inResponse.promise;
+    client.abort();
+    leave.resolve();
+    const response = await pending;
+    expect(response.headers.get("content-type")).toBe(MULTIPART);
+    expect(await response.text()).toBe("");
+    expect(signalOf(request)?.aborted).toBe(true);
+    hold.resolve();
+    await flush();
+    // Only the initial result went through the hooks (before the client left).
+    expect(seen).toHaveLength(1);
+  });
+
   it("a client that cancels after the initial payload stops the deferred work quietly", async () => {
     const { schema, hold } = fixture();
     const reported: Array<GraphQLError> = [];

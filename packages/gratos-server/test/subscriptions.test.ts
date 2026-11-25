@@ -295,6 +295,27 @@ describe("GraphQL-over-SSE", () => {
     expect(payloads).toEqual([{ data: { hello: "world" } }]);
   });
 
+  it("a client that left before its single result was framed gets an empty body", async () => {
+    const { schema } = fixture();
+    const client = new AbortController();
+    // The client leaves while the result hooks run, so the stream starts on an aborted signal.
+    const server = createServer({
+      schema,
+      plugins: [
+        {
+          onResult: () => {
+            client.abort();
+          },
+        },
+      ],
+    });
+    const response = await server.handle(
+      post({ query: "{ hello }" }, { accept: "text/event-stream", signal: client.signal }),
+    );
+    expect(response.headers.get("content-type")).toBe(SSE);
+    expect(await response.text()).toBe("");
+  });
+
   it("an SSE-only client gets request errors as JSON", async () => {
     const { schema } = fixture();
     const server = createServer({ schema });

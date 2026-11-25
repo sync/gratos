@@ -8,8 +8,9 @@
 // - a rejected pull (a source that failed) becomes a GraphQL error payload, goes through the same
 //   hooks, and is sent as the final payload, then the stream ends (`complete`, or the closing
 //   boundary);
-// - once the core signal is aborted (the client left), a rejected pull is a cancellation
-//   (graphql's AbortError, or a cancelled() sentinel): it skips the hooks and nothing more is sent;
+// - once the core signal is aborted (the client left), the body ends at once, even with a payload
+//   still queued, and a rejected pull is a cancellation (graphql's AbortError, or a cancelled()
+//   sentinel): it skips the hooks and nothing more is sent;
 // - closing the stream early (a body cancel, or the core signal aborting) aborts the core signal
 //   first, so cooperative sources stop (one waiting on `info.getAbortSignal()`), and only then
 //   awaits the iterator's `return()`: a `return()` alone can wait forever on a pending pull.
@@ -124,16 +125,29 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
 
   const body = new ReadableStream<Uint8Array>(
     {
-      start: () => {
-        // A client that left while nothing reads or cancels the body still stops the executor.
-        if (rest !== undefined) {
-          signal.addEventListener("abort", () => void stop(), {
-            once: true,
-            signal: listening.signal,
-          });
+      start: (stream) => {
+        // The client left (the core signal aborted) while nothing cancelled the body: the body
+        // ends at once, so nothing still queued (the initial result, a closing delimiter) goes
+        // out, and the executor stops. The signal is aborted already, so `return()` comes after.
+        const leave = (): void => {
+          if (finished) {
+            return;
+          }
+          finished = true;
+          pendingFirst = undefined;
+          stream.close();
+          void stop();
+        };
+        if (signal.aborted) {
+          leave();
+          return;
         }
+        signal.addEventListener("abort", leave, { once: true, signal: listening.signal });
       },
       pull: async (stream) => {
+        if (finished) {
+          return;
+        }
         /** Sends the last chunk and ends the stream normally. */
         const end = async (text: string): Promise<void> => {
           finished = true;
@@ -183,21 +197,16 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           await sendPayload(payload);
           return;
         }
-        if (rest === undefined || finished) {
+        if (rest === undefined) {
           return;
         }
         let pulled: IteratorResult<StreamPayload, void>;
         try {
           pulled = await rest.next();
         } catch (error) {
+          // Once the client has left (the body already ended), a rejected pull is a cancellation
+          // (graphql's AbortError, a cancelled() sentinel), not a failure: nothing is reported.
           if (finished) {
-            return;
-          }
-          if (signal.aborted) {
-            // The client left: a cancellation, not a failure. Nothing is reported or sent.
-            finished = true;
-            stream.close();
-            await stop();
             return;
           }
           // The source failed: its error is the last payload, through the same result hooks.
