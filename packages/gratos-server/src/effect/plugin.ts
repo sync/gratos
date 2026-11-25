@@ -20,7 +20,8 @@
 //   closing frame sent, `streamEnded`) keeps the stream's outcome, never a cancel; plus, for a mutation, the request signal's abort (a standalone client
 //   that left, whose body nobody may read). A mutation the core reports as started defers its end
 //   until the core's tracked mutation settles, and ends ok or error (its errors, its answer's
-//   status, a failing body), never cancel. A cancel is recorded when it is decided, but with
+//   status, a failing body), never cancel. A cancel, or a failed body (the core stops the
+//   executor then), is recorded when it is decided, but with
 //   Effect work still running the span ends once that work has settled (the interrupted
 //   resolvers' fibers have exited, after their finalizers, and every pulled Stream has closed
 //   its scope), never before the spans that work ends.
@@ -123,16 +124,19 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     span.attribute("graphql.errors", state.errors);
     span.attribute("http.response.status_code", status);
     const scope = state.scope;
+    const cancelled = Exit.hasInterrupts(exit);
     if (
-      Exit.hasInterrupts(exit) &&
+      (cancelled || state.trigger === "error") &&
       scope !== undefined &&
       (scope.scope.fibers.size > 0 || scope.scope.streams.size > 0)
     ) {
-      // The client left with Effect work still running: its outcome is recorded now, but the
-      // span ends once that work has settled (interrupted resolvers have exited, after their
-      // finalizers; pulled Streams have closed their scopes), after the spans it still ends.
-      // The transport is not held: the response is over for it already.
-      if (scope.scope.interruptOnAbort) {
+      // The client left, or the streamed response failed (the core stops its executor then),
+      // with Effect work still running: its outcome is recorded now, but the span ends once that
+      // work has settled (interrupted resolvers have exited, after their finalizers; pulled
+      // Streams have closed their scopes), after the spans it still ends. The transport is not
+      // held: the response is over for it already. A failed stream's executor is stopped by the
+      // core (its signal aborts, which interrupts the fibers), so only a cancel interrupts here.
+      if (cancelled && scope.scope.interruptOnAbort) {
         scope.interrupt();
       }
       void settled(scope.scope).then(() => {

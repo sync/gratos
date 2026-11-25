@@ -3,7 +3,7 @@
 // idempotent end (body wrapper, null body), streamed responses, mutations that outlive their
 // client, the jit phase, and plugin order with serverTiming.
 import { Clock, Context, Duration, Effect, Stream, Tracer } from "effect";
-import type { GraphQLFieldResolver, GraphQLSchema } from "graphql";
+import type { ExecutionResult, GraphQLFieldResolver, GraphQLSchema } from "graphql";
 import { describe, expect, it } from "vitest";
 
 import { createServer, gqlError, jit, serverTiming } from "../../src/index.ts";
@@ -936,4 +936,125 @@ describe("effect() tracing under an external parent span", () => {
     // Its children inherit the decision.
     expect(tracer.named("resolve Query.value")[0]?.sampled).toBe(false);
   });
+});
+
+/** A resource whose release waits for `hold`, and the gates a test watches. */
+const held = () => {
+  const acquired = gate();
+  const releasing = gate();
+  const hold = gate();
+  const resource = Effect.acquireRelease(
+    Effect.sync(() => {
+      acquired.resolve();
+    }),
+    () =>
+      Effect.sync(() => {
+        releasing.resolve();
+      }).pipe(Effect.andThen(Effect.promise(() => hold.promise)), Effect.withSpan("release held")),
+  );
+  return { acquired, releasing, hold, resource };
+};
+
+/** An onResult hook that throws on every payload `fails` picks. */
+const throwing = (fails: (payload: ExecutionResult) => boolean): Plugin => ({
+  onResult: (payload) => {
+    if (fails(payload)) {
+      throw new Error("hook failed");
+    }
+    return undefined;
+  },
+});
+
+/** Reads a body to its end, and says whether it failed (a result hook threw) instead. */
+const readFails = async (response: Response): Promise<boolean> => {
+  const reader = (response.body ?? new ReadableStream<Uint8Array>()).getReader();
+  for (;;) {
+    try {
+      const { done } = await reader.read();
+      if (done) {
+        return false;
+      }
+    } catch {
+      return true;
+    }
+  }
+};
+
+describe("effect() tracing of a streamed response that fails", () => {
+  it("ends the span of a @defer response whose result hook throws after a held sibling's release, once", async () => {
+    const { acquired, releasing, hold, resource } = held();
+    const built = build(
+      executors[2]?.plugins() ?? [],
+      {
+        Item: {
+          // Sent once the held sibling holds its resource; its payload makes the hook throw.
+          value: () => Effect.promise(() => acquired.promise).pipe(Effect.as("i")),
+          later: () => resource.pipe(Effect.andThen(Effect.never), Effect.scoped),
+        },
+      },
+      {
+        after: [throwing((payload) => "incremental" in payload)],
+        quiet: true,
+      },
+    );
+    const response = await built.server.handle(
+      post(
+        { query: "query Failing { item { ... @defer { value } ... @defer { later } } }" },
+        { accept: "multipart/mixed" },
+      ),
+    );
+    expect(await readFails(response)).toBe(true);
+    await releasing.promise;
+    await flush();
+    const [operation] = operations(built.tracer);
+    // The failed stream stopped its executor: the held sibling's fiber is still in its finalizer.
+    expect(operation?.ended).toBe(false);
+    hold.resolve();
+    await until(() => built.tracer.open().length === 0);
+    const [resolver] = built.tracer.named("resolve Item.later");
+    const [release] = built.tracer.named("release held");
+    expect(resolver?.parentId).toBe(operation?.spanId);
+    expect(release?.parentId).toBe(resolver?.spanId);
+    expect(operation?.outcome).toBe("error");
+    expect(operation?.endCalls).toBe(1);
+    expect(built.ended).toEqual([operation]);
+    expect((operation?.endTime ?? 0n) >= (release?.endTime ?? 1n)).toBe(true);
+    expect((operation?.endedAtPerf ?? 0) >= (release?.endedAtPerf ?? 1)).toBe(true);
+  });
+
+  it.each(executors)(
+    "ends the span of an SSE stream whose result hook throws after its Stream's held release, once ($name executor)",
+    async (executor) => {
+      const { releasing, hold, resource } = held();
+      const built = build(
+        executor.plugins(),
+        {
+          Subscription: {
+            events: () =>
+              Stream.unwrap(
+                resource.pipe(Effect.as(Stream.make("a").pipe(Stream.concat(Stream.never)))),
+              ),
+          },
+        },
+        { after: [throwing((payload) => payload.data !== undefined)], quiet: true },
+      );
+      const response = await built.server.handle(
+        post({ query: "subscription Failing { events }" }, { accept: "text/event-stream" }),
+      );
+      expect(await readFails(response)).toBe(true);
+      await releasing.promise;
+      await flush();
+      const [operation] = operations(built.tracer);
+      // The failed stream closed its source: the Stream's scope is still closing.
+      expect(operation?.ended).toBe(false);
+      hold.resolve();
+      await until(() => built.tracer.open().length === 0);
+      const [release] = built.tracer.named("release held");
+      expect(operation?.outcome).toBe("error");
+      expect(operation?.endCalls).toBe(1);
+      expect(built.ended).toEqual([operation]);
+      expect((operation?.endTime ?? 0n) >= (release?.endTime ?? 1n)).toBe(true);
+      expect((operation?.endedAtPerf ?? 0) >= (release?.endedAtPerf ?? 1)).toBe(true);
+    },
+  );
 });
