@@ -34,6 +34,7 @@ import {
   jsonResponse,
   MULTIPART_MIXED,
   negotiate,
+  onBodyEnd,
   readParams,
   statusOf,
   TEXT_EVENT_STREAM,
@@ -1144,14 +1145,20 @@ const serve = <Ctx>(
         "gratos-server: a Request was passed to handle() while an earlier call on it is in flight; its per-request state is shared. Pass request.clone() instead.",
       );
     }
+    let response: Response;
     try {
-      return await handleOwned(request, start);
-    } finally {
+      response = await handleCall(request, start);
+    } catch (error) {
       endHandling(request);
+      throw error;
     }
+    // The call is in flight until its body is done (a streamed one included).
+    return onBodyEnd(response, () => {
+      endHandling(request);
+    });
   };
 
-  const handleOwned = async (request: Request, start: number): Promise<Response> => {
+  const handleCall = async (request: Request, start: number): Promise<Response> => {
     const enter = entryOf(request);
     // The client leaving aborts the core signal inside the execution wrappers.
     const controller = linkedController(request.signal, enter, logger);

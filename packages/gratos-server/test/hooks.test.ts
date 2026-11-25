@@ -1190,6 +1190,29 @@ describe("a Request passed to handle() again", () => {
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
+  it("counts a call as in flight until its streamed body is done", async () => {
+    const warn = vi.fn();
+    // Only its schema is used: a subscription whose pull stays pending, so the stream stays open.
+    const { server, probe } = throwingSubscriptionServer("before");
+    const watched = createServer({
+      schema: server.control.schema(),
+      logger: { warn, error: () => {} },
+    });
+    const request = post({ query: "subscription { held }" }, { accept: "text/event-stream" });
+    const response = await watched.handle(request);
+    const reader = (response.body ?? new ReadableStream()).getReader();
+    const pending = reader.read().catch(() => undefined);
+    await waitFor(() => probe.pulls === 1, "the source's first pull");
+    // handle() has returned, but the event stream is still open.
+    await (await watched.handle(request)).text();
+    expect(warn).toHaveBeenCalledTimes(1);
+    await reader.cancel();
+    await pending;
+    // The body is done (cancelled): reusing the Request is no overlap.
+    await (await watched.handle(request)).text();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   it("does not warn when the Request is reused after the earlier call returned", async () => {
     const warn = vi.fn();
     const server = createServer({ schema: basicSchema(), logger: { warn, error: () => {} } });

@@ -331,5 +331,55 @@ export const jsonResponse = (
     headers: { "content-type": `${mediaType}; charset=utf-8` },
   });
 
+/**
+ * `response` with `end` called once its body is done: read to its end, failed or cancelled (the
+ * cancel still reaches the original body), at once for a null body or one that is already locked.
+ * The pass-through reads on demand (highWaterMark 0), so it pulls no further ahead than the
+ * transport does.
+ */
+export const onBodyEnd = (response: Response, end: () => void): Response => {
+  const { body } = response;
+  if (body === null || body.locked) {
+    end();
+    return response;
+  }
+  const reader: ReadableStreamDefaultReader<Uint8Array> = body.getReader();
+  let ended = false;
+  const finish = (): void => {
+    if (!ended) {
+      ended = true;
+      end();
+    }
+  };
+  const passThrough = new ReadableStream<Uint8Array>(
+    {
+      pull: async (controller) => {
+        try {
+          const read = await reader.read();
+          if (read.done) {
+            finish();
+            controller.close();
+          } else {
+            controller.enqueue(read.value);
+          }
+        } catch (error) {
+          finish();
+          controller.error(error);
+        }
+      },
+      cancel: async (reason) => {
+        finish();
+        await reader.cancel(reason);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return new Response(passThrough, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+};
+
 /** An errors-only result. */
 export const errorResult = (errors: ReadonlyArray<GraphQLError>): ExecutionResult => ({ errors });

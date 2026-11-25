@@ -316,8 +316,9 @@ export interface Server {
    * `WeakMap<Request, …>`), so a Request object must not be passed to `handle()` again, on this
    * server or another, while an earlier call on it is still in flight, including a response body
    * still being streamed. Parallel calls need distinct Request objects; to replay one, pass
-   * `request.clone()`. Reusing a Request after its earlier response has finished (or was
-   * cancelled) works. An overlapping call is not blocked: the core logs a warning.
+   * `request.clone()`. A call is in flight until its response body has been read to its end,
+   * has failed or was cancelled (a response without a body, at once); reusing a Request after
+   * that works. An overlapping call is not blocked: the core logs a warning.
    */
   readonly handle: (request: Request) => Promise<Response>;
   readonly control: ServerControl;
