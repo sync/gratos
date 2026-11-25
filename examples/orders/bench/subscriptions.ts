@@ -133,7 +133,10 @@ export interface EventCounter {
   readonly close: () => Promise<void>;
 }
 
-/** Reads `body` to its end, counting the warm-up and measured events in it. */
+/**
+ * Reads `body` to its end, counting the warm-up and measured events in it: each complete SSE
+ * frame (ended by a blank line) once, however the body is split into chunks.
+ */
 export const countEvents = (body: ReadableStream<Uint8Array>): EventCounter => {
   const reader = body.getReader();
   const counts = { warmUp: 0, measured: 0 };
@@ -141,19 +144,23 @@ export const countEvents = (body: ReadableStream<Uint8Array>): EventCounter => {
   let failure: unknown;
   const pump = (async () => {
     const decoder = new TextDecoder();
-    let tail = "";
+    // The start of a frame whose end has not been read yet: a frame may straddle chunks.
+    let partial = "";
     try {
       for (;;) {
         const chunk = await reader.read();
         if (chunk.done) {
           return;
         }
-        // A marker may straddle two chunks: count in the tail of the last chunk plus this one
-        // (the tail is shorter than any marker, so nothing is counted twice).
-        const text = tail + decoder.decode(chunk.value, { stream: true });
-        counts.warmUp += text.split(WARM_UP_MARKER).length - 1;
-        counts.measured += text.split(MEASURED_MARKER).length - 1;
-        tail = text.slice(-(MEASURED_MARKER.length - 1));
+        const frames = (partial + decoder.decode(chunk.value, { stream: true })).split("\n\n");
+        partial = frames.pop() ?? "";
+        for (const frame of frames) {
+          if (frame.includes(WARM_UP_MARKER)) {
+            counts.warmUp += 1;
+          } else if (frame.includes(MEASURED_MARKER)) {
+            counts.measured += 1;
+          }
+        }
       }
     } catch (error) {
       failure = error;

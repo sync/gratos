@@ -10,11 +10,12 @@ import type { OrderRow } from "../src/services/Api.ts";
 
 const encoder = new TextEncoder();
 
+/** One SSE `next` event with an order of `status`, as the server writes it. */
+const frame = (status: string) =>
+  `event: next\ndata: {"data":{"orderChanged":{"id":"o-1","status":"${status}"}}}\n\n`;
+
 /** One SSE `next` event with an order of `status`, as the bench reads it. */
-const event = (status: string) =>
-  encoder.encode(
-    `event: next\ndata: {"data":{"orderChanged":{"id":"o-1","status":"${status}"}}}\n\n`,
-  );
+const event = (status: string) => encoder.encode(frame(status));
 
 /** An order row with `id`. */
 const row = (id: string): OrderRow => ({
@@ -93,6 +94,45 @@ describe("bench:subscriptions", () => {
     });
     await counter.close();
     expect(cancelled).toBe(true);
+  });
+
+  it("counts each event once, however the body is split into chunks", async () => {
+    // Split right after each marker, inside the next event's marker, and between the blank lines
+    // that end a frame: an event is counted when its frame is complete, once.
+    const text = ["warm-up", "measured", "warm-up", "measured"].map(frame).join("");
+    const cuts = [
+      text.indexOf('"warm-up"') + '"warm-up"'.length,
+      text.indexOf('"measured"') + 4,
+      text.indexOf('"measured"') + '"measured"'.length,
+      text.indexOf("\n\n", text.lastIndexOf("warm-up")) + 1,
+    ];
+    const bounds = [0, ...cuts, text.length];
+    const chunks = bounds
+      .slice(1)
+      .map((end, index) => encoder.encode(text.slice(bounds[index], end)));
+    const counter = countEvents(
+      new ReadableStream<Uint8Array>({
+        start: (controller) => {
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+          }
+          controller.close();
+        },
+      }),
+    );
+
+    const error = await counter
+      .waitFor(() => false, performance.now() + 10_000, "reading every chunk")
+      .then(
+        () => undefined,
+        (error_: unknown) => error_,
+      );
+
+    expect(error).toMatchObject({
+      message: "the subscription ended reading every chunk (warm-up 2, measured 2)",
+    });
+    expect(counter.counts).toEqual({ warmUp: 2, measured: 2 });
+    await counter.close();
   });
 
   it("aborts the request when the subscription does not answer in time, and cancels a late body", async () => {
