@@ -261,7 +261,8 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       startTime: nanosOf(state, state.t0),
       kind: "internal",
       root: false,
-      sampled: Option.isSome(parent) && parent.value._tag === "Span" ? parent.value.sampled : true,
+      // A Span and an ExternalSpan (a propagated parent) both carry their sampling decision.
+      sampled: Option.isSome(parent) ? parent.value.sampled : true,
     });
     state.span = span;
     for (const phase of state.phases) {

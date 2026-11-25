@@ -2,7 +2,7 @@
 // when", Tracing): phase spans inside the operation span, cache hits, the early-exit span, the one
 // idempotent end (body wrapper, null body), streamed responses, mutations that outlive their
 // client, the jit phase, and plugin order with serverTiming.
-import { Clock, Context, Duration, Effect, Stream } from "effect";
+import { Clock, Context, Duration, Effect, Stream, Tracer } from "effect";
 import type { GraphQLFieldResolver, GraphQLSchema } from "graphql";
 import { describe, expect, it } from "vitest";
 
@@ -907,4 +907,33 @@ describe("effect() tracing with a Clock that is not performance.now()", () => {
       expect((resolver?.endTime ?? 0n) <= (operation?.endTime ?? -1n)).toBe(true);
     },
   );
+});
+
+describe("effect() tracing under an external parent span", () => {
+  it("keeps an unsampled external parent's sampling decision", async () => {
+    const tracer = recordingTracer();
+    const parent = Tracer.externalSpan({
+      spanId: "external-span",
+      traceId: "external-trace",
+      sampled: false,
+    });
+    const server = createServer({
+      schema: effectSchema(
+        makeSchema("type Query { value: String }", {
+          Query: { value: () => Effect.succeed("v").pipe(Effect.delay("1 millis")) },
+        }),
+        { failure, isFailure },
+      ),
+      plugins: [effect({ context: Context.add(tracer.context, Tracer.ParentSpan, parent) })],
+    });
+    expect((await gql(server, "query External { value }")).body).toEqual({
+      data: { value: "v" },
+    });
+    const [operation] = tracer.named("graphql External");
+    expect(operation?.parentId).toBe("external-span");
+    expect(operation?.traceId).toBe("external-trace");
+    expect(operation?.sampled).toBe(false);
+    // Its children inherit the decision.
+    expect(tracer.named("resolve Query.value")[0]?.sampled).toBe(false);
+  });
 });
