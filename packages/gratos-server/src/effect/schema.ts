@@ -9,7 +9,8 @@
 //   tracked in the request scope until it completes (addObserver) and a Promise is returned.
 // A thenable (Grats' async adapters for an async derived context) keeps its fast path, but its
 // fulfilled value is classified the same way: an Effect is run, a Stream becomes the
-// single-iterator iterable. A resolver that returns a tagged-error instance as data counts as an
+// single-iterator iterable. A subscription source may also be an Effect (or an Exit) of its
+// Stream or AsyncIterable: it is run through the same runner, then its value is classified. A resolver that returns a tagged-error instance as data counts as an
 // Effect (a Data.TaggedError is yieldable): it fails with itself and goes through the mapper.
 //
 // Semantic non-null: Grats emits `extensions.gratos.semanticNonNull` instead of assertNonNull for
@@ -125,10 +126,18 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
     return value;
   };
 
-  /** Classifies a subscribe's return value. */
+  /**
+   * Classifies a subscribe's return value: a Stream becomes the single-iterator iterable; an
+   * Effect (an Exit included) is run as a field's is, and what it succeeds with is classified the
+   * same way (a Stream, or an AsyncIterable as it is); a thenable's value too.
+   */
   const sourceValue = (value: unknown): PromiseOrValue<unknown> => {
     if (Stream.isStream(value)) {
       return streamSource(value, currentScope() ?? emptyScope, options);
+    }
+    if (Effect.isEffect(value)) {
+      const ran = run(value);
+      return Predicate.isPromise(ran) ? ran.then(sourceValue) : sourceValue(ran);
     }
     if (isThenable(value)) {
       return Promise.resolve(value).then((fulfilled) => sourceValue(fulfilled));
@@ -194,6 +203,8 @@ export const effectSchema = <E>(
     for (const field of Object.values(type.getFields())) {
       const spanName = `resolve ${type.name}.${field.name}`;
       const runner = makeRunner(options, spanName, isSemanticNonNull(field));
+      // A source's Effect is not checked for null: the marker is about the field's values.
+      const sources = makeRunner(options, `subscribe ${type.name}.${field.name}`, false);
       const { resolve, subscribe } = field;
       if (resolve !== undefined) {
         field.resolve = (source, args, ctx, info) =>
@@ -201,7 +212,7 @@ export const effectSchema = <E>(
       }
       if (subscribe !== undefined) {
         field.subscribe = (source, args, ctx, info) =>
-          runner.sourceValue(subscribe(source, args, ctx, info));
+          sources.sourceValue(subscribe(source, args, ctx, info));
       }
     }
   }

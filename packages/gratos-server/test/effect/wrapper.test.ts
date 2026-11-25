@@ -52,7 +52,7 @@ const SDL = `
   }
   type Item { value: String }
   type Mutation { write: String, writeTwo: String }
-  type Subscription { events: Item, failing(die: Boolean): String }
+  type Subscription { events: Item, failing(die: Boolean): String, greet: String }
 `;
 
 type Resolver = GraphQLFieldResolver<never, unknown>;
@@ -95,6 +95,29 @@ const asSubscriptions = (schema: GraphQLSchema): GraphQLSchema => {
     }
   }
   return schema;
+};
+
+/** Subscribes to `greet` and reads the whole SSE response. */
+const greet = async (built: Built) => {
+  const response = await built.server.handle(
+    post({ query: "subscription { greet }" }, { accept: "text/event-stream" }),
+  );
+  return readSse(await response.text());
+};
+
+async function* generated() {
+  yield "hi";
+}
+
+/** Subscription sources that are an Effect or an Exit of what graphql-js needs. */
+const sources = {
+  exit: () => Effect.succeed(Stream.make("hi")),
+  sync: () => Effect.sync(() => Stream.make("hi")),
+  async: () => Effect.succeed(Stream.make("hi")).pipe(Effect.delay("1 millis")),
+  promised: () => Promise.resolve(Effect.succeed(Stream.make("hi"))),
+  promisedAsync: () =>
+    Promise.resolve(Effect.succeed(Stream.make("hi")).pipe(Effect.delay("1 millis"))),
+  iterable: () => Effect.sync(generated),
 };
 
 describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
@@ -241,6 +264,60 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       });
       const sent = await run(built, "{ value }");
       expect(sent.body).toEqual({ data: { value: "from a promise" } });
+    });
+  });
+
+  describe("subscription sources", () => {
+    it.each(Object.entries(sources))(
+      "runs a source that is an Effect or an Exit (%s)",
+      async (_name, source) => {
+        const built = build({ Subscription: { greet: source } });
+        const read = await greet(built);
+        expect(read.payloads.map((payload) => payload.data)).toEqual([{ greet: "hi" }]);
+        expect(read.names).toEqual(["next", "complete"]);
+      },
+    );
+
+    it("interrupts a source Effect still running when the client leaves", async () => {
+      const started = gate();
+      let interrupted = 0;
+      const built = build({
+        Subscription: {
+          greet: () =>
+            Effect.sync(() => {
+              started.resolve();
+            }).pipe(
+              Effect.andThen(Effect.never),
+              Effect.onInterrupt(() =>
+                Effect.sync(() => {
+                  interrupted += 1;
+                }),
+              ),
+            ),
+        },
+      });
+      const controller = new AbortController();
+      const pending = built.server.handle(
+        post(
+          { query: "subscription { greet }" },
+          { accept: "text/event-stream", signal: controller.signal },
+        ),
+      );
+      await started.promise;
+      controller.abort();
+      expect((await pending).status).toBe(499);
+      await until(() => interrupted === 1);
+    });
+
+    it("maps a source Effect's typed failure", async () => {
+      const built = build({
+        Subscription: { greet: () => Effect.fail(new NotFound({ id: "src" })) },
+      });
+      const read = await greet(built);
+      expect(read.payloads[0]?.errors?.[0]).toMatchObject({
+        message: "src not found",
+        extensions: { code: "NOT_FOUND" },
+      });
     });
   });
 
