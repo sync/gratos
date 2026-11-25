@@ -105,8 +105,15 @@ const unexpectedError = (cause: Cause.Cause<never>): GratsDevError => {
   });
 };
 
-/** The default dev log, and the fallback when a caller's logger throws. */
-const toStderr = (line: string): void => void process.stderr.write(`${line}\n`);
+/**
+ * The default dev log, and the fallback when a caller's logger throws. Node's console ignores
+ * write errors (a closed stderr pipe, say), where `process.stderr.write` would emit an unhandled
+ * EPIPE and end the process.
+ */
+const toStderr = (line: string): void => {
+  // oxlint-disable-next-line no-console -- the console's write-error handling is the point here.
+  console.error(line);
+};
 
 /**
  * The boot step as an Effect: generate() for `options.tsconfig` (writing only the files whose

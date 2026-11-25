@@ -2,10 +2,11 @@
 // only the generated files that changed, loads the schema module only once they are written,
 // and turns every failure into a GratsDevError that answers 500 GRATS_ERROR with the
 // diagnostics. The `pnpm dev` loop itself is tested on the real process in examples/orders.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { once } from "node:events";
 
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, expect, it, vi } from "@effect/vitest";
@@ -202,7 +203,7 @@ describe("devSchema", () => {
   });
 
   it.effect("keeps a loaded app when the logger throws on the success line", () => {
-    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
     return Effect.gen(function* () {
       const loaded = yield* devSchema({
         tsconfig: join(import.meta.dirname, "smoke", "tsconfig.json"),
@@ -215,7 +216,7 @@ describe("devSchema", () => {
       });
       expect(loaded).toBe("the app");
       // The line still reaches the terminal.
-      expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join("")).toMatch(
+      expect(stderr.mock.calls.map(([line]) => String(line)).join("\n")).toMatch(
         /Gratos: (the schema|wrote)/,
       );
     }).pipe(
@@ -260,7 +261,7 @@ describe("devSchema's error report", () => {
 
   it("resolves loadSchema with the original GratsDevError when the logger throws", async () => {
     const project = smokeCopy("dev-logger");
-    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const bad = await loadSchema({
         tsconfig: project.path("tsconfig.json"),
@@ -272,7 +273,7 @@ describe("devSchema's error report", () => {
         "Gratos could not load the app: SyntaxError: Unexpected token",
       );
       // The terminal still gets the error, on standard error.
-      expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join("")).toContain(
+      expect(stderr.mock.calls.map(([line]) => String(line)).join("\n")).toContain(
         bad.failure.formatted,
       );
     } finally {
@@ -280,6 +281,37 @@ describe("devSchema's error report", () => {
       project.remove();
     }
   });
+});
+
+describe("the dev log's fallback", () => {
+  it("survives a closed stderr when the caller's logger throws (no EPIPE crash)", async () => {
+    const project = smokeCopy("dev-epipe");
+    try {
+      const script = [
+        `import { loadSchema } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "..", "src", "dev.ts")).href)};`,
+        `const result = await loadSchema({`,
+        `  tsconfig: ${JSON.stringify(project.path("tsconfig.json"))},`,
+        `  load: async () => "the app",`,
+        `  log: () => { throw new Error("the logger is broken"); },`,
+        `});`,
+        `process.stdout.write(result._tag);`,
+      ].join("\n");
+      const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      // The reader of stderr goes away at once: a raw write to it would fail with EPIPE.
+      child.stderr.destroy();
+      let stdout = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+      const [code] = await once(child, "exit");
+      expect(stdout).toBe("Success");
+      expect(code).toBe(0);
+    } finally {
+      project.remove();
+    }
+  }, 30_000);
 });
 
 describe("loadSchema", () => {
