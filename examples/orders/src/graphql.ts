@@ -50,6 +50,8 @@ export const failure = Match.type<AppError>().pipe(
 export interface AppOptions {
   /** Receives every error of every result, unmasked. Default: the Effect logger. */
   readonly report?: ((error: GraphQLError) => void) | undefined;
+  /** No request log and no "Listening on" line (tests). Default false. */
+  readonly quiet?: boolean | undefined;
 }
 
 export const makeServer = (
@@ -97,4 +99,5 @@ export const appLayer = (schema: GraphQLSchema, options: AppOptions = {}) =>
         effectRouteLayer(makeServer(schema, services, options)),
       ),
     ),
+    { disableLogger: options.quiet === true, disableListenLog: options.quiet === true },
   ).pipe(Layer.provide(FakeApi.layer));
