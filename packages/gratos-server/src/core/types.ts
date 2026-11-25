@@ -197,7 +197,7 @@ export interface Plugin<Ctx = unknown> {
    * mutation's root fields, a subscription's source setup), each call into a subscription's source
    * (its iterator, each pull, its `return()` or `throw()`), each subscription event's execution,
    * each pull of an incremental response's subsequent payloads (graphql-js runs deferred work
-   * from there), and a custom executor's call to `next()` made outside the executor call (from an
+   * from there) and their close (which closes the @stream sources still open), and a custom executor's call to `next()` made outside the executor call (from an
    * event emitter's callback, say). An entry made while the wrappers are already running (a
    * `next()` called from the executor call) enters them again, nested: the code making it may
    * run in another async context by then (a listener an `EventEmitterAsyncResource` calls in the

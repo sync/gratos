@@ -149,8 +149,10 @@ const subscriptionSource = (
 type Enter = <T>(run: () => T) => T;
 
 /**
- * The subsequent payloads of an incremental result as stream payloads. Each pull runs inside the
- * request's execution wrappers (`wrapExecution`): graphql-js runs deferred work from it.
+ * The subsequent payloads of an incremental result as stream payloads. Each pull and the close
+ * run inside the request's execution wrappers (`wrapExecution`): graphql-js runs deferred work
+ * from a pull, and closes the @stream sources (their `return()`, a generator's `finally`) from
+ * the close.
  */
 const incrementalSource = (
   results: IncrementalResults["subsequentResults"],
@@ -163,7 +165,7 @@ const incrementalSource = (
       : { done: false, value: { result: pulled.value, hasNext: pulled.value.hasNext } };
   },
   return: async () => {
-    await results.return();
+    await enter(() => results.return());
   },
 });
 

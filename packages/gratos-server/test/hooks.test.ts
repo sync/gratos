@@ -2,7 +2,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter, EventEmitterAsyncResource } from "node:events";
 
-import { GraphQLError } from "graphql";
+import { GraphQLError, legacyExecuteIncrementally } from "graphql";
 import type { ExecutionResult, OperationDefinitionNode } from "graphql";
 import { describe, expect, it, vi } from "vitest";
 
@@ -10,7 +10,7 @@ import { createServer, gqlError, incremental } from "../src/index.ts";
 import type { Executor, Phase, Plugin, Server } from "../src/index.ts";
 import { flush, gate, gql, post, send, URL_ } from "./support/http.ts";
 import type { Sent } from "./support/http.ts";
-import { basicSchema } from "./support/schema.ts";
+import { basicSchema, makeSchema } from "./support/schema.ts";
 import { readUntil } from "./support/stream.ts";
 
 const silent = { warn: () => {}, error: () => {} };
@@ -649,6 +649,67 @@ describe("wrapExecution", () => {
     await reader.cancel();
     expect(await pending).toEqual({ done: true, value: undefined });
     expect(seen).toEqual(["iterator in", "next in", "next in", "return in"]);
+  });
+});
+
+describe("wrapExecution of a @stream source's cleanup", () => {
+  it("closes a cancelled @stream's source inside the request's wrappers", async () => {
+    // The executor runs without the abort signal (graphql-js would close the source from its
+    // abort listener, outside the wrappers): only the core's close of the results reaches it.
+    const storage = new AsyncLocalStorage<Request>();
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed" },
+    );
+    const seen: Array<string> = [];
+    const where = (): string => (storage.getStore() === request ? "in" : "out");
+    let pulls = 0;
+    const server = createServer({
+      schema: makeSchema("type Query { items: [Int] }", {
+        Query: {
+          // One item, then an idle pull that only the cleanup settles.
+          items: () => {
+            const release = Promise.withResolvers<IteratorResult<number>>();
+            return {
+              [Symbol.asyncIterator]: () => ({
+                next: () => {
+                  pulls += 1;
+                  return pulls === 1 ? Promise.resolve({ done: false, value: 1 }) : release.promise;
+                },
+                return: () => {
+                  seen.push(`return ${where()}`);
+                  release.resolve({ done: true, value: undefined });
+                  return Promise.resolve({ done: true, value: undefined });
+                },
+              }),
+            };
+          },
+        },
+      }),
+      plugins: [
+        {
+          onExecute: (_input, args) => () =>
+            legacyExecuteIncrementally({ ...args, abortSignal: undefined }),
+        },
+        incremental(),
+        { wrapExecution: (req, run) => storage.run(req, run) },
+      ],
+    });
+    const response = await server.handle(request);
+    const { reader } = await readUntil(response.body ?? new ReadableStream(), (text) =>
+      text.includes('"hasNext":true'),
+    );
+    // A second read, pending on the idle pull, which the cancel ends.
+    const pending = reader.read();
+    while (pulls < 2) {
+      await flush();
+    }
+    await reader.cancel();
+    await pending;
+    while (seen.length === 0) {
+      await flush();
+    }
+    expect(seen).toEqual(["return in"]);
   });
 });
 
