@@ -37,8 +37,9 @@ export type Enter = <T>(run: () => T) => T;
 /**
  * Runs one of the core's own entries that must happen whatever the wrappers do (an abort of the
  * core signal, the close of a source) inside the request's execution wrappers. A wrapper that
- * throws is logged with `message`, and `run` runs directly when it had not run yet (its result is
- * kept when it had). A throw from `run` itself propagates.
+ * throws is logged with `message` (a logger that throws as well is ignored), and `run` runs
+ * directly when it had not run yet (its result is kept when it had). A throw from `run` itself
+ * propagates.
  */
 export const enterOrRun = <T>(enter: Enter, logger: Logger, message: string, run: () => T): T => {
   let ran: { readonly value: T } | undefined;
@@ -58,7 +59,11 @@ export const enterOrRun = <T>(enter: Enter, logger: Logger, message: string, run
     if (threw !== undefined && threw.error === error) {
       throw error;
     }
-    logger.error(message, error);
+    try {
+      logger.error(message, error);
+    } catch {
+      // A logger that throws too never skips the fallback, nor changes what `run` gave.
+    }
     if (ran !== undefined) {
       return ran.value;
     }

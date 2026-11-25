@@ -842,13 +842,17 @@ describe("wrapExecution of a @stream source's cleanup", () => {
 /**
  * A @stream server (see streamServer) whose wrapper throws once armed: by `arm()`, or, with
  * `armOnExecute`, once the executor has returned (only the core's later entries fail). Its
- * logger records errors.
+ * logger records errors, and throws on each one with `loggerThrows`.
  */
-const throwingWrapperServer = (armOnExecute: boolean, withSignal = true) => {
+const throwingWrapperServer = (armOnExecute: boolean, withSignal = true, loggerThrows = false) => {
   let armed = false;
   let pulls = 0;
   const returned: Array<string> = [];
-  const error = vi.fn();
+  const error = vi.fn((..._args: ReadonlyArray<unknown>): void => {
+    if (loggerThrows) {
+      throw new Error("logger failed");
+    }
+  });
   const server = createServer({
     schema: makeSchema("type Query { items: [Int] }", {
       Query: {
@@ -939,6 +943,25 @@ describe("a wrapper that throws on the core's own entries", () => {
       { accept: "multipart/mixed" },
     );
     const { server, returned, error, arm, pulls } = throwingWrapperServer(false);
+    const { reader, pending } = await readToIdlePull(await server.handle(request), pulls);
+    arm();
+    await expect(reader.cancel()).resolves.toBeUndefined();
+    await pending;
+    expect(signalOf(request)?.aborted).toBe(true);
+    await returnCalled(returned);
+    expect(returned).toEqual(["return"]);
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on an abort.",
+      expect.any(Error),
+    );
+  });
+
+  it("still aborts the core signal and releases the source when the logger throws too", async () => {
+    const request = post(
+      { query: "{ items @stream(initialCount: 1) }" },
+      { accept: "multipart/mixed" },
+    );
+    const { server, returned, error, arm, pulls } = throwingWrapperServer(false, true, true);
     const { reader, pending } = await readToIdlePull(await server.handle(request), pulls);
     arm();
     await expect(reader.cancel()).resolves.toBeUndefined();
