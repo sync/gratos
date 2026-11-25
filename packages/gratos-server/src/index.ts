@@ -5,6 +5,8 @@ export { CLIENT_CLOSED_REQUEST, createServer } from "./core/server.ts";
 export { mutationOf, signalOf, startOf } from "./core/requestState.ts";
 export { gqlError, httpStatusOf } from "./core/errors.ts";
 export { APPLICATION_JSON, GRAPHQL_RESPONSE_JSON } from "./core/http.ts";
+export { isIncrementalPayload, mapPayloadErrors, payloadErrors } from "./core/payload.ts";
+export type { IncrementalPayload } from "./core/payload.ts";
 export type {
   BaseServerOptions,
   ContextFactory,

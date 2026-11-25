@@ -1,9 +1,12 @@
 // maskErrors(): replaces the message of every unexpected error (one whose original error is not a
 // GraphQLError, such as a plain Error thrown by a resolver) with a generic one, keeping its path
 // and locations and dropping its extensions. Errors raised on purpose (a GraphQLError, gqlError)
-// pass unchanged. It also turns on hideSuggestions for validation and execution.
+// pass unchanged. It covers every payload: a result, each incremental entry of a subsequent
+// payload, and each subscription event. It also turns on hideSuggestions for validation and
+// execution.
 import { GraphQLError } from "graphql";
 
+import { mapPayloadErrors, payloadErrors } from "../core/payload.ts";
 import type { Plugin } from "../core/types.ts";
 
 export interface MaskErrorsOptions {
@@ -34,14 +37,12 @@ export const maskErrors = (options: MaskErrorsOptions = {}): Plugin => {
     name: "maskErrors",
     hideSuggestions: true,
     onResult: (payload) => {
-      const { errors } = payload;
-      if (errors === undefined || !errors.some(isUnexpectedError)) {
+      if (!payloadErrors(payload).some(isUnexpectedError)) {
         return undefined;
       }
-      return {
-        ...payload,
-        errors: errors.map((error) => (isUnexpectedError(error) ? mask(error, message) : error)),
-      };
+      return mapPayloadErrors(payload, (error) =>
+        isUnexpectedError(error) ? mask(error, message) : error,
+      );
     },
   };
 };
