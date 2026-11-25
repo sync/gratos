@@ -710,6 +710,45 @@ describe("control.drain", () => {
     expect((await pending).body).toEqual({ data: { bump: 1, bump2: 2 } });
   });
 
+  it("keeps a started mutation tracked until its work settles when a wrapper throws after it ran", async () => {
+    const events: Array<string> = [];
+    const hold = gate();
+    const started = gate();
+    const error = vi.fn();
+    const server = createServer({
+      schema: basicSchema({
+        Mutation: {
+          bump: async () => {
+            started.resolve();
+            await hold.promise;
+            events.push("committed");
+            return 1;
+          },
+        },
+      }),
+      logger: { warn: () => {}, error },
+      plugins: [
+        {
+          // Calls the executor, then fails: the mutation it started keeps running.
+          wrapExecution: (_request, run) => {
+            run();
+            throw new Error("wrapper failed");
+          },
+        },
+      ],
+    });
+    const pending = gql(server, "mutation { bump }");
+    await started.promise;
+    const drained = server.control.drain().then(() => events.push("drained"));
+    await sleep(5);
+    expect(events).toEqual([]);
+    hold.resolve();
+    await drained;
+    expect(events).toEqual(["committed", "drained"]);
+    const sent = await pending;
+    expect(sent.status).toBe(500);
+  });
+
   it("a continuation on mutationOf(req).settled runs before drain() resolves", async () => {
     const { server, events, first, second, firstStarted } = twoFieldServer();
     const request = post({ query: "mutation { bump bump2 }" });
