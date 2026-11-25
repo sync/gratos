@@ -211,6 +211,11 @@ const client = new ApolloClient({
   cache: new InMemoryCache(),
   incrementalHandler: new Defer20220824Handler(),
 });
+```
+
+Then query (call `client.stop()` when you are done with the client):
+
+```ts file=examples/orders/test/e2e.test.ts
 const result = await client.query({
   query: gql`
     query StreamedOrders($userId: ID!) {

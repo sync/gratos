@@ -4,6 +4,8 @@
 // subscriptions, not SSE). Apollo gets Defer20220824Handler explicitly, the incremental format the
 // server speaks. Every wait is bounded: each request (its body included) has a deadline, and every
 // Apollo client and SSE reader is stopped when its test ends, passed or failed.
+import { createServer } from "node:http";
+
 import { ApolloClient, gql, HttpLink, InMemoryCache } from "@apollo/client";
 import { Defer20220824Handler } from "@apollo/client/incremental";
 import { CombinedGraphQLErrors } from "@apollo/client/errors";
@@ -47,12 +49,16 @@ const recordingFetch = (exchanges: Array<Exchange>): typeof fetch => {
   const recorded: typeof fetch = async (input, init) => {
     const response = await boundedFetch(input, init);
     const [mine, theirs] = response.body === null ? [null, null] : response.body.tee();
+    const body = mine === null ? Promise.resolve("") : new Response(mine).text();
+    // A body cut short rejects both copies. Apollo reports its own; this one is read only by the
+    // tests that await it, so it is handled here (they still see it reject).
+    body.catch(() => undefined);
     exchanges.push({
       request: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
       status: response.status,
       contentType: response.headers.get("content-type"),
       serverTiming: response.headers.get("server-timing"),
-      body: mine === null ? Promise.resolve("") : new Response(mine).text(),
+      body,
     });
     return new Response(theirs, {
       status: response.status,
@@ -358,11 +364,16 @@ describe("the orders app over HTTP, with Apollo Client", () => {
     onTestFinished(() => {
       vi.unstubAllGlobals();
     });
-    // From here to the query's end, the README's code (its `file=` block quotes it).
+    // From here to the query's end, the README's code (its two `file=` blocks quote it), with
+    // the client's cleanup registered between them: it stops when the test ends, also when its
+    // query rejects.
     const client = new ApolloClient({
       link: new HttpLink({ uri, headers: { authorization: `Bearer ${userId}` } }),
       cache: new InMemoryCache(),
       incrementalHandler: new Defer20220824Handler(),
+    });
+    onTestFinished(() => {
+      client.stop();
     });
     const result = await client.query({
       query: gql`
@@ -376,7 +387,6 @@ describe("the orders app over HTTP, with Apollo Client", () => {
       variables: { userId },
       fetchPolicy: "no-cache",
     });
-    client.stop();
 
     // Signed in (a guest gets Forbidden and no data), the whole streamed list.
     expect(result.error).toBeUndefined();
@@ -532,5 +542,50 @@ describe("the orders app over HTTP, the plugins", () => {
     expect(first.body).toEqual({
       data: { jitProbe: { id: "o-3", total: 7.25, customer: { id: "u-1", name: "Ada" } } },
     });
+  });
+});
+
+describe("the recording fetch", () => {
+  it("leaves no rejection unhandled when a body is cut short", async () => {
+    // A server that sends its headers and the start of a body, then drops the connection.
+    const truncating = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"data":');
+      setImmediate(() => response.socket?.destroy());
+    });
+    await new Promise<void>((resolve) => {
+      truncating.listen(0, "127.0.0.1", resolve);
+    });
+    onTestFinished(
+      () =>
+        new Promise<void>((resolve) => {
+          truncating.close(() => resolve());
+        }),
+    );
+    const address = truncating.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const unhandled: Array<unknown> = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    onTestFinished(() => {
+      process.off("unhandledRejection", onUnhandled);
+    });
+    const exchanges: Array<Exchange> = [];
+
+    // Apollo's copy rejects, and nothing reads the recorded one.
+    const response = await recordingFetch(exchanges)(`http://127.0.0.1:${port}/`, {
+      method: "POST",
+      body: "{}",
+    });
+    await expect(response.text()).rejects.toThrow();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+
+    expect(unhandled).toEqual([]);
+    // A test that reads the recorded body still sees it fail.
+    await expect(exchanges[0]?.body).rejects.toThrow();
   });
 });
