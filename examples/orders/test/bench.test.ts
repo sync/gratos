@@ -5,7 +5,13 @@
 // error instead of a hang, and the body is cancelled on every path.
 import { describe, expect, it, vi } from "vitest";
 
-import { countEvents, measure, openSubscription, plainQueue } from "../bench/subscriptions.ts";
+import {
+  countEvents,
+  measure,
+  openSubscription,
+  parseEvents,
+  plainQueue,
+} from "../bench/subscriptions.ts";
 import type { OrderRow } from "../src/services/Api.ts";
 
 const encoder = new TextEncoder();
@@ -224,6 +230,15 @@ describe("bench:subscriptions", () => {
     await vi.waitFor(() => {
       expect(cancelled).toBe(true);
     });
+  });
+
+  it("refuses an --events value that is not a positive safe integer", () => {
+    expect(parseEvents("20000")).toBe(20_000);
+    for (const value of ["Infinity", "nope", "", "-5", "0", "1.5", "1e20"]) {
+      expect(() => parseEvents(value)).toThrow(
+        `--events must be a positive safe integer, got ${value}`,
+      );
+    }
   });
 
   it("the plain source is a FIFO, also across a drained queue", async () => {

@@ -337,6 +337,19 @@ export const measure = async (
   }
 };
 
+/**
+ * The `--events` flag as a positive safe integer. Anything else is refused before the first run:
+ * `Infinity` would publish forever without yielding, `NaN` would wait out the deadline, and a
+ * negative count would report negative rates.
+ */
+export const parseEvents = (value: string): number => {
+  const events = Number(value);
+  if (!Number.isSafeInteger(events) || events <= 0) {
+    throw new Error(`--events must be a positive safe integer, got ${value}`);
+  }
+  return events;
+};
+
 const median = (values: ReadonlyArray<number>): number =>
   values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
 
@@ -347,7 +360,7 @@ if (import.meta.main) {
       record: { type: "boolean", default: false },
     },
   });
-  const events = Number(flags.events);
+  const events = parseEvents(flags.events);
   const runs = 5;
   const variants = ["effect", "plain"] as const;
   const modes = ["burst", "paced"] as const;
