@@ -270,6 +270,11 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           // frame is queued still ends the body (its own signal is still watched).
           stoppingSource = true;
           controller.abort();
+          // A listener on the core signal may have made the client leave right away (the body
+          // has ended): nothing is reported then, as for any rejected pull once it has left.
+          if (finished) {
+            return;
+          }
           const result = await processed({ errors: [failure(error)] });
           if (result !== undefined) {
             await sendPayload({ result, hasNext: false });

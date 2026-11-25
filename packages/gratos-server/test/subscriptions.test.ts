@@ -729,6 +729,48 @@ describe("a standalone handle(Request): cancelling the body", () => {
     expect(payloads).toEqual([{ data: { failing: 1 } }]);
   });
 
+  it("a client that leaves inside the source's stop is not reported", async () => {
+    const reported: Array<string> = [];
+    const client = new AbortController();
+    const schema = makeSchema(
+      `
+        type Query { hello: String }
+        type Subscription { failing: Int }
+      `,
+      { Subscription: { failing: (payload: number) => payload } },
+    );
+    Object.assign(schema.getSubscriptionType()?.getFields()["failing"] ?? {}, {
+      async *subscribe(
+        _source: unknown,
+        _args: unknown,
+        _context: unknown,
+        info: GraphQLResolveInfo,
+      ) {
+        // The source's own abort listener makes the client leave as the core stops it.
+        info.getAbortSignal()?.addEventListener("abort", () => {
+          client.abort();
+        });
+        yield 1;
+        await Promise.resolve();
+        throw new GraphQLError("a deliberate source error");
+      },
+    });
+    const server = createServer({
+      schema,
+      plugins: [reportErrors((error) => reported.push(error.message))],
+    });
+    const response = await server.handle(
+      post(
+        { query: "subscription { failing }" },
+        { accept: "text/event-stream", signal: client.signal },
+      ),
+    );
+    const { names } = readSse(await response.text());
+    expect(names).toEqual(["next"]);
+    await flush();
+    expect(reported).toEqual([]);
+  });
+
   it("a result hook that throws on a later event fails the body and stops the source", async () => {
     const { schema, cleanups } = fixture();
     const errors: Array<unknown> = [];
