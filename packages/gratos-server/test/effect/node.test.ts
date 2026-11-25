@@ -2,6 +2,8 @@
 // executor (docs/plan.html M5 "Done when": aborts mid-SSE and mid-multipart, an idle subscription's
 // finalizer, one trace per request, the session-read span, HEAD, a client that leaves during a
 // slow runInRequest context, and the M4a method and content-type rows through NodeHttpServer).
+import { request as httpRequest } from "node:http";
+
 import type { GraphQLError } from "graphql";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -343,5 +345,72 @@ describe("over NodeHttpServer, incremental delivery", () => {
     expect((operation?.endTime ?? 0n) >= (resolver?.endTime ?? 1n)).toBe(true);
     expect((operation?.endedAtPerf ?? 0) >= (resolver?.endedAtPerf ?? 1)).toBe(true);
     expect(reported).toEqual([]);
+  });
+});
+
+/** Sends `method` with node:http (fetch refuses TRACE), and reads the status and Allow. */
+const rawRequest = (url: string, method: string) =>
+  new Promise<{ readonly status: number | undefined; readonly allow: string | undefined }>(
+    (resolve, reject) => {
+      const outgoing = httpRequest(url, { method }, (incoming) => {
+        incoming.resume();
+        resolve({ status: incoming.statusCode, allow: incoming.headers.allow });
+      });
+      outgoing.on("error", reject);
+      outgoing.end();
+    },
+  );
+
+describe("over NodeHttpServer, effectRoute's conversions", () => {
+  const executor = executors[0];
+  if (executor === undefined) {
+    throw new Error("no default executor");
+  }
+
+  it("answers a method no Web Request can carry (TRACE) with the core's 405", async () => {
+    const { served } = await start(executor);
+    expect(await rawRequest(served.url, "TRACE")).toEqual({ status: 405, allow: "POST" });
+  });
+
+  it("cancels the body of a HEAD response, which the transport never reads", async () => {
+    let cancelled = false;
+    const streaming: Plugin<Ctx> = {
+      onRequest: (request) =>
+        request.method === "HEAD"
+          ? new Response(
+              new ReadableStream({
+                cancel: () => {
+                  cancelled = true;
+                },
+              }),
+              { status: 200, headers: { "content-type": "text/plain" } },
+            )
+          : undefined,
+    };
+    const { served } = await start(executor, [streaming]);
+    const response = await fetch(served.url, { method: "HEAD" });
+    expect(response.status).toBe(200);
+    await until(() => cancelled);
+  });
+
+  it("keeps every Set-Cookie field, also two for the same cookie name", async () => {
+    const cookies: Plugin<Ctx> = {
+      onResponse: (response) => {
+        const headers = new Headers(response.headers);
+        headers.append("set-cookie", "session=old; Path=/old; Max-Age=0");
+        headers.append("set-cookie", "session=new; Path=/");
+        return new Response(response.body, { status: response.status, headers });
+      },
+    };
+    const { served } = await start(executor, [cookies]);
+    const response = await graphql(served.url, "{ greeting }");
+    expect(await response.json()).toEqual({ data: { greeting: "hello ada" } });
+    const fields = response.headers.getSetCookie();
+    expect(fields).toHaveLength(2);
+    expect(fields[0]).toContain("session=old");
+    expect(fields[0]).toContain("Path=/old");
+    expect(fields[0]).toContain("Max-Age=0");
+    expect(fields[1]).toContain("session=new");
+    expect(fields[1]).toContain("Path=/");
   });
 });
