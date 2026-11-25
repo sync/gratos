@@ -765,6 +765,18 @@ describe("regression: no @defer or @stream on mutations", () => {
       ),
     );
     expect(response.headers.get("content-type")).toBe(MULTIPART);
+    const { parts, closed } = readApolloMultipart(await response.text());
+    expect(closed).toBe(true);
+    expect(parts).toEqual([
+      { data: { items: [{ id: "1" }, { id: "2" }] }, hasNext: true },
+      {
+        incremental: [
+          { data: { name: "one" }, path: ["items", 0] },
+          { data: { name: "two" }, path: ["items", 1] },
+        ],
+        hasNext: false,
+      },
+    ]);
   });
 });
 
