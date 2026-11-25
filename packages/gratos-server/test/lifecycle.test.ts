@@ -835,6 +835,65 @@ describe("control.drain", () => {
     expect(signalOf(request)?.aborted).toBe(true);
   });
 
+  it("observes the rejection of an execution a wrapper around next() left running while the executor awaits a fallback", async () => {
+    const unhandled: Array<unknown> = [];
+    const listener = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", listener);
+    try {
+      const fallback = gate();
+      let entries = 0;
+      const server = createServer({
+        schema: basicSchema(),
+        logger: silent,
+        plugins: [
+          {
+            // Catches the nested entry's error and answers with a fallback it waits for.
+            onExecute: () => async (next) => {
+              try {
+                return await next();
+              } catch {
+                await fallback.promise;
+                return { data: { hello: "fallback" } };
+              }
+            },
+          },
+          // Its execution, which the throwing wrapper leaves running, fails meanwhile.
+          {
+            onExecute: () => async () => {
+              await sleep(1);
+              throw new Error("abandoned");
+            },
+          },
+          {
+            // The second entry is the one around next(): it runs it, then fails.
+            wrapExecution: (_request, run) => {
+              entries += 1;
+              const entry = entries;
+              const result = run();
+              if (entry === 2) {
+                throw new Error("wrapper failed");
+              }
+              return result;
+            },
+          },
+        ],
+      });
+      const sent = gql(server, "{ hello }");
+      await sleep(20);
+      fallback.resolve();
+      const response = await sent;
+      expect(response.error).toBeUndefined();
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ data: { hello: "fallback" } });
+      await sleep(5);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", listener);
+    }
+  });
+
   it("a continuation on mutationOf(req).settled runs before drain() resolves", async () => {
     const { server, events, first, second, firstStarted } = twoFieldServer();
     const request = post({ query: "mutation { bump bump2 }" });

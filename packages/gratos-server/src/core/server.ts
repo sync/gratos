@@ -721,6 +721,12 @@ const serve = <Ctx>(
         });
       } catch (error) {
         if (ran !== undefined) {
+          // Observed at once: it may reject while an executor that caught this error still
+          // works on its answer, before the request waits for it. The wrapper's error stays the
+          // failure, and the request still waits for the original (see settleAbandoned).
+          if (isPromiseLike(ran.result)) {
+            void ran.result.then(undefined, () => {});
+          }
           abandoned.push(ran.result);
         }
         throw error;
