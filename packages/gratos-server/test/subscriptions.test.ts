@@ -324,6 +324,8 @@ describe("GraphQL-over-SSE", () => {
     expect(responses).toEqual([200]);
     expect(response.headers.get("server-timing")).toContain("total;dur=");
     const { names, payloads } = readSse(await response.text());
+    // Still once now that the body has ended: onResponse is no "stream finished" hook.
+    expect(responses).toEqual([200]);
     expect(names).toEqual(["next", "next", "next", "complete"]);
     expect(seen).toEqual([{ tick: 1 }, { tick: 2 }, { tick: 3 }]);
     expect(payloads.map((payload) => payload.extensions)).toEqual([
@@ -518,9 +520,20 @@ describe("GraphQL-over-SSE", () => {
     async (name, close) => {
       const { schema } = fixture();
       const logged: Array<string> = [];
+      // Settles once the cleanup has finished (for "waits", once the signal it awaits aborted).
+      const cleaned = gate();
       const server = createServer({
         schema,
-        plugins: [incremental(), closingWith(close)],
+        plugins: [
+          incremental(),
+          closingWith(async (signal) => {
+            try {
+              return await close(signal);
+            } finally {
+              cleaned.resolve();
+            }
+          }),
+        ],
         logger: { warn: () => undefined, error: (message) => logged.push(message) },
       });
       const sent = await Promise.race([
@@ -541,6 +554,8 @@ describe("GraphQL-over-SSE", () => {
       expect(logged).toEqual(
         name === "rejects" ? ["gratos-server: closing a streamed result failed."] : [],
       );
+      const timedOut = sleep(1000).then(() => "the cleanup hangs");
+      expect(await Promise.race([cleaned.promise.then(() => "cleaned"), timedOut])).toBe("cleaned");
     },
   );
 
@@ -1025,9 +1040,10 @@ describe("onExecute and subscriptions", () => {
         },
       ],
     });
+    // `refused`'s source resolver records that it ran: it must not.
     const response = await server.handle(
       post(
-        { query: "subscription { tick(n: 2) }" },
+        { query: "subscription { refused }" },
         { accept: "text/event-stream, application/graphql-response+json" },
       ),
     );
@@ -1452,6 +1468,8 @@ describe("throw() on the response stream", () => {
   it("closes a source whose throw() catches the error and goes on through return(), once", async () => {
     const { stream, probe } = await probedStream({ throws: true, catches: true });
     await expect(stream.throw(error)).rejects.toBe(error);
+    // throw() itself closed the source through return(), once its throw() went on.
+    expect(probe).toEqual({ pulls: 0, returns: 1, throws: [error] });
     await stream.return();
     expect(probe).toEqual({ pulls: 0, returns: 1, throws: [error] });
   });
