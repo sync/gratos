@@ -71,8 +71,11 @@ const defaultDefect = (defect: ResolverDefect): void => {
   );
 };
 
-/** True when every reason is an interrupt and one of them carries the ClientAbort annotation. */
-const isClientAbort = <E>(cause: Cause.Cause<E>): boolean =>
+/**
+ * True when every reason is an interrupt and one of them carries the ClientAbort annotation (the
+ * client left). Any other interrupt (an Effect that interrupts itself, say) is not a cancellation.
+ */
+export const isClientAbort = <E>(cause: Cause.Cause<E>): boolean =>
   Cause.hasInterruptsOnly(cause) &&
   cause.reasons.some(
     (reason) =>

@@ -3,12 +3,15 @@
 // route fiber's context (the services, the Tracer, the HTTP span as its parent), so its span
 // joins the request's trace; `services` fills in what a standalone request has no route for.
 // When the client leaves (the core signal aborts), its fiber is interrupted with the ClientAbort
-// annotation, so the core answers 499 and a mutation never starts.
+// annotation, so the core answers 499 and a mutation never starts. Any other failure, an
+// interrupt that is not a client abort included (an Effect that interrupts itself), is an
+// ordinary context failure: a masked 500, logged by the core.
 import { Cause, Context, Effect, Exit } from "effect";
 import { HttpServerError } from "effect/http";
 
 import { cancelled } from "../core/errors.ts";
 import { signalOf } from "../core/requestState.ts";
+import { isClientAbort } from "./errors.ts";
 import { routeOf } from "./state.ts";
 
 export const runInRequest = <A, E, R>(
@@ -33,7 +36,7 @@ export const runInRequest = <A, E, R>(
       signal?.removeEventListener("abort", interrupt);
       if (Exit.isSuccess(exit)) {
         resolve(exit.value);
-      } else if (Cause.hasInterruptsOnly(exit.cause)) {
+      } else if (isClientAbort(exit.cause)) {
         reject(cancelled());
       } else {
         reject(Cause.squash(exit.cause));

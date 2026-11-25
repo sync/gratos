@@ -20,6 +20,7 @@ import {
   makeGuard,
   OperationType,
   ResolverDefect,
+  runInRequest,
   wrapSubscribe,
 } from "../../src/effect/index.ts";
 import { internals } from "../../src/effect/schema.ts";
@@ -791,6 +792,28 @@ describe("effectSchema", () => {
     expect(shared.getQueryType()?.getFields()["value"]).toBe(field);
     effectSchema(shared, { failure });
     expect(field?.resolve).toBe(once);
+  });
+});
+
+describe("runInRequest", () => {
+  it("treats an Effect that interrupts itself as a context failure, not a client abort", async () => {
+    const errors: Array<string> = [];
+    const server = createServer({
+      schema: makeSchema("type Query { a: String }"),
+      context: (request) => runInRequest(request, Effect.interrupt, Context.empty()),
+      plugins: [effect()],
+      logger: {
+        warn: () => {},
+        error: (message) => {
+          errors.push(message);
+        },
+      },
+    });
+    const sent = await gql(server, "{ a }");
+    expect(sent.status).toBe(500);
+    expect(sent.error?.extensions?.["code"]).toBeUndefined();
+    expect(sent.error?.message).toBe("Unexpected error.");
+    expect(errors).toEqual(["gratos-server: the context phase failed."]);
   });
 });
 
