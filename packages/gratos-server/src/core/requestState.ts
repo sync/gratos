@@ -23,7 +23,8 @@ export interface MutationTracker {
   readonly state: MutationState;
   /** Publishes `started: true`; the settle promise must be passed once execution is under way. */
   readonly start: () => void;
-  readonly settle: () => void;
+  /** Publishes `settled`, with the status of the answer built from the mutation's result. */
+  readonly settle: (status: number) => void;
   /** Publishes `started: false` (and `settled`) unless the mutation already started. */
   readonly skip: () => void;
   readonly isStarted: () => boolean;
@@ -38,15 +39,17 @@ export const registerMutation = (request: Request): MutationTracker => {
   const started = Promise.withResolvers<boolean>();
   const settled = Promise.withResolvers<undefined>();
   let state: "pending" | "started" | "skipped" = "pending";
+  let status: number | undefined;
   const tracker: MutationTracker = {
-    state: { started: started.promise, settled: settled.promise },
+    state: { started: started.promise, settled: settled.promise, status: () => status },
     start: () => {
       if (state === "pending") {
         state = "started";
         started.resolve(true);
       }
     },
-    settle: () => {
+    settle: (answered) => {
+      status = answered;
       settled.resolve(undefined);
     },
     skip: () => {

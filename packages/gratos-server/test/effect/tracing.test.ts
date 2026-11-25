@@ -48,7 +48,7 @@ interface Built {
 const build = (
   plugins: ReadonlyArray<Plugin>,
   overrides: Overrides = {},
-  options: { readonly after?: ReadonlyArray<Plugin> } = {},
+  options: { readonly after?: ReadonlyArray<Plugin>; readonly quiet?: boolean } = {},
 ): Built => {
   const tracer = recordingTracer();
   const ended: Array<RecordedSpan> = [];
@@ -87,6 +87,7 @@ const build = (
       }),
       ...(options.after ?? []),
     ],
+    logger: options.quiet === true ? { warn: () => {}, error: () => {} } : console,
   });
   return { server, tracer, ended };
 };
@@ -309,6 +310,86 @@ describe.each(executors)("effect() tracing ($name executor)", (executor) => {
     expect(operation?.endCalls).toBe(1);
     expect(operation?.outcome).toBe("ok");
     await (await pending).body?.cancel();
+    expect(operation?.endCalls).toBe(1);
+  });
+
+  it.each([
+    ["its client stays", false],
+    ["its client left first", true],
+  ])("ends a mutation whose result hook throws (a 500) with error (%s)", async (_name, leave) => {
+    const hold = gate();
+    const started = gate();
+    let holding = false;
+    const built = build(
+      executor.plugins(),
+      {
+        Mutation: {
+          first: () =>
+            Effect.gen(function* () {
+              if (holding) {
+                started.resolve();
+                yield* Effect.promise(() => hold.promise);
+              }
+              return "one";
+            }),
+        },
+      },
+      {
+        after: [
+          {
+            onResult: () => {
+              throw new Error("result hook failed");
+            },
+          },
+        ],
+        quiet: true,
+      },
+    );
+    await warm(built.server, "mutation Write { first }");
+    built.tracer.clear();
+    holding = true;
+    const controller = new AbortController();
+    const pending = built.server.handle(
+      post({ query: "mutation Write { first }" }, { signal: controller.signal }),
+    );
+    await started.promise;
+    if (leave) {
+      controller.abort();
+    }
+    hold.resolve();
+    const response = await pending;
+    expect(response.status).toBe(500);
+    await response.body?.cancel();
+    const [operation] = operations(built.tracer);
+    expect(operation?.outcome).toBe("error");
+    expect(operation?.endCalls).toBe(1);
+  });
+
+  it("ends a mutation whose response body fails with error", async () => {
+    let failing = false;
+    const failingBody: Plugin = {
+      onResponse: (response) =>
+        !failing
+          ? undefined
+          : new Response(
+              new ReadableStream({
+                pull: (controller) => {
+                  controller.error(new Error("body failed"));
+                },
+              }),
+              { status: response.status, headers: response.headers },
+            ),
+    };
+    const built = build([...executor.plugins(), failingBody], {
+      Mutation: { first: () => Effect.succeed("one") },
+    });
+    await warm(built.server, "mutation Write { first }");
+    built.tracer.clear();
+    failing = true;
+    const response = await built.server.handle(post({ query: "mutation Write { first }" }));
+    await expect(response.text()).rejects.toThrow("body failed");
+    const [operation] = operations(built.tracer);
+    expect(operation?.outcome).toBe("error");
     expect(operation?.endCalls).toBe(1);
   });
 

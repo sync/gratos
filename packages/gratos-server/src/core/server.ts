@@ -173,7 +173,7 @@ interface TrackedMutation {
   readonly done: Promise<void>;
 }
 
-const noop = (): void => {};
+const noop = (_status: number): void => {};
 
 /** A controller that aborts when `incoming` (the Request's signal: the client left) does. */
 const linkedController = (incoming: AbortSignal): AbortController => {
@@ -203,8 +203,11 @@ interface Dispatched {
   readonly outcome: Outcome;
   /** Whether a mutation's executor was called (false when it failed before dispatch). */
   readonly mutationStarted: boolean;
-  /** Publishes a mutation's completion; a no-op for other operations. */
-  readonly finish: () => void;
+  /**
+   * Publishes a mutation's completion, with the status of the answer built from its result; a
+   * no-op for other operations.
+   */
+  readonly finish: (status: number) => void;
 }
 
 /** An early answer: a Response to send as is. */
@@ -612,7 +615,7 @@ const serve = <Ctx>(
     if (run.controller.signal.aborted) {
       return answer(new Response(null, { status: CLIENT_CLOSED_REQUEST }));
     }
-    let finish = noop;
+    let finish: (status: number) => void = noop;
     if (mutation !== undefined) {
       const { promise: done, resolve } = Promise.withResolvers<undefined>();
       const entry: TrackedMutation = {
@@ -622,8 +625,8 @@ const serve = <Ctx>(
       };
       tracked.add(entry);
       mutation.start();
-      finish = () => {
-        mutation.settle();
+      finish = (status) => {
+        mutation.settle(status);
         tracked.delete(entry);
         resolve(undefined);
       };
@@ -852,12 +855,22 @@ const serve = <Ctx>(
     if (dispatched._tag === "answer") {
       return dispatched.response;
     }
+    // A failure to build the answer (a throwing result hook) is a 500 (handle()'s catch).
+    let status = 500;
     try {
-      return await encode(run, dispatched.outcome, ctx, operation, dispatched.mutationStarted);
+      const response = await encode(
+        run,
+        dispatched.outcome,
+        ctx,
+        operation,
+        dispatched.mutationStarted,
+      );
+      status = response.status;
+      return response;
     } finally {
       // A mutation's completion (mutationOf(req).settled, the drain) is published only once the
-      // result hooks have seen its result, never on body consumption.
-      dispatched.finish();
+      // result hooks have seen its result, never on body consumption, with the answer's status.
+      dispatched.finish(status);
     }
   };
 

@@ -17,7 +17,8 @@
 //   onResponse), and effectRoute's request Scope (the closed flag: a span created later ends
 //   with cancel at once), plus, for a mutation, the request signal's abort (a standalone client
 //   that left, whose body nobody may read). A mutation the core reports as started defers its end
-//   until the core's tracked mutation settles, and ends ok or error, never cancel.
+//   until the core's tracked mutation settles, and ends ok or error (its errors, its answer's
+//   status, a failing body), never cancel.
 //
 // Span times are nanoseconds from the Effect Clock. The core reports performance.now()
 // milliseconds; every such value goes through one per-request anchor, a (clock nanos, perf ms)
@@ -69,6 +70,8 @@ interface SpanState {
   errors: number;
   /** "none" for a query or subscription, else the mutation's progress. */
   mutation: "none" | "pending" | "started" | "skipped" | "settled";
+  /** A settled mutation's answer status (mutationOf(req).status()). */
+  answered: number | undefined;
   ended: boolean;
 }
 
@@ -83,9 +86,16 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     }
     state.ended = true;
     let exit: Exit.Exit<unknown, unknown>;
+    // The status the core answered with, or, once a started mutation has settled before
+    // onResponse ran (its client left first), the status of the answer built from its result.
+    const status = state.status === 0 ? (state.answered ?? 0) : state.status;
     if (state.mutation === "settled") {
-      // A started mutation always finished: ok or error, never cancel.
-      exit = state.errors > 0 ? Exit.fail("graphql errors") : Exit.void;
+      // A started mutation always finished: ok or error, never cancel. Its answer failing (a
+      // throwing result hook's 500) or its body failing is an error too.
+      exit =
+        state.errors > 0 || status >= 400 || state.trigger === "error"
+          ? Exit.fail(state.trigger === "error" ? "response body failed" : "graphql errors")
+          : Exit.void;
     } else if (state.trigger === "cancel" || state.status === 499) {
       exit = Exit.interrupt();
     } else if (state.trigger === "error" || state.status >= 400 || state.errors > 0) {
@@ -94,7 +104,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       exit = Exit.void;
     }
     span.attribute("graphql.errors", state.errors);
-    span.attribute("http.response.status_code", state.status);
+    span.attribute("http.response.status_code", status);
     // On the anchored timeline, as every phase: a coarse Clock read here could end the
     // operation before a phase reported after onContext (a jit compile).
     span.end(nanosOf(state, performance.now()), exit);
@@ -139,6 +149,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       status: 0,
       errors: 0,
       mutation: "none",
+      answered: undefined,
       ended: false,
     };
     state = created;
@@ -223,6 +234,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       void mutation.settled.then(() => {
         if (state.mutation === "started" || state.mutation === "pending") {
           state.mutation = "settled";
+          state.answered = mutation.status();
           tryEnd(state);
         }
       });

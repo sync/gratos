@@ -205,6 +205,49 @@ describe("mutationOf", () => {
   });
 });
 
+describe("mutationOf(req).status", () => {
+  it("is the status of the answer built from a settled mutation's result", async () => {
+    const server = createServer({ schema: basicSchema() });
+    const request = post({ query: "mutation { bump }" });
+    const seen: Array<number | undefined> = [mutationOf(request)?.status()];
+    const response = await server.handle(request);
+    expect(response.status).toBe(200);
+    seen.push(mutationOf(request)?.status());
+    expect(seen).toEqual([undefined, 200]);
+  });
+
+  it("is a 500 when building the answer failed (a throwing result hook)", async () => {
+    let status: number | undefined;
+    const server = createServer({
+      schema: basicSchema(),
+      plugins: [
+        {
+          onResult: () => {
+            throw new Error("hook failed");
+          },
+        },
+        {
+          onResponse: (_response, request) => {
+            status = mutationOf(request)?.status();
+          },
+        },
+      ],
+      logger: silent,
+    });
+    const response = await server.handle(post({ query: "mutation { bump }" }));
+    expect(response.status).toBe(500);
+    expect(status).toBe(500);
+  });
+
+  it("stays undefined for a mutation that never started", async () => {
+    const server = createServer({ schema: basicSchema() });
+    await server.control.drain();
+    const request = post({ query: "mutation { bump }" });
+    expect((await server.handle(request)).status).toBe(503);
+    expect(mutationOf(request)?.status()).toBeUndefined();
+  });
+});
+
 describe("no late start", () => {
   it("a client that leaves during the context phase never starts the mutation (499, onResponse runs)", async () => {
     const hold = gate();

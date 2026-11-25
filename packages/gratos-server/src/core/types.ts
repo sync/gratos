@@ -300,4 +300,11 @@ export interface MutationState {
    * started. It never waits for the response body. The drain waits for it.
    */
   readonly settled: Promise<void>;
+  /**
+   * Once a started mutation has settled, the HTTP status of the answer the core built from its
+   * result (before onResponse): the response's status, an error result's 4xx or 5xx included,
+   * or 500 when building it failed (a result hook threw). `undefined` until then, and for a
+   * mutation that never started. A span end on `settled` reads it to tell ok from error.
+   */
+  readonly status: () => number | undefined;
 }
