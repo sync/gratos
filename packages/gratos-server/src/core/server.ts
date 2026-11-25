@@ -61,7 +61,6 @@ import type {
   ExecutorResult,
   IncrementalResults,
   Logger,
-  NextExecutor,
   Params,
   Phase,
   PhaseName,
@@ -117,22 +116,19 @@ const unexpected = (originalError: unknown): GraphQLError =>
  * `legacyExecuteIncrementally()` when the schema declares @defer or @stream: `execute()` throws
  * on such a schema, even for an operation that uses neither.
  */
-const defaultExecutor =
-  (
-    operation: OperationDefinitionNode,
-    args: ExecutionArgs,
-    enter: Enter,
-    entrySignal: () => AbortSignal | undefined,
-  ): NextExecutor =>
-  () => {
-    if (operation.operation === "subscription") {
-      return subscribeOnce(args, enter);
-    }
-    // In a claim's `next()`, the signal of that entry (see Abandoned), else the core's.
-    const signal = entrySignal();
-    const run = signal === undefined ? args : { ...args, abortSignal: signal };
-    return hasIncrementalDirectives(run.schema) ? legacyExecuteIncrementally(run) : execute(run);
-  };
+const defaultExecutor = (
+  operation: OperationDefinitionNode,
+  args: ExecutionArgs,
+  signal: AbortSignal | undefined,
+  enter: Enter,
+): PromiseOrValue<ExecutorResult> => {
+  if (operation.operation === "subscription") {
+    return subscribeOnce(args, enter);
+  }
+  // The signal of the entry it runs in (see startExecution): the core's, or a claim's next()'s.
+  const run = signal === args.abortSignal ? args : { ...args, abortSignal: signal };
+  return hasIncrementalDirectives(run.schema) ? legacyExecuteIncrementally(run) : execute(run);
+};
 
 /** A rejected pull (a failed subscription source) as the GraphQL error the client gets. */
 const sourceFailure = (error: unknown): GraphQLError => {
@@ -208,6 +204,9 @@ interface TrackedMutation {
 }
 
 const noop = (_status: number): void => {};
+
+/** The claims of an operation no plugin claims (and of every subscription). */
+const noClaims: ReadonlyArray<Executor> = [];
 
 /**
  * A controller that aborts when `incoming` (the Request's signal: the client left) does. With
@@ -719,36 +718,41 @@ const serve = <Ctx>(
         finish: noop,
       };
     }
-    // The first claim runs; its `next` is the executor that would have run without it (the next
-    // claim in list order, else the default). A subscription always runs through subscribe(): a
-    // claim cannot answer it (an executor such as legacyExecuteIncrementally would return a
-    // one-shot result), so its claims are ignored once every hook has had its say.
+    // The first claim runs. A subscription always runs through subscribe(): a claim cannot
+    // answer it (an executor such as legacyExecuteIncrementally would return a one-shot result),
+    // so its claims are ignored once every hook has had its say.
     const { enter } = run;
     const abandoned: Array<Abandoned> = [];
-    /** The controller of the claim's `next()` entry running now (see Abandoned). */
-    let current: AbortController | undefined;
+    const chosen = input.operation.operation === "subscription" ? noClaims : (claims ?? noClaims);
     /**
-     * Enters the wrappers to run `next`, keeping what it returned from inside the entry: a
-     * wrapper that throws after running it leaves that execution running (see `abandoned`). A
-     * successful entry's result is returned as is. A claim's `next()` (`nested`) of a query runs
-     * with a signal of its own (see Abandoned).
+     * Enters the wrappers to run executor `index` (a claim, else the default), keeping what it
+     * returned from inside the entry: a wrapper that throws after running it leaves that
+     * execution running (see `abandoned`). A successful entry's result is returned as is. The
+     * core's entry (index 0) runs with the core signal; a claim's `next()` of a query runs with a
+     * signal of its own, linked to `signal`, the signal of the entry that called the claim: bound
+     * when the claim is called, so a `next()` it makes later (after an await, from a queue) is
+     * still stopped with it (see Abandoned).
      */
-    const enterKeeping = (next: NextExecutor, nested: boolean): PromiseOrValue<ExecutorResult> => {
-      const parent = current;
-      const core = args.abortSignal ?? undefined;
-      const controller =
-        nested && core !== undefined ? linkedController(parent?.signal ?? core) : undefined;
+    const enterExecutor = (
+      index: number,
+      signal: AbortSignal | undefined,
+    ): PromiseOrValue<ExecutorResult> => {
+      const controller = index > 0 && signal !== undefined ? linkedController(signal) : undefined;
+      const own = controller?.signal ?? signal;
+      const claim = chosen[index];
       let ran: { readonly result: PromiseOrValue<ExecutorResult> } | undefined;
       try {
         return enter(() => {
-          current = controller ?? parent;
-          try {
-            const result = next();
-            ran = { result };
-            return result;
-          } finally {
-            current = parent;
-          }
+          // Its `next` is the executor that would have run without it (the next claim in list
+          // order, else the default), bound to the request: an executor may call it later, from
+          // outside the executor call (an event emitter's callback, a queue), and the work still
+          // runs in the wrappers.
+          const result =
+            claim === undefined
+              ? defaultExecutor(input.operation, args, own, enter)
+              : claim(() => enterExecutor(index + 1, own));
+          ran = { result };
+          return result;
         });
       } catch (error) {
         if (ran !== undefined) {
@@ -763,19 +767,6 @@ const serve = <Ctx>(
         throw error;
       }
     };
-    let execute: NextExecutor = defaultExecutor(
-      input.operation,
-      args,
-      enter,
-      () => current?.signal,
-    );
-    const chosen = input.operation.operation === "subscription" ? undefined : claims;
-    for (const claim of chosen?.toReversed() ?? []) {
-      const next = execute;
-      // Bound to the request: an executor may call `next()` later, from outside the executor
-      // call (an event emitter's callback, a queue), and the work still runs in the wrappers.
-      execute = () => claim(() => enterKeeping(next, true));
-    }
     const { mutation } = run;
     if (mutation !== undefined && draining) {
       return answer(respond(run, errorResult([serverDraining()])));
@@ -805,7 +796,7 @@ const serve = <Ctx>(
         _tag: "dispatched",
         // Inside the execution wrappers (`wrapExecution`), which carry request-local state
         // into the resolvers.
-        outcome: { ok: true, result: enterKeeping(execute, false) },
+        outcome: { ok: true, result: enterExecutor(0, args.abortSignal ?? undefined) },
         abandoned,
         mutationStarted,
         finish,

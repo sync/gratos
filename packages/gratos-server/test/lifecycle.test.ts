@@ -961,6 +961,74 @@ describe("control.drain", () => {
     expect(signalOf(request)?.aborted).toBe(false);
   });
 
+  it("stops the execution a claim's delayed next() starts once the wrapper around that claim failed and the executor answered with a fallback", async () => {
+    const delayed = gate();
+    let settled = false;
+    let entries = 0;
+    const request = post({ query: "{ hello }" });
+    const server = createServer({
+      schema: basicSchema({
+        Query: {
+          // Settles only once its abort signal aborts (the client stays connected).
+          hello: (_source, _args, _context, info: GraphQLResolveInfo) =>
+            new Promise<string>((resolve) => {
+              info.getAbortSignal()?.addEventListener(
+                "abort",
+                () => {
+                  resolve("late");
+                },
+                { once: true },
+              );
+            }),
+        },
+      }),
+      logger: silent,
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              return { data: { hello: "fallback" } };
+            }
+          },
+        },
+        {
+          // Delegates only later (a queue, say), after the entry it was called in has failed.
+          onExecute: () => async (next) => {
+            await delayed.promise;
+            try {
+              return await next();
+            } finally {
+              settled = true;
+            }
+          },
+        },
+        {
+          // The second entry is the one around the first claim's next(): it runs the second
+          // claim, then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const response = await send(server, request);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: { hello: "fallback" } });
+    delayed.resolve();
+    // Its next() runs with the signal of the entry it was called in, which stopped with it.
+    await waitFor(() => settled, "the delayed next()'s execution settling");
+    expect(signalOf(request)?.aborted).toBe(false);
+  });
+
   it("closes a stream a wrapper around next() left running, and sends the stream the executor answers with instead", async () => {
     let returns = 0;
     let calls = 0;
