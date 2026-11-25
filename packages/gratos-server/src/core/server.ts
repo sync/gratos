@@ -205,6 +205,9 @@ interface TrackedMutation {
 
 const noop = (_status: number): void => {};
 
+/** The abandoned executions of a request that dispatched nothing. */
+const noneAbandoned: ReadonlySet<Promise<void>> = new Set();
+
 /** The claims of an operation no plugin claims (and of every subscription). */
 const noClaims: ReadonlyArray<Executor> = [];
 
@@ -252,29 +255,19 @@ type Outcome =
   | { readonly ok: true; readonly result: PromiseOrValue<ExecutorResult> }
   | { readonly ok: false; readonly error: unknown };
 
-/**
- * An execution a wrapper left running (see Dispatched), with the controller of the entry it ran
- * in: a claim's `next()` runs a query with a signal of its own, linked to the core signal (or to
- * the entry's it runs in), so the request can stop it without stopping the answer an executor
- * that caught the wrapper's error gives instead. The core's own entry has none.
- */
-interface Abandoned {
-  readonly result: PromiseOrValue<ExecutorResult>;
-  readonly controller: AbortController | undefined;
-}
-
 /** An execution that went past the gate (or failed before it), with its completion. */
 interface Dispatched {
   readonly _tag: "dispatched";
   readonly outcome: Outcome;
   /**
-   * The executions a wrapper left running: each entry into the wrappers that ran its executor
-   * (the core's executor call, or the entry around a claim's `next()`) and then threw. They are
-   * kept from inside the entry, before the wrapper can throw, and the request still waits for
-   * them (a started mutation stays tracked until its work settles). An executor may call
-   * `next()` later, so the list is read once the outcome has settled.
+   * The executions a wrapper left running: each entry into the wrappers that ran an executor
+   * (the core's executor call, or the entry around a claim's `next()`) and then threw. Each is
+   * kept, from inside the entry before the wrapper can throw, as a promise that settles (never
+   * rejects) once the execution has settled and a stream it gave is closed (nobody else holds
+   * it), and leaves the set then. An executor may call `next()` later, also while the request
+   * waits for them, so the set is read until it is empty (see settleAbandoned).
    */
-  readonly abandoned: ReadonlyArray<Abandoned>;
+  readonly abandoned: ReadonlySet<Promise<void>>;
   /** Whether a mutation's executor was called (false when it failed before dispatch). */
   readonly mutationStarted: boolean;
   /**
@@ -713,7 +706,7 @@ const serve = <Ctx>(
       return {
         _tag: "dispatched",
         outcome: { ok: false, error },
-        abandoned: [],
+        abandoned: noneAbandoned,
         mutationStarted: false,
         finish: noop,
       };
@@ -722,7 +715,34 @@ const serve = <Ctx>(
     // answer it (an executor such as legacyExecuteIncrementally would return a one-shot result),
     // so its claims are ignored once every hook has had its say.
     const { enter } = run;
-    const abandoned: Array<Abandoned> = [];
+    const abandoned = new Set<Promise<void>>();
+    /**
+     * Keeps an execution a wrapper left running until it settles (see Dispatched), observed at
+     * once: it may reject while an executor that caught the wrapper's error still works on its
+     * answer. Nobody reads its result, so a query's is stopped at once through its entry's own
+     * signal, inside the wrappers; the core's entry has none (the request fails, and
+     * settleAbandoned stops it with the core signal), and a mutation's is never stopped.
+     */
+    const abandon = (
+      result: PromiseOrValue<ExecutorResult>,
+      controller: AbortController | undefined,
+    ): void => {
+      const done = retire(run, result);
+      abandoned.add(done);
+      void done.then(() => {
+        abandoned.delete(done);
+      });
+      if (controller !== undefined) {
+        enterOrRun(
+          enter,
+          logger,
+          "gratos-server: a wrapExecution wrapper failed on an abort.",
+          () => {
+            controller.abort();
+          },
+        );
+      }
+    };
     const chosen = input.operation.operation === "subscription" ? noClaims : (claims ?? noClaims);
     /**
      * Enters the wrappers to run executor `index` (a claim, else the default), keeping what it
@@ -731,7 +751,7 @@ const serve = <Ctx>(
      * core's entry (index 0) runs with the core signal; a claim's `next()` of a query runs with a
      * signal of its own, linked to `signal`, the signal of the entry that called the claim: bound
      * when the claim is called, so a `next()` it makes later (after an await, from a queue) is
-     * still stopped with it (see Abandoned).
+     * still stopped with it (see abandon).
      */
     const enterExecutor = (
       index: number,
@@ -755,14 +775,9 @@ const serve = <Ctx>(
           return result;
         });
       } catch (error) {
+        // The wrapper's error stays the failure.
         if (ran !== undefined) {
-          // Observed at once: it may reject while an executor that caught this error still
-          // works on its answer, before the request waits for it. The wrapper's error stays the
-          // failure, and the request still waits for the original (see settleAbandoned).
-          if (isPromiseLike(ran.result)) {
-            void ran.result.then(undefined, () => {});
-          }
-          abandoned.push({ result: ran.result, controller });
+          abandon(ran.result, controller);
         }
         throw error;
       }
@@ -841,67 +856,45 @@ const serve = <Ctx>(
   });
 
   /**
-   * Waits for the executions a throwing wrapper left running (see Dispatched). A started
-   * mutation never gets the core signal: it stays tracked (the drain waits) until its work has
-   * settled, and a streamed result is closed without the signal. A query or subscription is
-   * stopped first: the core signal aborts (one waiting on it settles only then, while its client
-   * may stay connected), and the answer that follows gets a controller of its own (see
-   * closeUnsent), so a connected client's error answer is not taken for a disconnect; a streamed
-   * result is then closed with the signal already aborted.
+   * Waits for an execution a throwing wrapper left running, and closes a stream it gives, as any
+   * unsent one (inside the execution wrappers). Never rejects: its rejection, a failing close and
+   * that failure's logging concern no one.
+   */
+  const retire = async (run: Run, pending: PromiseOrValue<ExecutorResult>): Promise<void> => {
+    try {
+      const result = await settle(pending);
+      if (Symbol.asyncIterator in result || "initialResult" in result) {
+        await closeStreamed(run, result);
+      }
+    } catch {
+      // Nobody reads it.
+    }
+  };
+
+  /**
+   * Waits for the executions a throwing wrapper left running (see Dispatched), until none is
+   * left: also the work one of them starts while the request waits (a later `next()`). A
+   * started mutation never gets the core signal: it stays tracked (the drain waits) until its
+   * work has settled. A query or subscription is stopped first: the core signal aborts (one
+   * waiting on it settles only then, while its client may stay connected), and the answer that
+   * follows gets a controller of its own (see closeUnsent), so a connected client's error answer
+   * is not taken for a disconnect.
    */
   const settleAbandoned = async (
     run: Run,
-    abandoned: ReadonlyArray<Abandoned>,
+    abandoned: ReadonlySet<Promise<void>>,
     mutationStarted: boolean,
   ): Promise<void> => {
-    if (abandoned.length === 0) {
+    if (abandoned.size === 0) {
       return;
     }
     if (!mutationStarted) {
       abortInside(run);
       run.controller = linkedController(run.request.signal);
     }
-    await closeAbandoned(run, abandoned);
-  };
-
-  /**
-   * Waits for the executions a throwing wrapper left running, and closes a streamed result, as
-   * any unsent one (inside the execution wrappers). A rejection concerns no one.
-   */
-  const closeAbandoned = async (run: Run, abandoned: ReadonlyArray<Abandoned>): Promise<void> => {
-    await Promise.all(
-      abandoned.map(async ({ result: pending }) => {
-        let result: ExecutorResult;
-        try {
-          result = await settle(pending);
-        } catch {
-          return;
-        }
-        if (Symbol.asyncIterator in result || "initialResult" in result) {
-          await closeStreamed(run, result);
-        }
-      }),
-    );
-  };
-
-  /**
-   * Stops the queries a throwing wrapper around a claim's `next()` left running, once the
-   * executor has answered anyway (it caught the wrapper's error): each one's own signal aborts,
-   * inside the execution wrappers, never the core signal, which the answer (maybe a stream) still
-   * runs with. A streamed one is then closed; the answer does not wait for that.
-   */
-  const releaseAbandoned = (run: Run, abandoned: ReadonlyArray<Abandoned>): void => {
-    enterOrRun(
-      run.enter,
-      logger,
-      "gratos-server: a wrapExecution wrapper failed on an abort.",
-      () => {
-        for (const { controller } of abandoned) {
-          controller?.abort();
-        }
-      },
-    );
-    void closeAbandoned(run, abandoned);
+    while (abandoned.size > 0) {
+      await Promise.all(abandoned);
+    }
   };
 
   /** execute (await the executor) and encode: the result hooks, then the Response. */
@@ -925,12 +918,11 @@ const serve = <Ctx>(
     }
     // What a throwing wrapper left running (see Dispatched): waited for when the request failed,
     // and for a started mutation whatever its executor answered (one that caught the wrapper's
-    // error and answered anyway), so the mutation stays tracked until that work settles. A query
-    // whose executor answered anyway is stopped on its own signal (see releaseAbandoned).
+    // error and answered anyway), so the mutation stays tracked until that work settles. A
+    // query's, whose executor answered anyway, was stopped on its own signal, and the answer
+    // does not wait for it.
     if (failure !== undefined || mutationStarted) {
       await settleAbandoned(run, abandoned, mutationStarted);
-    } else if (abandoned.length > 0) {
-      releaseAbandoned(run, abandoned);
     }
     if (failure !== undefined || result === undefined) {
       const error = failure?.error;

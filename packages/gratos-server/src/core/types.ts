@@ -206,7 +206,15 @@ export interface Plugin<Ctx = unknown> {
    * run in another async context by then (a listener an `EventEmitterAsyncResource` calls in the
    * context it was created in), so a wrapper must be reentrant, and may run `run` directly when
    * its own state is in effect already. It calls `run` once, synchronously, and returns what it
-   * returns. A plugin
+   * returns. A wrapper that throws after calling `run` around an executor (the executor call, a
+   * `next()`) leaves that execution running, with nobody to read its result. The core keeps every
+   * such execution until it settles (a stream it gives is then closed) and stops a query's or
+   * subscription's: the one a `next()` started at once, on that entry's own signal (each `next()`
+   * runs with a signal linked to the one of the entry that called its executor, also when it is
+   * called later), the executor call's with the core signal, as the request fails. A failed
+   * request answers, and a started mutation's completion (`mutationOf(req).settled`, the drain)
+   * is published, only once none is left, work one of them starts meanwhile included; a
+   * mutation's is never stopped. A plugin
    * carries request-local state into the resolvers this way, which keep receiving the
    * application's own context value: the Effect layer enters an `AsyncLocalStorage`, whose store
    * the async continuations of that work inherit. Wrappers nest in list order (the first is the
