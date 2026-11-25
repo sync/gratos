@@ -1,7 +1,10 @@
 // GraphQL-over-HTTP (docs/plan.html M4a "HTTP matrix", M4b): POST only, JSON bodies, and Accept
 // negotiation between application/graphql-response+json (the default) and application/json for
 // single results, multipart/mixed (deferSpec=20220824) for incremental results and
-// text/event-stream for subscriptions, with the status rules for each.
+// text/event-stream for subscriptions, with the status rules for each. A client that accepts
+// text/event-stream and no JSON type gets request errors (parse, validation, refusals…) as
+// GraphQL-over-SSE, one `next` event then `complete`, with a 200 (graphql-sse's protocol,
+// distinct connections mode); see `respond` in server.ts.
 import type { ExecutionResult, GraphQLError } from "graphql";
 
 import { statusFromErrors } from "./errors.ts";

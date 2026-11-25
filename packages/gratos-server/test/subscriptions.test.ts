@@ -316,10 +316,50 @@ describe("GraphQL-over-SSE", () => {
     expect(await response.text()).toBe("");
   });
 
-  it("an SSE-only client gets request errors as JSON", async () => {
+  it.each([
+    ["a validation error", { query: "subscription { nope }" }, /Cannot query field "nope"/, []],
+    ["a syntax error", { query: "subscription {" }, /^Syntax Error/, []],
+    ["a body error", { query: "{ hello }", variables: [] }, /^`variables` must be an object/, []],
+    [
+      "an unknown operation",
+      { query: "subscription A { tick(n: 1) }", operationName: "B" },
+      /^Unknown operation named "B"/,
+      [],
+    ],
+    [
+      "an onExecute refusal",
+      { query: "subscription { tick(n: 1) }" },
+      /^refused$/,
+      [
+        {
+          onExecute: () => {
+            throw new GraphQLError("refused");
+          },
+        },
+      ],
+    ],
+  ] satisfies ReadonlyArray<readonly [string, unknown, RegExp, ReadonlyArray<Plugin>]>)(
+    "an SSE-only client gets %s as a next event, then complete, with a 200",
+    async (_name, body, message, plugins) => {
+      const { schema } = fixture();
+      const server = createServer({ schema, plugins });
+      const response = await server.handle(post(body, { accept: "text/event-stream" }));
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe(SSE);
+      const { names, payloads } = readSse(await response.text());
+      expect(names).toEqual(["next", "complete"]);
+      expect(payloads).toHaveLength(1);
+      expect(payloads[0]?.data).toBeUndefined();
+      expect(payloads[0]?.errors?.[0]?.message).toMatch(message);
+    },
+  );
+
+  it("a client that accepts JSON too still gets request errors as JSON", async () => {
     const { schema } = fixture();
     const server = createServer({ schema });
-    const sent = await gql(server, "subscription { nope }", { accept: "text/event-stream" });
+    const sent = await gql(server, "subscription { nope }", {
+      accept: "text/event-stream, application/graphql-response+json",
+    });
     expect(sent.status).toBe(400);
     expect(sent.headers.get("content-type")).toBe(
       "application/graphql-response+json; charset=utf-8",

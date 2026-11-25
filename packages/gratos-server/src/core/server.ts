@@ -331,14 +331,38 @@ const serve = <Ctx>(
     mediaType: MediaType;
     /** What the client accepts (the streamed types too). */
     accepted: Accepted;
+    /**
+     * The client accepts text/event-stream and no JSON type: request errors go out as
+     * GraphQL-over-SSE events (see `respond`).
+     */
+    errorsAsEvents: boolean;
     ctx: Ctx | undefined;
     mutation: MutationTracker | undefined;
   }
 
-  const respond = (run: Run, result: ExecutionResult, status?: number): Response =>
-    jsonResponse(result, status ?? statusOf(result, run.mediaType), run.mediaType, () => {
+  /**
+   * A single result, or a request error, as JSON with its status. A client that accepts
+   * text/event-stream and no JSON type gets it as GraphQL-over-SSE instead: one `next` event with
+   * the result, then `complete`, always with a 200. graphql-sse's protocol (distinct connections
+   * mode) has errors found before execution reported through an accepted SSE connection, since a
+   * client reading an event stream cannot read a JSON body, and a 4xx makes it fail the
+   * connection without the errors.
+   */
+  const respond = (run: Run, result: ExecutionResult, status?: number): Response => {
+    if (run.errorsAsEvents) {
+      return sseResponse({
+        first: { result, hasNext: false },
+        rest: undefined,
+        process: (payload) => payload,
+        failure: sourceFailure,
+        controller: run.controller,
+        logger,
+      });
+    }
+    return jsonResponse(result, status ?? statusOf(result, run.mediaType), run.mediaType, () => {
       run.controller.abort();
     });
+  };
 
   /** Whether the request is a mutation (not started yet) and the drain has begun. */
   const drainRefuses = (run: Run): boolean => run.mutation !== undefined && draining;
@@ -380,8 +404,10 @@ const serve = <Ctx>(
       );
     }
     run.accepted = accepted;
-    // A client that accepts only streamed types still gets request errors as JSON (the default).
+    // A client that accepts no JSON type gets request errors as GraphQL-over-SSE when it accepts
+    // text/event-stream, else (multipart/mixed only) as JSON, the default.
     run.mediaType = accepted.json ?? GRAPHQL_RESPONSE_JSON;
+    run.errorsAsEvents = accepted.json === undefined && accepted.eventStream;
     if (!isJsonContentType(request.headers.get("content-type"))) {
       return answer(requestError(run, `Content-Type must be ${APPLICATION_JSON}.`, 415));
     }
@@ -761,6 +787,7 @@ const serve = <Ctx>(
       generation,
       mediaType: GRAPHQL_RESPONSE_JSON,
       accepted: { json: GRAPHQL_RESPONSE_JSON, multipart: false, eventStream: false },
+      errorsAsEvents: false,
       ctx: undefined,
       mutation: undefined,
     };

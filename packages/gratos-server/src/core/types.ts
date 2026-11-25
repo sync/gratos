@@ -126,6 +126,8 @@ export interface Plugin<Ctx = unknown> {
    * After the body is read, before the "no query" check (so APQ hash-only requests get here).
    * Returns replacement params, or nothing. A throw becomes a 400 GraphQL error response
    * (always 400, even for a `gqlError` with another status; the error's extensions are kept).
+   * Like every request error, it goes to a client that accepts text/event-stream and no JSON
+   * type as a GraphQL-over-SSE `next` event, then `complete`, with a 200.
    */
   readonly onParams?: (
     params: Params,
