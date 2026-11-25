@@ -485,6 +485,44 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
       expect(built.tracer.open()).toEqual([]);
     });
 
+    it("never starts the Effect of a Promise-wrapped resolver that settles after the abort", async () => {
+      const called = gate();
+      const late = gate();
+      let ran = 0;
+      let holding = false;
+      const built = build({
+        Query: {
+          slow: () =>
+            holding
+              ? (() => {
+                  called.resolve();
+                  return late.promise.then(() =>
+                    Effect.sync(() => {
+                      ran += 1;
+                      return "late";
+                    }),
+                  );
+                })()
+              : Effect.succeed("warm"),
+        },
+      });
+      for (let index = 0; index < executor.warmUp; index += 1) {
+        await gql(built.server, "{ slow }");
+      }
+      holding = true;
+      const controller = new AbortController();
+      const pending = send(
+        built.server,
+        post({ query: "{ slow }" }, { signal: controller.signal }),
+      );
+      await called.promise;
+      controller.abort();
+      late.resolve();
+      await pending;
+      await flush();
+      expect(ran).toBe(0);
+    });
+
     it("lets a mutation finish after its client left", async () => {
       const writes: Array<string> = [];
       const hold = gate();

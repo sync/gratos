@@ -23,6 +23,7 @@ import { HttpServerError } from "effect/http";
 import { isObjectType } from "graphql";
 import type { GraphQLField, GraphQLFieldResolver, GraphQLSchema } from "graphql";
 
+import { cancelled } from "../core/errors.ts";
 import type { PromiseOrValue } from "../core/types.ts";
 import { fromCause } from "./errors.ts";
 import type { FromCauseOptions } from "./errors.ts";
@@ -93,6 +94,11 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
     }
     // The execution scope (effect()'s wrapExecution): a thenable's continuation inherits it.
     const scope = currentScope() ?? emptyScope;
+    if (scope.aborted && scope.interruptOnAbort) {
+      // The client has left (a Promise-wrapped resolver settled after the abort): the Effect is
+      // never started. track() still interrupts a fiber whose own startup saw the abort.
+      throw cancelled();
+    }
     const fiber = internals.runForkWith(servicesFor<unknown>(scope.context))(
       Effect.withSpan(effect, spanName),
     );
