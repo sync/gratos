@@ -73,9 +73,11 @@ const responseStream = (
   validated: ValidatedSubscriptionArgs,
   source: AsyncIterable<unknown>,
   enter: <T>(run: () => T) => T,
+  enterClose: <T>(run: () => T) => T,
 ): AsyncGenerator<ExecutionResult, void, void> => {
   // Every call into the source runs inside `enter`, as the source's setup did: its iterator,
-  // each pull (the body's reads come from the transport, outside the request), and its cleanup.
+  // each pull (the body's reads come from the transport, outside the request), and its cleanup
+  // (through `enterClose`, which still runs it when a wrapper throws).
   const iterator = enter(() => source[Symbol.asyncIterator]());
   const signal = validated.externalAbortSignal;
   /** No more pulls reach the source: it ended, it threw, or the stream was closed. */
@@ -99,12 +101,12 @@ const responseStream = (
       if (thrown !== undefined) {
         // The method is read inside `enter` too (an accessor may need the request's state); a
         // source with no `throw()` gets `return()`.
-        const after = await enter(() => iterator.throw?.(thrown.error));
+        const after = await enterClose(() => iterator.throw?.(thrown.error));
         if (after?.done !== true) {
-          await enter(() => iterator.return?.());
+          await enterClose(() => iterator.return?.());
         }
       } else {
-        await enter(() => iterator.return?.());
+        await enterClose(() => iterator.return?.());
       }
     } catch {
       // Ignored, as subscribe() ignores it.
@@ -215,11 +217,14 @@ const responseStream = (
  * Runs a subscription as graphql-js subscribe() does, returning its response stream, or the
  * errors-only result of a subscription that could not start. Each call into the source (its
  * iterator, each pull, its `return()` or `throw()`) and each event's execution run inside `enter`
- * (the request's execution wrappers, `wrapExecution`), as the executor call itself does.
+ * (the request's execution wrappers, `wrapExecution`), as the executor call itself does; its
+ * `return()` or `throw()` inside `enterClose`, an entry that must run whatever the wrappers do
+ * (the core's `enterOrRun`: a wrapper that throws never skips the source's cleanup).
  */
 export const subscribeOnce = (
   args: ExecutionArgs,
   enter: <T>(run: () => T) => T = (run) => run(),
+  enterClose: <T>(run: () => T) => T = enter,
 ): PromiseOrValue<AsyncGenerator<ExecutionResult, void, void> | ExecutionResult> => {
   const validated = validateSubscriptionArgs(args);
   if (!("schema" in validated)) {
@@ -229,7 +234,7 @@ export const subscribeOnce = (
     resultOrStream: AsyncIterable<unknown> | ExecutionResult,
   ): AsyncGenerator<ExecutionResult, void, void> | ExecutionResult =>
     Symbol.asyncIterator in resultOrStream
-      ? responseStream(validated, resultOrStream, enter)
+      ? responseStream(validated, resultOrStream, enter, enterClose)
       : resultOrStream;
   const resultOrStream = createSourceEventStream(validated);
   return isPromiseLike(resultOrStream) ? resultOrStream.then(adopt) : adopt(resultOrStream);

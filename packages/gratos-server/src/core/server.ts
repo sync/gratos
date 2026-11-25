@@ -123,9 +123,13 @@ const defaultExecutor = (
   args: ExecutionArgs,
   signal: AbortSignal | undefined,
   enter: Enter,
+  logger: Logger,
 ): PromiseOrValue<ExecutorResult> => {
   if (operation.operation === "subscription") {
-    return subscribeOnce(args, enter);
+    // A throwing wrapper still closes the source (directly).
+    return subscribeOnce(args, enter, (run) =>
+      enterOrRun(enter, logger, "gratos-server: a wrapExecution wrapper failed on a close.", run),
+    );
   }
   // The signal of the entry it runs in (see startExecution): the core's, or a claim's next()'s.
   const run = signal === args.abortSignal ? args : { ...args, abortSignal: signal };
@@ -771,7 +775,7 @@ const serve = <Ctx>(
           // runs in the wrappers.
           const result =
             claim === undefined
-              ? defaultExecutor(input.operation, args, own, enter)
+              ? defaultExecutor(input.operation, args, own, enter, logger)
               : claim(() => enterExecutor(index + 1, own));
           ran = { result };
           return result;

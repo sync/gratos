@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter, EventEmitterAsyncResource } from "node:events";
 
 import { GraphQLError, legacyExecuteIncrementally } from "graphql";
-import type { ExecutionResult, OperationDefinitionNode } from "graphql";
+import type { ExecutionResult, GraphQLResolveInfo, OperationDefinitionNode } from "graphql";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createServer, gqlError, incremental, signalOf } from "../src/index.ts";
@@ -893,6 +893,69 @@ const throwingWrapperServer = (armOnExecute: boolean, withSignal = true, loggerT
   return { server, returned, error, arm, pulls: () => pulls };
 };
 
+/**
+ * A subscription server over one source: each pull waits until `info.getAbortSignal()` aborts,
+ * then rejects; `return()` is recorded. Its wrapper throws, before or after calling `run`, on
+ * every entry once `arm()` has been called (or once the source's first pull has started, with
+ * `armOnPull`): only the core's later entries fail.
+ */
+const throwingSubscriptionServer = (when: "before" | "after", armOnPull = false) => {
+  const probe = { pulls: 0, returns: 0, armed: false };
+  const schema = makeSchema(
+    `
+      type Query { hello: String }
+      type Subscription { held: Int }
+    `,
+    { Subscription: { held: (payload: number) => payload } },
+  );
+  Object.assign(schema.getSubscriptionType()?.getFields()["held"] ?? {}, {
+    subscribe: (_root: unknown, _args: unknown, _ctx: unknown, info: GraphQLResolveInfo) => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          probe.pulls += 1;
+          probe.armed ||= armOnPull;
+          return new Promise<never>((_resolve, reject) => {
+            info.getAbortSignal()?.addEventListener(
+              "abort",
+              () => {
+                reject(new Error("pull aborted"));
+              },
+              { once: true },
+            );
+          });
+        },
+        return: () => {
+          probe.returns += 1;
+          return Promise.resolve({ done: true, value: undefined });
+        },
+      }),
+    }),
+  });
+  const error = vi.fn();
+  const server = createServer({
+    schema,
+    logger: { warn: () => {}, error },
+    plugins: [
+      {
+        wrapExecution: (_request, run) => {
+          if (probe.armed && when === "before") {
+            throw new Error("wrapper failed");
+          }
+          const result = run();
+          if (probe.armed && when === "after") {
+            throw new Error("wrapper failed");
+          }
+          return result;
+        },
+      },
+    ],
+  });
+  const arm = (): void => {
+    probe.armed = true;
+  };
+  return { server, probe, error, arm };
+};
+
 describe("a wrapper that throws on the core's own entries", () => {
   it("still aborts the core signal and closes an unsent result (a 406)", async () => {
     const request = post(
@@ -1020,6 +1083,24 @@ describe("a wrapper that throws on the core's own entries", () => {
     await flush();
     await flush();
     expect(unhandled).toEqual([]);
+  });
+
+  it("still closes a subscription's source when a wrapper throws before its close runs", async () => {
+    const { server, probe, error, arm } = throwingSubscriptionServer("before");
+    const response = await server.handle(
+      post({ query: "subscription { held }" }, { accept: "text/event-stream" }),
+    );
+    const reader = (response.body ?? new ReadableStream()).getReader();
+    const pending = reader.read().catch(() => undefined);
+    await waitFor(() => probe.pulls === 1, "the source's first pull");
+    arm();
+    await reader.cancel();
+    await pending;
+    await waitFor(() => probe.returns === 1, "the source's return() call");
+    expect(error).toHaveBeenCalledWith(
+      "gratos-server: a wrapExecution wrapper failed on a close.",
+      expect.any(Error),
+    );
   });
 });
 
