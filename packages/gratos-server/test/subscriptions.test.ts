@@ -63,6 +63,7 @@ const fixture = ({ referenced = false }: { readonly referenced?: boolean } = {})
         failing(kind: String!): Int
         refused: Int
         slowSetup: Int
+        selfCleaningSetup: Int
         fresh: Int
       }
     `,
@@ -177,6 +178,36 @@ const fixture = ({ referenced = false }: { readonly referenced?: boolean } = {})
           },
         }),
       };
+    },
+    resolve: (payload: number) => payload,
+  });
+  // The same slow setup, written the way docs/plan.html M4b asks of a source on graphql 17.1: it
+  // watches info.getAbortSignal() and closes what it set up when the client has left meanwhile.
+  Object.assign(field("selfCleaningSetup"), {
+    subscribe: async (
+      _source: unknown,
+      _args: unknown,
+      _context: unknown,
+      info: GraphQLResolveInfo,
+    ) => {
+      setupStarted.resolve();
+      await setup.promise;
+      const iterable = {
+        [Symbol.asyncIterator]: () => ({
+          next: () => {
+            setupPulls += 1;
+            return Promise.resolve({ done: false, value: 1 });
+          },
+          return: () => {
+            setupReturns += 1;
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        }),
+      };
+      if (info.getAbortSignal()?.aborted === true) {
+        await iterable[Symbol.asyncIterator]().return();
+      }
+      return iterable;
     },
     resolve: (payload: number) => payload,
   });
@@ -538,9 +569,21 @@ describe("a standalone handle(Request): cancelling the body", () => {
     expect(reported).toEqual([]);
   });
 
-  it.each(schemas)(
-    "a client that leaves while the source is set up gets a 499, unreported; the late source is closed, never pulled (%s)",
-    async (_name, referenced) => {
+  // graphql 17.1 drops a source whose setup (a Promise from the source resolver) finishes after
+  // the client left, without calling its return(): the core never receives it. A source that
+  // must release what it set up watches info.getAbortSignal() (selfCleaningSetup). An upstream
+  // graphql-js fix is a follow-up; the core does not patch graphql.
+  it.each(
+    schemas.flatMap(
+      ([name, referenced]) =>
+        [
+          [`${name}, a source that ignores the signal`, referenced, "slowSetup", 0],
+          [`${name}, a source that watches the signal`, referenced, "selfCleaningSetup", 1],
+        ] as const,
+    ),
+  )(
+    "a client that leaves while the source is set up gets a 499, unreported, never pulled (%s)",
+    async (_name, referenced, field, returns) => {
       const { schema, setup, setupStarted, setupPulls, setupReturns } = fixture({ referenced });
       const responses: Array<number> = [];
       const reported: Array<GraphQLError> = [];
@@ -560,7 +603,7 @@ describe("a standalone handle(Request): cancelling the body", () => {
       const client = new AbortController();
       const pending = server.handle(
         post(
-          { query: "subscription { slowSetup }" },
+          { query: `subscription { ${field} }` },
           { accept: "text/event-stream", signal: client.signal },
         ),
       );
@@ -572,10 +615,8 @@ describe("a standalone handle(Request): cancelling the body", () => {
       expect(responses).toEqual([CLIENT_CLOSED_REQUEST]);
       // graphql's subscribe() answered with an AbortError at the field, which is not reported.
       expect(reported).toEqual([]);
-      // graphql 17.1 drops a source that resolves after the abort; the core closes it, once.
-      await eventually(() => setupReturns() > 0);
       await flush();
-      expect(setupReturns()).toBe(1);
+      expect(setupReturns()).toBe(returns);
       expect(setupPulls()).toBe(0);
     },
   );

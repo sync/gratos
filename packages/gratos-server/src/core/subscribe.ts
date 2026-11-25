@@ -11,9 +11,12 @@
 // idle source) is never released, and a body cancel waits on it forever. Here the source is asked
 // once, and the iterator it gives is the one read and closed.
 //
-// A source resolver that settles after the request signal aborted is dropped by graphql 17.1
-// (cancellablePromise rejects at the abort and ignores the late value). The workspace patches
-// graphql (patches/graphql@17.1.0.patch) so that such a source is closed, once.
+// Known graphql 17.1 limitation: a source resolver that settles after the request signal aborted
+// is dropped (cancellablePromise rejects at the abort and ignores the late value), so its
+// iterator never gets `return()` and the core never sees it. The client still gets a quiet 499.
+// A source whose setup acquires something must release it itself: watch info.getAbortSignal()
+// and close what it set up if the signal has aborted by then (test/subscriptions.test.ts,
+// selfCleaningSetup). graphql is not patched; an upstream fix is a follow-up.
 import {
   createSourceEventStream,
   executeSubscriptionEvent,
