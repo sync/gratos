@@ -83,8 +83,7 @@ describe("a program from a real tsconfig", () => {
 
   it("blanks third-party code but loads lib files in full", () => {
     expect(session.blankThirdParty).toBe(true);
-    // The store directory of graphql, patched by the workspace (graphql@17.1.0_patch_hash=…) or not.
-    expect([...session.blanked].some((fileName) => /\/graphql@17\.1\.0[/_]/.test(fileName))).toBe(
+    expect([...session.blanked].some((fileName) => fileName.includes("/graphql@17.1.0/"))).toBe(
       true,
     );
     expect(libFiles.length).toBeGreaterThan(0);

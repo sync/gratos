@@ -71,9 +71,6 @@ minimumReleaseAgeExclude:
   - oxlint@1.95.0
   - tsrs@7.1.0-beta.tsrs5
 
-patchedDependencies:
-  graphql@17.1.0: patches/graphql@17.1.0.patch
-
 permissions:
   '@cloudflare/oxlint-config':
     skills: false
