@@ -572,6 +572,90 @@ describe("a standalone handle(Request): cancelling the body", () => {
     await eventually(() => cleanups.includes("forever"));
   });
 
+  it("a client that leaves while a result hook runs: the event is not serialized and nothing is logged", async () => {
+    const { schema, cleanups } = fixture();
+    const client = new AbortController();
+    const logged: Array<unknown> = [];
+    let serialized = 0;
+    let events = 0;
+    const server = createServer({
+      schema,
+      logger: { warn: () => undefined, error: (message) => logged.push(message) },
+      plugins: [
+        {
+          // On the second event the client leaves, and the hook hands back a payload that
+          // cannot be serialized (it counts each attempt).
+          onResult: (payload) => {
+            events += 1;
+            if (events !== 2) {
+              return undefined;
+            }
+            client.abort();
+            const probe = {
+              toJSON: () => {
+                serialized += 1;
+                throw new Error("serialized after the client left");
+              },
+            };
+            return { ...payload, extensions: { probe } };
+          },
+        },
+      ],
+    });
+    const response = await server.handle(
+      post(
+        { query: "subscription { forever }" },
+        { accept: "text/event-stream", signal: client.signal },
+      ),
+    );
+    expect(readSse(await response.text()).names).toEqual(["next"]);
+    await eventually(() => cleanups.includes("forever"));
+    await flush();
+    expect(serialized).toBe(0);
+    expect(logged).toEqual([]);
+  });
+
+  it("a client that leaves while an event is serialized: the event is not sent and nothing fails", async () => {
+    const { schema, cleanups } = fixture();
+    const client = new AbortController();
+    const logged: Array<unknown> = [];
+    let events = 0;
+    const server = createServer({
+      schema,
+      logger: { warn: () => undefined, error: (message) => logged.push(message) },
+      plugins: [
+        {
+          // The second event's extensions make the client leave while they are serialized.
+          onResult: (payload) => {
+            events += 1;
+            if (events !== 2) {
+              return undefined;
+            }
+            const probe = {
+              toJSON: () => {
+                client.abort();
+                return "left";
+              },
+            };
+            return { ...payload, extensions: { probe } };
+          },
+        },
+      ],
+    });
+    const response = await server.handle(
+      post(
+        { query: "subscription { forever }" },
+        { accept: "text/event-stream", signal: client.signal },
+      ),
+    );
+    const text = await response.text();
+    expect(text).not.toContain("left");
+    expect(readSse(text).names).toEqual(["next"]);
+    await eventually(() => cleanups.includes("forever"));
+    await flush();
+    expect(logged).toEqual([]);
+  });
+
   it("a Request signal that aborts without a body cancel still stops the source", async () => {
     const { schema, cleanups, idleStarted } = fixture();
     const server = createServer({ schema });

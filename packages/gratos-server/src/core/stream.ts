@@ -174,14 +174,28 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
             return undefined;
           }
         };
-        /** Sends one payload, and ends the stream after the last one. */
+        /**
+         * Sends one payload, and ends the stream after the last one. Once the body has ended (the
+         * client left while a result hook ran, say), the payload is not serialized, and a failure
+         * to serialize it concerns no one.
+         */
         const sendPayload = async (payload: StreamPayload): Promise<void> => {
+          if (finished) {
+            return;
+          }
           let framed: string;
           try {
             framed = framing.frame(payload);
           } catch (error) {
+            if (finished) {
+              return;
+            }
             // JSON.stringify throws on a bigint or a cycle (in extensions a hook added, say).
             await fail("gratos-server: a streamed payload could not be serialized.", error);
+            return;
+          }
+          // Serializing runs user code (toJSON), which may have ended the body too.
+          if (finished) {
             return;
           }
           if (rest === undefined || !payload.hasNext) {
