@@ -1,0 +1,37 @@
+{
+  "runner": {
+    "platform": "darwin-arm64",
+    "cpu": "Apple M1 Max",
+    "cores": 10,
+    "memoryGb": 32,
+    "node": "v26.13.0"
+  },
+  "events": 20000,
+  "runs": 5,
+  "burst": {
+    "effect": {
+      "eventsPerSecond": 74606,
+      "microsPerEvent": 13.4,
+      "runs": [71748, 72590, 81656, 82150, 74606]
+    },
+    "plain": {
+      "eventsPerSecond": 50350,
+      "microsPerEvent": 19.9,
+      "runs": [51468, 51514, 47421, 44187, 50350]
+    },
+    "effectVersusPlain": 1.48
+  },
+  "paced": {
+    "effect": {
+      "eventsPerSecond": 28867,
+      "microsPerEvent": 34.6,
+      "runs": [28515, 29004, 29772, 28551, 28867]
+    },
+    "plain": {
+      "eventsPerSecond": 34677,
+      "microsPerEvent": 28.8,
+      "runs": [34914, 33948, 33567, 34713, 34677]
+    },
+    "effectVersusPlain": 0.83
+  }
+}

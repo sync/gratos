@@ -9,7 +9,9 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "codegen": "gratos --tsconfig src/tsconfig.json",
-    "codegen:check": "gratos --check --tsconfig src/tsconfig.json"
+    "codegen:check": "gratos --check --tsconfig src/tsconfig.json",
+    "bench:compiler": "node ../../packages/gratos/bench/run.ts --project src/tsconfig.json --baseline ../../bench/orders.json",
+    "bench:subscriptions": "node bench/subscriptions.ts"
   },
   "dependencies": {
     "@dblechoc/gratos": "workspace:*",
