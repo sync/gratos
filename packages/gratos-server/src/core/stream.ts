@@ -50,22 +50,33 @@ const encoder = new TextEncoder();
 /** How a stream type frames its payloads. */
 interface Framing {
   readonly contentType: string;
+  /** What comes before the first payload (or before `end`, when there is none). */
+  readonly start: string;
+  /** One payload, ready for the client to read as soon as it arrives. */
   readonly frame: (payload: StreamPayload) => string;
   /** What ends the stream, after the last payload. */
   readonly end: string;
 }
 
-/** The multipart part of one payload; Apollo Server's framing (each part ends with a delimiter). */
-const MULTIPART_PART = "\r\n---\r\ncontent-type: application/json; charset=utf-8\r\n\r\n";
-
+/**
+ * multipart/mixed with boundary "-". Every chunk ends with a delimiter (`\r\n---`): a client
+ * that splits on the delimiter (Apollo Client) reads a part only once the delimiter after it has
+ * arrived, so a part must never wait for the next one. A part therefore starts with the CRLF that
+ * ends its delimiter line, and the stream ends with `--` (the close delimiter). On the wire this
+ * is byte for byte Apollo Server's framing; only the chunk edges differ, so a stream that ends
+ * without a `hasNext: false` part still closes cleanly instead of sending an empty part.
+ */
 const multipartFraming: Framing = {
   contentType: `${MULTIPART_MIXED}; boundary="-"; deferSpec=${DEFER_SPEC}`,
-  frame: ({ result, hasNext }) => `${MULTIPART_PART}${JSON.stringify({ ...result, hasNext })}`,
-  end: "\r\n-----\r\n",
+  start: "\r\n---",
+  frame: ({ result, hasNext }) =>
+    `\r\ncontent-type: application/json; charset=utf-8\r\n\r\n${JSON.stringify({ ...result, hasNext })}\r\n---`,
+  end: "--\r\n",
 };
 
 const sseFraming: Framing = {
   contentType: `${TEXT_EVENT_STREAM}; charset=utf-8`,
+  start: "",
   frame: ({ result }) => `event: next\ndata: ${JSON.stringify(result)}\n\n`,
   end: "event: complete\ndata:\n\n",
 };
@@ -75,7 +86,15 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
   const { signal } = controller;
   /** Set once the stream has ended or was cancelled: nothing more may touch its controller. */
   let finished = false;
+  /** Whether `framing.start` has been sent. */
+  let started = false;
   let pendingFirst = first;
+  /** The bytes of one chunk, preceded by `framing.start` in the first one. */
+  const chunk = (text: string): Uint8Array => {
+    const prefix = started ? "" : framing.start;
+    started = true;
+    return encoder.encode(prefix + text);
+  };
   /** Removes the abort listener once the stream has ended. */
   const listening = new AbortController();
   let closing: Promise<void> | undefined;
@@ -118,7 +137,7 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
         /** Sends the last chunk and ends the stream normally. */
         const end = async (text: string): Promise<void> => {
           finished = true;
-          stream.enqueue(encoder.encode(text));
+          stream.enqueue(chunk(text));
           stream.close();
           await release();
         };
@@ -135,7 +154,7 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           if (rest === undefined || !payload.hasNext) {
             await end(framed + framing.end);
           } else {
-            stream.enqueue(encoder.encode(framed));
+            stream.enqueue(chunk(framed));
           }
         };
 

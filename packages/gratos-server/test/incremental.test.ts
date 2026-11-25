@@ -22,7 +22,7 @@ import {
 import type { ExecuteInput, Plugin } from "../src/index.ts";
 import { flush, gate, gql, post } from "./support/http.ts";
 import { makeSchema } from "./support/schema.ts";
-import { readMultipart, readUntil, wireErrors } from "./support/stream.ts";
+import { readApolloMultipart, readMultipart, readUntil, wireErrors } from "./support/stream.ts";
 
 const MULTIPART = 'multipart/mixed; boundary="-"; deferSpec=20220824';
 const APOLLO_ACCEPT =
@@ -185,6 +185,38 @@ describe("multipart/mixed; deferSpec=20220824", () => {
       { incremental: [{ items: [2], path: ["list", 1] }], hasNext: true },
       { incremental: [{ items: [3], path: ["list", 2] }], hasNext: false },
     ]);
+  });
+
+  it("Apollo Client reads the initial result while the deferred work is still blocked", async () => {
+    const { schema, hold } = fixture();
+    const server = createServer({ schema, plugins: [incremental()] });
+    const response = await server.handle(
+      post({ query: "{ hello ... @defer { slow } }" }, { accept: APOLLO_ACCEPT }),
+    );
+    const reader = response.body?.getReader();
+    if (reader === undefined) {
+      throw new Error("no body");
+    }
+    const decoder = new TextDecoder();
+    // The first chunk alone, while the deferred resolver is held: nothing more can arrive yet.
+    const first = await reader.read();
+    const head = decoder.decode(first.value, { stream: true });
+    expect(readApolloMultipart(head)).toEqual({
+      parts: [{ data: { hello: "world" }, hasNext: true }],
+      closed: false,
+    });
+    hold.resolve();
+    let text = head;
+    for (let read = await reader.read(); read.done !== true; read = await reader.read()) {
+      text += decoder.decode(read.value, { stream: true });
+    }
+    expect(readApolloMultipart(text)).toEqual({
+      parts: [
+        { data: { hello: "world" }, hasNext: true },
+        { incremental: [{ data: { slow: "slow" }, path: [] }], hasNext: false },
+      ],
+      closed: true,
+    });
   });
 
   it("an operation that defers nothing at run time (if: false) is one JSON result", async () => {

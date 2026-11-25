@@ -69,13 +69,47 @@ export const readSse = (text: string) => {
   };
 };
 
-/** The JSON payloads of a multipart/mixed body with boundary "-". */
-export const readMultipart = (text: string): Array<WirePayload> =>
-  text
-    .split("\r\n---")
-    .map((part) => part.slice(part.indexOf("\r\n\r\n") + 4))
-    .filter((part) => part.startsWith("{"))
-    .map((part) => parsePayload(part.trim()));
+/** The multipart/mixed delimiter for boundary "-", as Apollo Client searches for it. */
+const DELIMITER = "\r\n---";
+
+/** What Apollo Client has read of a multipart/mixed body. */
+export interface ApolloMultipart {
+  readonly parts: Array<WirePayload>;
+  readonly closed: boolean;
+}
+
+/**
+ * Reads a multipart/mixed body (boundary "-") the way Apollo Client 4.1 does
+ * (`consumeMultipartBody` in link/http/parseAndCheckHttpResponse.js): a part is delivered only
+ * once the delimiter after it has arrived, and the body ends at the close delimiter (`--` right
+ * after a delimiter). `parts` are the payloads a client holding `text` so far has delivered;
+ * `closed` says whether it saw the close delimiter.
+ */
+export const readApolloMultipart = (text: string): ApolloMultipart => {
+  const parts: Array<WirePayload> = [];
+  let buffer = text;
+  let encountered = false;
+  const passedFinal = () => encountered && buffer.startsWith("--");
+  let index = buffer.indexOf(DELIMITER);
+  while (index > -1 && !passedFinal()) {
+    encountered = true;
+    const message = buffer.slice(0, index);
+    buffer = buffer.slice(index + DELIMITER.length);
+    const headersEnd = message.indexOf("\r\n\r\n");
+    const body = message.slice(headersEnd);
+    if (body !== "") {
+      if (!message.slice(0, headersEnd).toLowerCase().includes("content-type: application/json")) {
+        throw new Error(`A part without a JSON content type: ${JSON.stringify(message)}`);
+      }
+      parts.push(parsePayload(body.trim()));
+    }
+    index = buffer.indexOf(DELIMITER);
+  }
+  return { parts, closed: passedFinal() };
+};
+
+/** The JSON payloads Apollo Client delivers from a multipart/mixed body (boundary "-"). */
+export const readMultipart = (text: string): Array<WirePayload> => readApolloMultipart(text).parts;
 
 /** Every error of a payload: its own, then those of each incremental entry. */
 export const wireErrors = (payload: WirePayload): ReadonlyArray<WireError> => [
