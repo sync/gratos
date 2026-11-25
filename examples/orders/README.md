@@ -205,3 +205,14 @@ with this handler the cache's default merge truncates a streamed list to its fir
 pinned 4.3.8 a streamed root list arrives whole with the cache too (`test/e2e.test.ts` records
 it), but `no-cache` stays the safe choice. Apollo's HTTP link has no SSE transport: subscribe
 over SSE with `fetch` (or an SSE client), as the end-to-end test does.
+
+## Benchmarks
+
+```sh
+pnpm bench:compiler        # files loaded, cold build and peak RSS of `gratos` on this app
+pnpm bench:subscriptions   # SSE throughput of orderChanged: the Effect Stream vs a plain source
+```
+
+Both print JSON and take `--record`, which writes `bench/orders.json` and
+`bench/subscriptions.json` at the repo root (with the machine they ran on). The dev loop's
+save-to-first-good-response times are printed by `test/dev.test.ts`.
