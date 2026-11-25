@@ -7,6 +7,7 @@ import type {
   GraphQLSchema,
   LegacyExperimentalIncrementalExecutionResults,
   OperationDefinitionNode,
+  ValidationRule,
 } from "graphql";
 
 /** A value or a Promise of it. */
@@ -28,7 +29,10 @@ export interface Params {
   readonly extensions?: JsonObject | undefined;
 }
 
-/** The incremental (`@defer`/`@stream`) results an executor can return (encoded from M4b). */
+/**
+ * The incremental (`@defer`/`@stream`) results an executor can return, in graphql 17's legacy
+ * format (`legacyExecuteIncrementally`), sent as multipart/mixed; deferSpec=20220824.
+ */
 export type IncrementalResults = LegacyExperimentalIncrementalExecutionResults;
 
 /** What an executor produces: one result, incremental results, or a subscription's events. */
@@ -107,6 +111,11 @@ export interface Plugin<Ctx = unknown> {
   readonly name?: string;
   /** Turns on `hideSuggestions` for validation and execution (`maskErrors()` sets it). */
   readonly hideSuggestions?: boolean;
+  /**
+   * Validation rules run with graphql's specified rules on every document the cache does not hold
+   * yet (`incremental()` rejects @defer and @stream on mutations). Read once, at startup.
+   */
+  readonly validationRules?: ReadonlyArray<ValidationRule>;
   /** Once, at startup. May replace the schema through `control.replaceSchema`. */
   readonly onServer?: (init: ServerInit) => PromiseOrValue<void>;
   /** First, at `handle()` entry. Returning a Response answers the request (onResponse still runs). */
@@ -149,8 +158,12 @@ export interface Plugin<Ctx = unknown> {
    */
   readonly onExecute?: (input: ExecuteInput, args: ExecutionArgs) => Executor | undefined | void;
   /**
-   * Every payload an executor produces: the initial result, a subsequent incremental payload, or
-   * a subscription event. Returns a replacement payload, or nothing. Synchronous.
+   * Every payload an executor produces: a single result, the initial result of an incremental
+   * response, a subsequent incremental payload, or a subscription event (including the error a
+   * failing source ends with). A subsequent payload keeps its errors in `incremental[].errors`:
+   * read and rewrite errors with `payloadErrors` and `mapPayloadErrors`. Returns a replacement
+   * payload, or nothing (`hasNext` stays the executor's). Synchronous. It never runs for a
+   * payload that comes after the client has left.
    */
   readonly onResult?: (
     payload: ExecutionResult,

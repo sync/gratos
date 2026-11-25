@@ -87,7 +87,7 @@ describe("415: unsupported Content-Type", () => {
 describe("406: unsupported Accept", () => {
   it.each([
     ["text/html"],
-    ["application/xml, text/*"],
+    ["application/xml, image/*"],
     ["application/json;q=0"],
     ["application/json; charset=utf-16"],
     ['application/graphql-response+json;charset="iso-8859-1", */*;charset=utf-16'],

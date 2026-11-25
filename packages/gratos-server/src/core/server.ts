@@ -1,13 +1,17 @@
 // The server core (docs/plan.html M4a): `createServer({ schema, context, plugins })` returns a
 // Web-standard `handle(Request): Promise<Response>` that runs five phases (read, document cache,
-// context, execute, encode) around the plugin hooks, plus `control` (replaceSchema, drain).
+// context, execute, encode) around the plugin hooks, plus `control` (replaceSchema, drain). The
+// encode phase sends a single result as JSON, incremental results as multipart/mixed and
+// subscription events as GraphQL-over-SSE (M4b).
 import {
   AbortedGraphQLExecutionError,
   assertValidSchema,
   execute,
   getOperationAST,
   GraphQLError,
+  legacyExecuteIncrementally,
   parse,
+  specifiedRules,
   subscribe,
   validate,
 } from "graphql";
@@ -17,6 +21,7 @@ import type {
   ExecutionResult,
   GraphQLSchema,
   OperationDefinitionNode,
+  ValidationRule,
 } from "graphql";
 
 import { DocumentCache, operationEntry } from "./documents.ts";
@@ -28,13 +33,17 @@ import {
   GRAPHQL_RESPONSE_JSON,
   isJsonContentType,
   jsonResponse,
+  MULTIPART_MIXED,
   negotiate,
   readParams,
   statusOf,
+  TEXT_EVENT_STREAM,
 } from "./http.ts";
-import type { MediaType } from "./http.ts";
+import type { Accepted, MediaType } from "./http.ts";
 import { registerMutation, registerRequest } from "./requestState.ts";
 import type { MutationTracker } from "./requestState.ts";
+import { multipartResponse, sseResponse } from "./stream.ts";
+import type { PayloadSource, StreamOptions, StreamPayload } from "./stream.ts";
 import type {
   BaseServerOptions,
   ContextFactory,
@@ -43,6 +52,7 @@ import type {
   ExecuteInput,
   Executor,
   ExecutorResult,
+  IncrementalResults,
   Logger,
   NextExecutor,
   Params,
@@ -68,8 +78,9 @@ const isPromiseLike = <T>(value: PromiseOrValue<T>): value is Promise<T> =>
 const settle = async <T>(value: PromiseOrValue<T>): Promise<T> =>
   isPromiseLike(value) ? await value : value;
 
-const isSingleResult = (result: ExecutorResult): result is ExecutionResult =>
-  !(Symbol.asyncIterator in result) && !("initialResult" in result);
+/** True when the schema declares @defer or @stream (incremental() adds them). */
+const hasIncrementalDirectives = (schema: GraphQLSchema): boolean =>
+  schema.getDirective("defer") !== undefined || schema.getDirective("stream") !== undefined;
 
 /** Closes a streamed result the JSON path cannot send. */
 const closeStreamed = async (result: ExecutorResult): Promise<void> => {
@@ -101,10 +112,58 @@ const unexpected = (originalError: unknown): GraphQLError =>
     extensions: { http: { status: 500 } },
   });
 
+/**
+ * The executor that runs when no plugin claims the operation. Subscriptions always go through
+ * graphql-js `subscribe()`. Queries and mutations go through `execute()`, or through
+ * `legacyExecuteIncrementally()` when the schema declares @defer or @stream: `execute()` throws
+ * on such a schema, even for an operation that uses neither.
+ */
 const defaultExecutor =
   (operation: OperationDefinitionNode, args: ExecutionArgs): NextExecutor =>
-  () =>
-    operation.operation === "subscription" ? subscribe(args) : execute(args);
+  () => {
+    if (operation.operation === "subscription") {
+      return subscribe(args);
+    }
+    return hasIncrementalDirectives(args.schema) ? legacyExecuteIncrementally(args) : execute(args);
+  };
+
+/** A rejected pull (a failed subscription source) as the GraphQL error the client gets. */
+const sourceFailure = (error: unknown): GraphQLError => {
+  if (error instanceof GraphQLError) {
+    return error;
+  }
+  return error instanceof Error
+    ? new GraphQLError(error.message, { originalError: error })
+    : unexpected(error);
+};
+
+/** A subscription's events as stream payloads. */
+const subscriptionSource = (
+  events: AsyncGenerator<ExecutionResult, void, void>,
+): PayloadSource => ({
+  next: async () => {
+    const pulled = await events.next();
+    return pulled.done === true
+      ? pulled
+      : { done: false, value: { result: pulled.value, hasNext: true } };
+  },
+  return: async () => {
+    await events.return();
+  },
+});
+
+/** The subsequent payloads of an incremental result as stream payloads. */
+const incrementalSource = (results: IncrementalResults["subsequentResults"]): PayloadSource => ({
+  next: async () => {
+    const pulled = await results.next();
+    return pulled.done === true
+      ? pulled
+      : { done: false, value: { result: pulled.value, hasNext: pulled.value.hasNext } };
+  },
+  return: async () => {
+    await results.return();
+  },
+});
 
 interface TrackedMutation {
   readonly name: string;
@@ -161,6 +220,10 @@ const serve = <Ctx>(
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
   const logger: Logger = options.logger ?? console;
   const hideSuggestions = plugins.some((plugin) => plugin.hideSuggestions === true);
+  // graphql's specified rules, plus every plugin's (incremental() rejects @defer on mutations).
+  const pluginRules = plugins.flatMap((plugin) => plugin.validationRules ?? []);
+  const validationRules: ReadonlyArray<ValidationRule> | undefined =
+    pluginRules.length === 0 ? undefined : [...specifiedRules, ...pluginRules];
 
   // Hook lists are built once: a hook that no plugin defines costs nothing per request.
   const onServer = hooksOf(plugins, "onServer");
@@ -258,7 +321,10 @@ const serve = <Ctx>(
     /** The schema generation this request pinned; it finishes on it whatever replaceSchema does. */
     schema: GraphQLSchema;
     generation: number;
+    /** The JSON type single results and request errors use. */
     mediaType: MediaType;
+    /** What the client accepts (the streamed types too). */
+    accepted: Accepted;
     ctx: Ctx | undefined;
     mutation: MutationTracker | undefined;
   }
@@ -296,18 +362,20 @@ const serve = <Ctx>(
     if (request.method !== "POST") {
       return answer(new Response(null, { status: 405, headers: { allow: "POST" } }));
     }
-    const mediaType = negotiate(request.headers.get("accept"));
-    if (mediaType === undefined) {
+    const accepted = negotiate(request.headers.get("accept"));
+    if (accepted === undefined) {
       run.mediaType = APPLICATION_JSON;
       return answer(
         requestError(
           run,
-          `Accept must allow ${GRAPHQL_RESPONSE_JSON} or ${APPLICATION_JSON}.`,
+          `Accept must allow ${GRAPHQL_RESPONSE_JSON}, ${APPLICATION_JSON}, ${MULTIPART_MIXED} or ${TEXT_EVENT_STREAM}.`,
           406,
         ),
       );
     }
-    run.mediaType = mediaType;
+    run.accepted = accepted;
+    // A client that accepts only streamed types still gets request errors as JSON (the default).
+    run.mediaType = accepted.json ?? GRAPHQL_RESPONSE_JSON;
     if (!isJsonContentType(request.headers.get("content-type"))) {
       return answer(requestError(run, `Content-Type must be ${APPLICATION_JSON}.`, 415));
     }
@@ -352,7 +420,7 @@ const serve = <Ctx>(
     }
     const validateStart = performance.now();
     reportPhase(run.request, "parse", parseStart, validateStart);
-    const errors = validate(run.schema, document, undefined, { hideSuggestions });
+    const errors = validate(run.schema, document, validationRules, { hideSuggestions });
     reportPhase(run.request, "validate", validateStart, performance.now());
     if (errors.length > 0) {
       return answer(respond(run, errorResult(errors)));
@@ -460,11 +528,35 @@ const serve = <Ctx>(
     }
   };
 
+  /** The result hooks (onResult), in list order, on one payload. */
+  const processPayload = (run: Run, ctx: Ctx, payload: ExecutionResult): ExecutionResult => {
+    let processed = payload;
+    for (const hook of onResult) {
+      processed = hook(processed, ctx, run.request) ?? processed;
+    }
+    return processed;
+  };
+
+  const streamOptions = (
+    run: Run,
+    ctx: Ctx,
+    first: StreamPayload | undefined,
+    rest: PayloadSource | undefined,
+  ): StreamOptions => ({
+    first,
+    rest,
+    process: (payload) => processPayload(run, ctx, payload),
+    failure: sourceFailure,
+    controller: run.controller,
+    logger,
+  });
+
   /** execute (await the executor) and encode: the result hooks, then the Response. */
   const encode = async (
     run: Run,
     outcome: Outcome,
     ctx: Ctx,
+    operation: OperationDefinitionNode,
     mutationStarted: boolean,
   ): Promise<Response> => {
     let result: ExecutorResult | undefined;
@@ -493,19 +585,56 @@ const serve = <Ctx>(
       }
       result = errorResult([unexpected(error)]);
     }
-    if (!isSingleResult(result)) {
-      await closeStreamed(result);
-      return requestError(
-        run,
-        "This operation streams its result, which needs a streaming Accept type.",
-        406,
+    const streamed = Symbol.asyncIterator in result || "initialResult" in result;
+    if ((streamed || operation.operation === "subscription") && run.controller.signal.aborted) {
+      // The client left before the stream started: a cancellation, with nothing reported or
+      // sent. A subscription source that was still being set up comes back from subscribe() as
+      // an errors-only result (graphql's AbortError at the field); a stream that already exists
+      // is closed (the signal is aborted, so `return()` cannot wait on a pull).
+      if (streamed) {
+        await closeStreamed(result);
+      }
+      return new Response(null, { status: CLIENT_CLOSED_REQUEST });
+    }
+    if (Symbol.asyncIterator in result) {
+      // A subscription (process() refused one whose client does not accept text/event-stream).
+      if (!run.accepted.eventStream) {
+        await closeStreamed(result);
+        return requestError(run, `A subscription needs Accept: ${TEXT_EVENT_STREAM}.`, 406);
+      }
+      return sseResponse(streamOptions(run, ctx, undefined, subscriptionSource(result)));
+    }
+    if ("initialResult" in result) {
+      if (!run.accepted.multipart) {
+        await closeStreamed(result);
+        return requestError(
+          run,
+          `This operation uses @defer or @stream, which needs Accept: ${MULTIPART_MIXED}.`,
+          406,
+        );
+      }
+      const { initialResult, subsequentResults } = result;
+      let first: StreamPayload;
+      try {
+        first = { result: processPayload(run, ctx, initialResult), hasNext: true };
+      } catch (error) {
+        // A failing result hook: stop the deferred work before the request fails.
+        run.controller.abort();
+        await closeStreamed(result);
+        throw error;
+      }
+      return multipartResponse(
+        streamOptions(run, ctx, first, incrementalSource(subsequentResults)),
       );
     }
-    let payload = result;
-    for (const hook of onResult) {
-      payload = hook(payload, ctx, run.request) ?? payload;
+    const payload = processPayload(run, ctx, result);
+    // A single result is JSON, unless the client accepts no JSON type or the operation is a
+    // subscription (whose client reads a stream even when subscribe() answers at once).
+    if (run.accepted.json !== undefined && operation.operation !== "subscription") {
+      return respond(run, payload);
     }
-    return respond(run, payload);
+    const single = streamOptions(run, ctx, { result: payload, hasNext: false }, undefined);
+    return run.accepted.eventStream ? sseResponse(single) : multipartResponse(single);
   };
 
   const process = async (run: Run): Promise<Response> => {
@@ -537,6 +666,10 @@ const serve = <Ctx>(
           ? "Must provide an operation name when the document contains several operations."
           : `Unknown operation named "${params.operationName}".`;
       return respond(run, errorResult([new GraphQLError(message)]));
+    }
+    if (operation.operation === "subscription" && !run.accepted.eventStream) {
+      // Refused before the source starts: its events can only go out as GraphQL-over-SSE.
+      return requestError(run, `A subscription needs Accept: ${TEXT_EVENT_STREAM}.`, 406);
     }
     const isMutation = operation.operation === "mutation";
     if (isMutation) {
@@ -585,7 +718,7 @@ const serve = <Ctx>(
       return dispatched.response;
     }
     try {
-      return await encode(run, dispatched.outcome, ctx, dispatched.mutationStarted);
+      return await encode(run, dispatched.outcome, ctx, operation, dispatched.mutationStarted);
     } finally {
       // A mutation's completion (mutationOf(req).settled, the drain) is published only once the
       // result hooks have seen its result, never on body consumption.
@@ -615,6 +748,7 @@ const serve = <Ctx>(
       schema,
       generation,
       mediaType: GRAPHQL_RESPONSE_JSON,
+      accepted: { json: GRAPHQL_RESPONSE_JSON, multipart: false, eventStream: false },
       ctx: undefined,
       mutation: undefined,
     };
