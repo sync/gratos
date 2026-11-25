@@ -1,5 +1,7 @@
 // @dblechoc/gratos-server/effect: the Effect layer (docs/plan.html M5). It is the only entry that
-// imports `effect`; the core (`@dblechoc/gratos-server`) never does.
+// imports `effect`; the core (`@dblechoc/gratos-server`) never does. It also needs
+// `AsyncLocalStorage` (`node:async_hooks`: Node, Bun, Deno, Workers with nodejs_compat), which
+// carries each request's scope into its resolvers through the core's `wrapExecution` hook.
 export { effectSchema, wrapSubscribe } from "./schema.ts";
 export type { EffectSchemaOptions } from "./schema.ts";
 export { fromCause, GuardTimeout, isGuardTimeout, ResolverDefect } from "./errors.ts";
