@@ -66,6 +66,12 @@ export interface RequestScope {
   readonly streams: Set<Promise<void>>;
   /** Interrupt fibers on a client abort (false for a mutation: its fibers always finish). */
   readonly interruptOnAbort: boolean;
+  /**
+   * The core signal (`signalOf(req)`). A fiber whose execution has a signal of its own (one a
+   * claim's `next()` runs, which the core aborts once a wrapper left it running) is interrupted
+   * when that signal aborts too.
+   */
+  readonly signal: AbortSignal | undefined;
   /** Set once the client has left: a fiber forked later is interrupted at once. */
   aborted: boolean;
   /**

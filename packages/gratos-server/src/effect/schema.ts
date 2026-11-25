@@ -57,6 +57,7 @@ const unboundScopeOf = (type: OperationKind): RequestScope => ({
   fibers: new Set(),
   streams: new Set(),
   interruptOnAbort: false,
+  signal: undefined,
   aborted: false,
   spanEnded: () => {},
 });
@@ -90,8 +91,25 @@ const isSemanticNonNull = (field: GraphQLField<unknown, unknown>): boolean => {
   return Predicate.hasProperty(gratos, "semanticNonNull") && gratos.semanticNonNull === true;
 };
 
-/** Starts tracking a running fiber in its request scope; it removes itself when it completes. */
-const track = (scope: RequestScope, fiber: Fiber.Fiber<unknown, unknown>): void => {
+/**
+ * The abort signal of the execution a resolver runs in. graphql-jit's info has no
+ * `getAbortSignal` (its executions take no signal).
+ */
+const signalOfExecution = (info: GraphQLResolveInfo): AbortSignal | undefined => {
+  const execution: { readonly getAbortSignal?: () => AbortSignal | undefined } = info;
+  return execution.getAbortSignal?.();
+};
+
+/**
+ * Starts tracking a running fiber in its request scope; it removes itself when it completes.
+ * `signal` is its execution's (`info.getAbortSignal()`): one that is not the core signal (a
+ * claim's `next()`) interrupts the fiber when it aborts, as the core signal does.
+ */
+const track = (
+  scope: RequestScope,
+  fiber: Fiber.Fiber<unknown, unknown>,
+  signal: AbortSignal | undefined,
+): void => {
   if (isUnbound(scope)) {
     return;
   }
@@ -99,9 +117,20 @@ const track = (scope: RequestScope, fiber: Fiber.Fiber<unknown, unknown>): void 
   fiber.addObserver(() => {
     scope.fibers.delete(fiber);
   });
-  // Tracked still: an interrupted fiber runs its finalizers before it exits.
-  if (scope.aborted && scope.interruptOnAbort) {
+  if (!scope.interruptOnAbort) {
+    return;
+  }
+  const interrupt = (): void => {
     fiber.interruptUnsafe(undefined, HttpServerError.ClientAbort.annotation);
+  };
+  // Tracked still: an interrupted fiber runs its finalizers before it exits.
+  if (scope.aborted || signal?.aborted === true) {
+    interrupt();
+  } else if (signal !== undefined && signal !== scope.signal) {
+    signal.addEventListener("abort", interrupt, { once: true });
+    fiber.addObserver(() => {
+      signal.removeEventListener("abort", interrupt);
+    });
   }
 };
 
@@ -152,7 +181,7 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
       spanEnded();
       return settleExit(exit);
     }
-    track(scope, fiber);
+    track(scope, fiber, signalOfExecution(info));
     return new Promise<unknown>((resolve, reject) => {
       fiber.addObserver((done) => {
         spanEnded();

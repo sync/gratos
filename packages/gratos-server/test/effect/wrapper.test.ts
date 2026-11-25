@@ -26,6 +26,7 @@ import {
   gqlError,
   maskErrors,
   reportErrors,
+  signalOf,
   withIncrementalDirectives,
 } from "../../src/index.ts";
 import type { Plugin, Server } from "../../src/index.ts";
@@ -41,7 +42,7 @@ import {
 } from "../../src/effect/index.ts";
 import { internals } from "../../src/effect/schema.ts";
 import { currentScope, scopeOfRequest } from "../../src/effect/state.ts";
-import { flush, gate, gql, post, send } from "../support/http.ts";
+import { flush, gate, gql, post, send, waitFor } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
 import { readSse } from "../support/stream.ts";
 import { executors, expectChildOf, recordingTracer, until } from "./support.ts";
@@ -1260,5 +1261,67 @@ describe("the guard without a server", () => {
 
   it("reads the OperationType reference the effect() plugin writes", () => {
     expect(Context.get(Context.empty(), OperationType)).toBe("query");
+  });
+});
+
+describe("an execution a wrapper left running", () => {
+  it("interrupts the fibers of a claim's next() once the wrapper around it fails, not the fallback's", async () => {
+    let interrupted = 0;
+    let entries = 0;
+    const started = gate();
+    const request = post({ query: "{ slow }" });
+    const server = createServer({
+      schema: effectSchema(
+        makeSchema("type Query { slow: String }", {
+          Query: {
+            slow: () =>
+              Effect.sync(() => {
+                started.resolve();
+              }).pipe(
+                Effect.andThen(Effect.never),
+                Effect.onInterrupt(() =>
+                  Effect.sync(() => {
+                    interrupted += 1;
+                  }),
+                ),
+              ),
+          },
+        }),
+        { failure, isFailure: isAppError },
+      ),
+      logger: { warn: () => {}, error: () => {} },
+      plugins: [
+        {
+          // Catches the nested entry's error and answers with a fallback.
+          onExecute: () => async (next) => {
+            try {
+              return await next();
+            } catch {
+              return { data: { slow: "fallback" } };
+            }
+          },
+        },
+        effect(),
+        {
+          // The second entry is the one around the claim's next(): it runs the default
+          // executor (whose resolver forks the fiber), then fails.
+          wrapExecution: (_request, run) => {
+            entries += 1;
+            const entry = entries;
+            const result = run();
+            if (entry === 2) {
+              throw new Error("wrapper failed");
+            }
+            return result;
+          },
+        },
+      ],
+    });
+    const sent = await send(server, request);
+    expect(sent.body).toEqual({ data: { slow: "fallback" } });
+    await started.promise;
+    await waitFor(() => interrupted === 1, "the abandoned fiber's interruption");
+    // The core signal (the fallback's) is still live.
+    expect(signalOf(request)?.aborted).toBe(false);
   });
 });

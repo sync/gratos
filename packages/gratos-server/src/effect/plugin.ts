@@ -396,6 +396,7 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
       fibers: new Set(),
       streams: new Set(),
       interruptOnAbort: type !== "mutation",
+      signal: signalOf(request),
       aborted: false,
       spanEnded: (endTime) => {
         childEnded(state, endTime);
