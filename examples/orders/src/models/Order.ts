@@ -1,63 +1,94 @@
+import type { Float, ID, Int } from "@dblechoc/gratos";
 import { Effect, Stream } from "effect";
 
 import { Api } from "../services/Api.ts";
 import type { OrderRow } from "../services/Api.ts";
 import { Bus } from "../services/Bus.ts";
 import type { AppError } from "../services/errors.ts";
-import type { Ctx } from "./context.ts";
+import type { Ctx, Services } from "./context.ts";
+import { User } from "./User.ts";
 
-/** @gqlType */
+/** An order a user placed. @gqlType */
 export class Order {
   /** @gqlField */
-  id: string;
+  id: ID;
+  /** @gqlField */
+  total: Float;
   /** @gqlField */
   status: string;
+  private readonly customerId: string;
 
   constructor(row: OrderRow) {
     this.id = row.id;
+    this.total = row.total;
     this.status = row.status;
+    this.customerId = row.customer_id;
+  }
+
+  /** Who placed it. @gqlField */
+  customer(ctx: Ctx): Effect.Effect<User, AppError, Services> {
+    const id = this.customerId;
+    return ctx.guard({
+      scopes: ["USER"],
+      effect: Effect.gen(function* () {
+        const api = yield* Api;
+        return new User(yield* api.user_get({ id }));
+      }),
+    });
   }
 }
 
-/** @gqlQueryField */
-export function order(id: string, ctx: Ctx): Effect.Effect<Order, AppError, Api> {
+/** One order, by id. @gqlQueryField */
+export function order(ctx: Ctx, id: ID): Effect.Effect<Order, AppError, Services> {
   return ctx.guard({
-    scopes: ["orders:read"],
+    scopes: ["USER"],
     effect: Effect.gen(function* () {
       const api = yield* Api;
-      return new Order(yield* api.order(id));
+      return new Order(yield* api.order_get({ id }));
     }),
   });
 }
 
-/** @gqlMutationField */
-export function cancelOrder(id: string, ctx: Ctx): Effect.Effect<Order, AppError, Api | Bus> {
+/** A user's orders, newest first. @gqlQueryField */
+export function orders(
+  ctx: Ctx,
+  userId: ID,
+  first?: Int | null,
+): Effect.Effect<Array<Order>, AppError, Services> {
   return ctx.guard({
-    scopes: ["orders:write"],
+    scopes: ["USER"],
     effect: Effect.gen(function* () {
       const api = yield* Api;
-      const row = yield* api.cancel(id);
-      const bus = yield* Bus;
-      yield* bus.publish(row);
-      return new Order(row);
+      const rows = yield* api.order_list({ userId, limit: first ?? 20 });
+      return rows.map((row) => new Order(row));
     }),
   });
 }
 
-/** Every change to the order, from the moment the subscription starts. */
-/** @gqlSubscriptionField */
-export function orderChanged(id: string, ctx: Ctx): Stream.Stream<Order, AppError, Api | Bus> {
+/** Cancels an open order. @gqlMutationField */
+export function cancelOrder(ctx: Ctx, id: ID): Effect.Effect<Order, AppError, Services> {
+  return ctx.guard({
+    scopes: ["USER"],
+    effect: Effect.gen(function* () {
+      const api = yield* Api;
+      // Runs to its end, even if the client leaves: a mutation is never interrupted.
+      return new Order(yield* api.order_cancel({ id }));
+    }),
+  });
+}
+
+/** Each change to one order, from the moment the subscription starts. @gqlSubscriptionField */
+export function orderChanged(ctx: Ctx, id: ID): Stream.Stream<Order, AppError, Services> {
   return ctx.guardStream({
-    scopes: ["orders:read"],
+    scopes: ["USER"],
+    // The setup Effect itself, not Stream.unwrap of it: the guard bounds only the setup (the
+    // order must exist), never the stream's lifetime. When the client leaves, the encoder calls
+    // return(), and the Stream's scope closes its bus subscription.
     stream: Effect.gen(function* () {
       const api = yield* Api;
-      yield* api.order(id);
+      yield* api.order_get({ id });
       const bus = yield* Bus;
-      const changes = yield* bus.subscribe;
-      return changes.pipe(
-        Stream.filter((row) => row.id === id),
-        Stream.map((row) => new Order(row)),
-      );
+      return bus.watch(`orders.${id}`).pipe(Stream.map((row) => new Order(row)));
     }),
   });
 }

@@ -8,7 +8,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { copyApp, devCommand, post, start, until } from "./support/app.ts";
+import { AUTHORIZATION, copyApp, devCommand, post, start, until } from "./support/app.ts";
 import type { AppCopy, Answer, Payload, Running } from "./support/app.ts";
 
 const BUDGET_MS = process.env["CI"] === undefined ? 2000 : 3000;
@@ -73,6 +73,10 @@ const LABEL_FIELD = `
 const addLabel = (source: string) =>
   source.replace("\n  constructor(row: OrderRow) {", LABEL_FIELD);
 
+/** The 1-based line of the first line of `source` that contains `text`. */
+const lineOf = (source: string, text: string): number =>
+  source.split("\n").findIndex((line) => line.includes(text)) + 1;
+
 const timings: Array<string> = [];
 
 describe("pnpm dev", () => {
@@ -122,7 +126,7 @@ describe("pnpm dev", () => {
               {
                 message: expect.stringContaining("Unable to resolve type reference."),
                 file: "src/models/Order.ts",
-                line: 14,
+                line: lineOf(app.read(MODEL), "  status: Map<string, number>;"),
                 column: 11,
               },
             ],
@@ -183,7 +187,7 @@ describe("pnpm dev", () => {
 
     // A syntax error in a service the models import.
     save(app, "src/services/Bus.ts", (source) =>
-      source.replace("PubSub.unbounded<OrderRow>();", "PubSub.unbounded<OrderRow>(;"),
+      source.replace("PubSub.unbounded<Event>();", "PubSub.unbounded<Event>(;"),
     );
     const syntax = await gratsError("Expression expected");
     expect(syntax.body).toEqual({
@@ -197,7 +201,7 @@ describe("pnpm dev", () => {
               {
                 message: "SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expression expected",
                 file: "src/services/Bus.ts",
-                line: 18,
+                line: lineOf(app.read("src/services/Bus.ts"), "PubSub.unbounded<Event>(;"),
               },
             ],
           },
@@ -205,7 +209,7 @@ describe("pnpm dev", () => {
       ],
     });
     // The terminal shows Node's report, with the source line.
-    expect(dev.output()).toContain("PubSub.unbounded<OrderRow>(;");
+    expect(dev.output()).toContain("PubSub.unbounded<Event>(;");
 
     // Every request answers it, on any path, not only /graphql.
     const other = await fetch(new URL("/health", dev.url));
@@ -222,7 +226,7 @@ describe("pnpm dev", () => {
 
     // A service only the app's wiring imports, which builds but throws when it is loaded.
     save(app, "src/services/Bus.ts", (source) =>
-      source.replace("PubSub.unbounded<OrderRow>(;", "PubSub.unbounded<OrderRow>();"),
+      source.replace("PubSub.unbounded<Event>(;", "PubSub.unbounded<Event>();"),
     );
     save(
       app,
@@ -273,7 +277,11 @@ describe("pnpm dev", () => {
     // An open subscription, which has received an event (the core answers with the first one).
     const subscription = fetch(dev.url, {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "text/event-stream" },
+      headers: {
+        "content-type": "application/json",
+        accept: "text/event-stream",
+        authorization: AUTHORIZATION,
+      },
       body: JSON.stringify({ query: 'subscription { orderChanged(id: "o-2") { status } }' }),
       signal: AbortSignal.timeout(BOOT_MS),
     });

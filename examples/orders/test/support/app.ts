@@ -139,6 +139,9 @@ export const start = async (
   };
 };
 
+/** The session every test request carries: the seed user u-1 (a guest is refused). */
+export const AUTHORIZATION = "Bearer u-1";
+
 /** A GraphQL-over-HTTP request body. */
 export interface Payload {
   readonly query?: string;
@@ -160,6 +163,7 @@ export const post = async (url: string, payload: Payload): Promise<Answer | unde
       headers: {
         "content-type": "application/json",
         accept: "application/graphql-response+json",
+        authorization: AUTHORIZATION,
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(2000),
