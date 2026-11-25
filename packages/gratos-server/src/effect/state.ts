@@ -88,10 +88,15 @@ export const scopeOfRequest = (request: Request): RequestScope | undefined =>
  */
 const executionScope = new AsyncLocalStorage<RequestScope>();
 
-/** Runs `run` with the request's scope as the execution scope (directly when it has none). */
+/**
+ * Runs `run` with the request's scope as the execution scope (directly when it has none, or when
+ * it is in effect already: the core enters the wrappers again for an entry made inside them).
+ */
 export const enterScope = <T>(request: Request, run: () => T): T => {
   const scope = requestScopes.get(request);
-  return scope === undefined ? run() : executionScope.run(scope, run);
+  return scope === undefined || executionScope.getStore() === scope
+    ? run()
+    : executionScope.run(scope, run);
 };
 
 /**

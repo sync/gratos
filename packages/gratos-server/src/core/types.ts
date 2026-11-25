@@ -190,8 +190,12 @@ export interface Plugin<Ctx = unknown> {
    * (its iterator, each pull, its `return()` or `throw()`), each subscription event's execution,
    * each pull of an incremental response's subsequent payloads (graphql-js runs deferred work
    * from there), and a custom executor's call to `next()` made outside the executor call (from an
-   * event emitter's callback, say). An entry made while the wrappers are already running
-   * (synchronously, as a `next()` called from the executor call is) is not wrapped again. It calls `run` once, synchronously, and returns what it returns. A plugin
+   * event emitter's callback, say). An entry made while the wrappers are already running (a
+   * `next()` called from the executor call) enters them again, nested: the code making it may
+   * run in another async context by then (a listener an `EventEmitterAsyncResource` calls in the
+   * context it was created in), so a wrapper must be reentrant, and may run `run` directly when
+   * its own state is in effect already. It calls `run` once, synchronously, and returns what it
+   * returns. A plugin
    * carries request-local state into the resolvers this way, which keep receiving the
    * application's own context value: the Effect layer enters an `AsyncLocalStorage`, whose store
    * the async continuations of that work inherit. Wrappers nest in list order (the first is the

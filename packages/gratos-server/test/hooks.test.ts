@@ -1,6 +1,6 @@
 // The hook contract (docs/plan.html M4a, "Contract types"): a test for each hook.
 import { AsyncLocalStorage } from "node:async_hooks";
-import { EventEmitter } from "node:events";
+import { EventEmitter, EventEmitterAsyncResource } from "node:events";
 
 import { GraphQLError } from "graphql";
 import type { ExecutionResult, OperationDefinitionNode } from "graphql";
@@ -416,6 +416,43 @@ const recording = (name: string, log: Array<string>, current: Current): Plugin =
   },
 });
 
+/**
+ * A server whose resolvers record whether they ran in their own request's store (the context
+ * is the Request), and whose executor calls `next()` synchronously, inside the executor call,
+ * from a listener `emitterOf` gives (an EventEmitterAsyncResource calls its listeners in the
+ * async context it was created in, not the caller's).
+ */
+const nextFromEmitter = (emitterOf: () => EventEmitterAsyncResource) => {
+  const storage = new AsyncLocalStorage<Request>();
+  const seen: Array<boolean> = [];
+  const server = createServer({
+    schema: basicSchema({
+      Query: {
+        count: (_source, _args, request: unknown) => {
+          seen.push(storage.getStore() === request);
+          return 1;
+        },
+      },
+    }),
+    context: (request) => request,
+    plugins: [
+      {
+        onExecute: () => (next) => {
+          const emitter = emitterOf();
+          let result: ReturnType<typeof next> | undefined;
+          emitter.once("go", () => {
+            result = next();
+          });
+          emitter.emit("go");
+          return result ?? { errors: [new GraphQLError("no result")] };
+        },
+      },
+      { wrapExecution: (request, run) => storage.run(request, run) },
+    ],
+  });
+  return { server, seen };
+};
+
 describe("wrapExecution", () => {
   it("wraps the executor call, nesting in list order, with the resolver's own context", async () => {
     const log: Array<string> = [];
@@ -536,14 +573,33 @@ describe("wrapExecution", () => {
     expect(seen).toBe(request);
   });
 
-  it("enters each wrapper once when an executor calls next() inside the executor call", async () => {
+  it("enters the wrappers again, nested, when an executor calls next() inside the executor call", async () => {
     const log: Array<string> = [];
     const server = createServer({
       schema: basicSchema(),
       plugins: [{ onExecute: () => delegate }, recording("a", log, {})],
     });
     expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
-    expect(log).toEqual(["a enter", "a exit"]);
+    expect(log).toEqual(["a enter", "a enter", "a exit", "a exit"]);
+  });
+
+  it("runs a next() made from another request's context in its own request's wrappers", async () => {
+    let first: EventEmitterAsyncResource | undefined;
+    // Created in the first request's executor call (inside its wrappers, in its store): the
+    // second request's executor calls next() from a listener it calls in that store.
+    const { server, seen } = nextFromEmitter(
+      () => (first ??= new EventEmitterAsyncResource({ name: "first request" })),
+    );
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
+    expect(seen).toEqual([true, true]);
+  });
+
+  it("runs a next() made from an emitter created outside any request in the wrappers", async () => {
+    const emitter = new EventEmitterAsyncResource({ name: "outside" });
+    const { server, seen } = nextFromEmitter(() => emitter);
+    expect((await gql(server, "{ count }")).body).toEqual({ data: { count: 1 } });
+    expect(seen).toEqual([true]);
   });
 
   it("wraps a subscription source's pulls and its cleanup", async () => {

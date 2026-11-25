@@ -279,25 +279,16 @@ const serve = <Ctx>(
   };
 
   /**
-   * A request's entry into its execution wrappers. An entry made inside one that is still running
-   * (synchronously: an executor calling `next()` from the executor call) runs directly, so the
-   * wrappers see it once; an entry from anywhere else (an awaited continuation, a callback an
-   * event emitter dispatches, the transport pulling a stream) enters them again.
+   * A request's entry into its execution wrappers. Every entry enters them, also one made while
+   * they are running (an executor calling `next()` from the executor call): the code that makes
+   * it may run in another context by then (a listener an EventEmitterAsyncResource calls in the
+   * context it was created in, another request's, say), so only the wrappers know whether they
+   * are in effect. A wrapper entered again with its own state in effect can run `run` directly.
    */
-  const entryOf = (request: Request): Enter => {
-    let active = false;
-    return (run) => {
-      if (active || wrapExecution.length === 0) {
-        return run();
-      }
-      active = true;
-      try {
-        return enterExecution(request, run);
-      } finally {
-        active = false;
-      }
-    };
-  };
+  const entryOf =
+    (request: Request): Enter =>
+    (run) =>
+      enterExecution(request, run);
 
   const tracked = new Set<TrackedMutation>();
   let draining = false;
