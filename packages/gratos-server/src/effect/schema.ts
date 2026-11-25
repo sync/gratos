@@ -27,7 +27,7 @@ import { cancelled } from "../core/errors.ts";
 import type { PromiseOrValue } from "../core/types.ts";
 import { fromCause } from "./errors.ts";
 import type { FromCauseOptions } from "./errors.ts";
-import { currentScope, servicesFor, typedCause } from "./state.ts";
+import { currentScope, servicesFor } from "./state.ts";
 import type { RequestScope } from "./state.ts";
 
 export type EffectSchemaOptions<E> = FromCauseOptions<E>;
@@ -85,7 +85,7 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
       }
       return exit.value;
     }
-    throw fromCause(typedCause<E>(exit.cause), options);
+    throw fromCause(exit.cause, options);
   };
 
   const run = (effect: Effect.Effect<unknown, unknown, unknown>): PromiseOrValue<unknown> => {
@@ -169,7 +169,7 @@ const streamSource = <A, E, R, F>(
   options: EffectSchemaOptions<F>,
 ): AsyncIterable<A> => {
   const iterable = stream.pipe(
-    Stream.catchCause((cause) => Stream.die(fromCause(typedCause<F>(cause), options))),
+    Stream.catchCause((cause) => Stream.die(fromCause(cause, options))),
     Stream.toAsyncIterableWith(servicesFor<R>(scope.context)),
   );
   let iterator: AsyncIterator<A> | undefined;
@@ -204,7 +204,8 @@ const wrapped = <F extends object>(fn: F): F => {
 /**
  * Wraps every field's `resolve` and `subscribe` in place, once (a function it already wrapped,
  * through this schema or another one that shares the field, is left as it is), and returns the
- * schema. `failure` maps typed failures (see `FailureMapper`).
+ * schema. `failure` maps the typed failures `isFailure` accepts (see `FailureMapper`); any other
+ * failure is a defect.
  */
 export const effectSchema = <E>(
   schema: GraphQLSchema,

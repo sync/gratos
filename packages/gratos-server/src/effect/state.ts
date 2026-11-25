@@ -3,7 +3,7 @@
 // the execution scope a resolver call finds its request scope in (an AsyncLocalStorage).
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import type { Cause, Context, Fiber } from "effect";
+import type { Context, Fiber } from "effect";
 
 /** What effectRoute records for a request it serves. */
 export interface RouteState {
@@ -93,13 +93,4 @@ export const currentScope = (): RequestScope | undefined => executionScope.getSt
 export function servicesFor<R>(context: Context.Context<never>): Context.Context<R>;
 export function servicesFor(context: Context.Context<never>): Context.Context<never> {
   return context;
-}
-
-/**
- * A resolver's failure as the app's typed failure: an app's mapper is written for the typed
- * failures of its own resolvers (`Effect<A, AppError, R>`), which graphql-js hands back untyped.
- */
-export function typedCause<E>(cause: Cause.Cause<unknown>): Cause.Cause<E>;
-export function typedCause(cause: Cause.Cause<unknown>): Cause.Cause<unknown> {
-  return cause;
 }

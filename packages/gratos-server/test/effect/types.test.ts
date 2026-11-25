@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { gqlError } from "../../src/index.ts";
 import { effectSchema, makeGuard } from "../../src/effect/index.ts";
 import type { FailureMapper } from "../../src/effect/index.ts";
-import { Forbidden, NotFound } from "../app/src/errors.ts";
+import { Forbidden, isAppError, NotFound } from "../app/src/errors.ts";
 import type { AppError } from "../app/src/errors.ts";
 import { Api } from "../app/src/services.ts";
 import type { OrderRow } from "../app/src/services.ts";
@@ -48,7 +48,21 @@ describe("the failure mapper", () => {
         Forbidden: () => gqlError("forbidden", 403),
       }),
     );
-    expect(effectSchema(schema, { failure })).toBe(schema);
+    expect(effectSchema(schema, { failure, isFailure: isAppError })).toBe(schema);
+  });
+
+  it("comes with isFailure, so the mapper only receives the type it was written for", () => {
+    const schema = makeSchema("type Query { a: String }");
+    const failure = Match.type<AppError>().pipe(
+      Match.tagsExhaustive({
+        NotFound: () => gqlError("not found", 404),
+        Forbidden: () => gqlError("forbidden", 403),
+      }),
+    );
+    const withoutGuard = () =>
+      // @ts-expect-error: without isFailure, an untyped failure would reach the typed mapper.
+      effectSchema(schema, { failure });
+    expect(typeof withoutGuard).toBe("function");
   });
 });
 

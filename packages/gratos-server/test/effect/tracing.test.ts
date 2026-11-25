@@ -29,6 +29,9 @@ const failure = (): never => {
   throw new Error("no typed failures in this suite");
 };
 
+/** No failure is a typed one in this suite. */
+const isFailure = (_error: unknown): _error is never => false;
+
 const asSubscriptions = (schema: GraphQLSchema): GraphQLSchema => {
   for (const field of Object.values(schema.getSubscriptionType()?.getFields() ?? {})) {
     if (field.resolve !== undefined) {
@@ -69,7 +72,7 @@ const build = (
         ),
       }),
     ),
-    { failure },
+    { failure, isFailure },
   );
   const server = createServer({
     schema,
@@ -516,7 +519,7 @@ describe("effect() tracing with a Clock that is not performance.now()", () => {
         makeSchema("type Query { value: String }", {
           Query: { value: () => Effect.succeed("v").pipe(Effect.delay("2 millis")) },
         }),
-        { failure },
+        { failure, isFailure },
       ),
       plugins: [
         jit({ after: 2 }),
@@ -543,7 +546,7 @@ describe("effect() tracing with a Clock that is not performance.now()", () => {
         makeSchema("type Query { value: String }", {
           Query: { value: () => Effect.succeed("v").pipe(Effect.delay("5 millis")) },
         }),
-        { failure },
+        { failure, isFailure },
       ),
       plugins: [effect({ context: Context.add(tracer.context, Clock.Clock, fast) })],
     });

@@ -42,6 +42,12 @@ class NotFound extends Data.TaggedError("NotFound")<{ readonly id: string }> {}
 class Forbidden extends Data.TaggedError("Forbidden")<{ readonly scopes: ReadonlyArray<string> }> {}
 type AppError = NotFound | Forbidden;
 
+/** A tagged error that is not one of the app's typed failures. */
+class Unlisted extends Data.TaggedError("Unlisted")<{ readonly reason: string }> {}
+
+const isAppError = (error: unknown): error is AppError =>
+  Predicate.isTagged(error, "NotFound") || Predicate.isTagged(error, "Forbidden");
+
 const failure = Match.type<AppError>().pipe(
   Match.tagsExhaustive({
     NotFound: (error) => gqlError(`${error.id} not found`, 404, { code: "NOT_FOUND" }),
@@ -154,7 +160,7 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
     };
     const schema = effectSchema(
       asSubscriptions(makeSchema(SDL, resolvers(overrides), options.extensions ?? {})),
-      { failure: options.mapper ?? failure, onDefect: options.onDefect },
+      { failure: options.mapper ?? failure, isFailure: isAppError, onDefect: options.onDefect },
     );
     const server = createServer({
       schema,
@@ -339,6 +345,34 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
         path: ["value"],
         extensions: { code: "NOT_FOUND", http: { status: 404 } },
       });
+    });
+
+    it.each([
+      ["a value that is not an AppError", () => Effect.fail("plain string")],
+      ["a tagged error outside AppError", () => Effect.fail(new Unlisted({ reason: "unlisted" }))],
+      [
+        "an unknown failure with a defect",
+        () => Effect.failCause(Cause.combine(Cause.fail(42), Cause.die(new Error("also")))),
+      ],
+    ])("treats %s as a defect, never handing it to the mapper", async (_name, value) => {
+      const reported: Array<GraphQLError> = [];
+      const mapper = vi.fn(failure);
+      const built = build(
+        { Query: { value } },
+        {
+          mapper,
+          plugins: [
+            reportErrors((error) => {
+              reported.push(error);
+            }),
+            maskErrors(),
+          ],
+        },
+      );
+      const sent = await run(built, "{ value }");
+      expect(sent.error?.message).toBe("Unexpected error.");
+      expect(mapper).not.toHaveBeenCalled();
+      expect(reported.at(-1)?.originalError).toBeInstanceOf(ResolverDefect);
     });
 
     it("counts a tagged error returned as data as an Effect", async () => {
@@ -658,7 +692,7 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
             Query: { slow: () => Effect.succeed("late").pipe(Effect.delay("1 millis")) },
           }),
         ),
-        { failure },
+        { failure, isFailure: isAppError },
       );
       const server = createServer({
         schema,
@@ -784,15 +818,15 @@ describe.each(executors)("the Effect wrapper ($name executor)", (executor) => {
 describe("effectSchema", () => {
   it("wraps a field once, also through another schema that shares it (incremental())", () => {
     const schema = makeSchema(SDL, resolvers({}));
-    const wrapped = effectSchema(schema, { failure });
+    const wrapped = effectSchema(schema, { failure, isFailure: isAppError });
     const field = wrapped.getQueryType()?.getFields()["value"];
     const once = field?.resolve;
-    expect(effectSchema(wrapped, { failure })).toBe(wrapped);
+    expect(effectSchema(wrapped, { failure, isFailure: isAppError })).toBe(wrapped);
     expect(field?.resolve).toBe(once);
     const shared = withIncrementalDirectives(wrapped);
     expect(shared).not.toBe(wrapped);
     expect(shared.getQueryType()?.getFields()["value"]).toBe(field);
-    effectSchema(shared, { failure });
+    effectSchema(shared, { failure, isFailure: isAppError });
     expect(field?.resolve).toBe(once);
   });
 });
@@ -818,7 +852,7 @@ const hanging = () => {
             ),
         },
       }),
-      { failure },
+      { failure, isFailure: isAppError },
     ),
     plugins: [effect()],
   });
@@ -892,7 +926,7 @@ describe("wrapSubscribe", () => {
               }),
           ).pipe(Effect.as(Stream.never)),
         ),
-      { failure },
+      { failure, isFailure: isAppError },
     );
     // graphql-js hands back the source iterable the subscribe resolver returned.
     const validated = validateSubscriptionArgs({

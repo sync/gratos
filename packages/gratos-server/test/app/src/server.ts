@@ -20,7 +20,7 @@ import {
   runInRequest,
 } from "../../../src/effect/index.ts";
 import type { Ctx, DerivedHold } from "./context.ts";
-import { Forbidden } from "./errors.ts";
+import { Forbidden, isAppError } from "./errors.ts";
 import type { AppError } from "./errors.ts";
 import { getSchema } from "./generated/schema.ts";
 import { Api, Bus, JournalRef } from "./services.ts";
@@ -66,7 +66,7 @@ const readSession = (request: Request) =>
 /** The GraphQL server, given the app's services (and, standalone, the context to fork with). */
 export const makeServer = (services: Context.Context<Services>, options: AppOptions): Server =>
   createServer<Ctx>({
-    schema: effectSchema(getSchema(), { failure }),
+    schema: effectSchema(getSchema(), { failure, isFailure: isAppError }),
     context: (request) =>
       runInRequest(
         request,
