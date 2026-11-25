@@ -2,7 +2,7 @@
 // on such a schema, the multipart/mixed wire format, masking and reporting of deferred errors,
 // aborts, the mutation rule, and which operations it claims.
 import { AbortedGraphQLExecutionError, GraphQLError, parse } from "graphql";
-import type { ExecutionArgs } from "graphql";
+import type { ExecutionArgs, LegacySubsequentIncrementalExecutionResult } from "graphql";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -43,6 +43,17 @@ const SDL = `
 `;
 
 /** A schema with a counter of resolver calls, and hooks to hold the slow ones. */
+const PREMATURE = "The incremental result ended before its last payload.";
+
+/** Subsequent incremental payloads, from a list. */
+async function* subsequent(
+  payloads: ReadonlyArray<LegacySubsequentIncrementalExecutionResult>,
+): AsyncGenerator<LegacySubsequentIncrementalExecutionResult, void, void> {
+  for (const payload of payloads) {
+    yield payload;
+  }
+}
+
 const fixture = () => {
   const calls: Record<string, number> = {};
   const count = (name: string) => {
@@ -424,6 +435,39 @@ describe("errors in incremental payloads", () => {
       post({ query: "{ hello ... @defer { list } }" }, { accept: APOLLO_ACCEPT }),
     );
     expect(readMultipart(await response.text()).map((part) => part.hasNext)).toEqual([true, false]);
+  });
+
+  it("an incremental result that ends after a hasNext: true part gets a terminal error part", async () => {
+    const { schema } = fixture();
+    const reported: Array<string> = [];
+    const truncated: Plugin = {
+      // An executor whose subsequent results end without a hasNext: false payload.
+      onExecute: () => () => ({
+        initialResult: { data: { hello: "world" }, hasNext: true },
+        subsequentResults: subsequent([
+          { incremental: [{ data: { later: "later" }, path: [] }], hasNext: true },
+        ]),
+      }),
+    };
+    const server = createServer({
+      schema,
+      plugins: [
+        incremental(),
+        truncated,
+        reportErrors((error) => {
+          reported.push(error.message);
+        }),
+      ],
+    });
+    const response = await server.handle(post({ query: "{ hello }" }, { accept: APOLLO_ACCEPT }));
+    const { parts, closed } = readApolloMultipart(await response.text());
+    expect(closed).toBe(true);
+    expect(parts).toEqual([
+      { data: { hello: "world" }, hasNext: true },
+      { incremental: [{ data: { later: "later" }, path: [] }], hasNext: true },
+      { errors: [{ message: PREMATURE }], hasNext: false },
+    ]);
+    expect(reported).toEqual([PREMATURE]);
   });
 });
 

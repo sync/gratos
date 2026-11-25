@@ -8,13 +8,17 @@
 // - a rejected pull (a source that failed) becomes a GraphQL error payload, goes through the same
 //   hooks, and is sent as the final payload, then the stream ends (`complete`, or the closing
 //   boundary);
+// - an incremental result whose payloads end after one that said `hasNext: true` gets a last
+//   payload with an error and `hasNext: false`, through the same hooks, so the client (Apollo
+//   Client) marks the result complete;
 // - once the core signal is aborted (the client left), the body ends at once, even with a payload
 //   still queued, and a rejected pull is a cancellation (graphql's AbortError, or a cancelled()
 //   sentinel): it skips the hooks and nothing more is sent;
 // - closing the stream early (a body cancel, or the core signal aborting) aborts the core signal
 //   first, so cooperative sources stop (one waiting on `info.getAbortSignal()`), and only then
 //   awaits the iterator's `return()`: a `return()` alone can wait forever on a pending pull.
-import type { ExecutionResult, GraphQLError } from "graphql";
+import { GraphQLError } from "graphql";
+import type { ExecutionResult } from "graphql";
 
 import { DEFER_SPEC, MULTIPART_BOUNDARY, MULTIPART_MIXED, TEXT_EVENT_STREAM } from "./http.ts";
 import type { Logger } from "./types.ts";
@@ -57,15 +61,25 @@ interface Framing {
   readonly frame: (payload: StreamPayload) => string;
   /** What ends the stream, after the last payload. */
   readonly end: string;
+  /**
+   * Whether the client needs a payload with `hasNext: false` before the stream ends (multipart:
+   * Apollo Client marks the result complete only then).
+   */
+  readonly lastPayloadRequired: boolean;
 }
+
+/** The terminal payload of an incremental result that ended after a `hasNext: true` payload. */
+const prematureEnd = (): ExecutionResult => ({
+  errors: [new GraphQLError("The incremental result ended before its last payload.")],
+});
 
 /**
  * multipart/mixed with boundary "-". Every chunk ends with a delimiter (`\r\n---`): a client
  * that splits on the delimiter (Apollo Client) reads a part only once the delimiter after it has
  * arrived, so a part must never wait for the next one. A part therefore starts with the CRLF that
  * ends its delimiter line, and the stream ends with `--` (the close delimiter). On the wire this
- * is byte for byte Apollo Server's framing; only the chunk edges differ, so a stream that ends
- * without a `hasNext: false` part still closes cleanly instead of sending an empty part.
+ * is byte for byte Apollo Server's framing; only the chunk edges differ, so the close delimiter
+ * never needs an empty part before it.
  */
 const multipartFraming: Framing = {
   contentType: `${MULTIPART_MIXED}; boundary="${MULTIPART_BOUNDARY}"; deferSpec=${DEFER_SPEC}`,
@@ -73,6 +87,7 @@ const multipartFraming: Framing = {
   frame: ({ result, hasNext }) =>
     `\r\ncontent-type: application/json; charset=utf-8\r\n\r\n${JSON.stringify({ ...result, hasNext })}\r\n---`,
   end: "--\r\n",
+  lastPayloadRequired: true,
 };
 
 const sseFraming: Framing = {
@@ -80,6 +95,7 @@ const sseFraming: Framing = {
   start: "",
   frame: ({ result }) => `event: next\ndata: ${JSON.stringify(result)}\n\n`,
   end: "event: complete\ndata:\n\n",
+  lastPayloadRequired: false,
 };
 
 const streamResponse = (framing: Framing, options: StreamOptions): Response => {
@@ -234,6 +250,15 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
           return;
         }
         if (pulled.done === true) {
+          if (framing.lastPayloadRequired) {
+            // Every payload sent so far said `hasNext: true` (the stream ends at the first that
+            // does not): the client gets a last one, with an error, through the result hooks.
+            const result = await processed(prematureEnd());
+            if (result !== undefined) {
+              await sendPayload({ result, hasNext: false });
+            }
+            return;
+          }
           await end(framing.end);
           return;
         }
