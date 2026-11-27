@@ -20,7 +20,9 @@ devDependencies.
 
 - Node 26 (`.node-version`). Packages run from source through Node's type stripping; there is no build step in the workspace.
   The tarballs are built only by each package's `prepack` (`tsconfig.build*.json` into the gitignored `dist/`), and
-  `publishConfig` points `exports`, `bin` and `imports` at `dist/`.
+  `publishConfig` points `exports`, `bin` and `imports` at `dist/`. `node scripts/install-test.ts <dir> --peers min|newest|core`
+  installs the tarballs that `pnpm --filter "./packages/*" pack --pack-destination <dir>` writes into a project outside the
+  workspace and runs them there (CI's `pack-check` jobs; not part of `pnpm check`).
 - pnpm 12 (`packageManager`). Node 26 has no corepack: install with `npm i -g pnpm@12.23.0`. In CI, `pnpm/action-setup`.
 - Turborepo: `pnpm check` runs everything (`turbo run check`). Read `node_modules/turbo/docs` before changing `turbo.json`.
 - TypeScript 7 (`tsc --noEmit` per package). The compiler talks to TypeScript only through `packages/gratos/src/ts/`.
