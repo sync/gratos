@@ -1,0 +1,62 @@
+name: release
+
+# The Changesets flow (docs/plan.html F7, AGENTS.md "Releasing"). A push to main with pending
+# changesets opens or updates the Version Packages PR. Once that PR is merged, and only when the
+# repo variable GRATOS_PUBLISH is "true", `pnpm run release` runs the gate, packs both packages
+# with `changeset pack`, runs the install test on those exact tarballs, and publishes them with
+# `changeset publish --from-pack-dir`, over npm trusted publishing (OIDC, id-token: write) with
+# provenance. No npm token exists anywhere.
+#
+# The action opens and updates the Version Packages PR with GITHUB_TOKEN, so GitHub creates that
+# PR's `ci` runs (pull_request) in an approval-required state instead of starting them: a
+# maintainer starts them with "Approve workflows to run" in the PR's merge box, and they report
+# the required `ci` check. A `workflow_dispatch` run would not: GitHub never counts a check from
+# one toward a PR's required checks. AGENTS.md "Releasing" has the steps.
+on:
+  push:
+    branches: [main]
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write # the Version Packages branch, release tags, GitHub releases
+  pull-requests: write # the Version Packages PR
+  id-token: write # npm trusted publishing and provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      # No `cache: pnpm`, and no turbo cache, on purpose: the Actions cache is writable from
+      # lower-privileged runs, and this job publishes with provenance. It installs from the
+      # registry, checked against the lockfile, and runs the gate from scratch.
+      #
+      # Unlike shadcn-ui/cn's release workflow, there is no npm 11 pin and no `registry-url`:
+      # pnpm 12 runs `info`, `pack` and `publish` itself, and does the OIDC token exchange with
+      # the registry itself, so npm and an .npmrc written by setup-node play no part.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - run: pnpm install --frozen-lockfile
+      - name: Open the Version Packages PR, or publish
+        uses: changesets/action@v2
+        with:
+          # Publishing is off until the maintainer sets the repo variable GRATOS_PUBLISH to
+          # "true" (after the first release, published by hand: AGENTS.md "Releasing"). While it
+          # is unset, publish-script is empty, so the action only opens or updates the Version
+          # Packages PR and never publishes.
+          publish-script: ${{ vars.GRATOS_PUBLISH == 'true' && 'pnpm run release' || '' }}
+          # v2's names for v1's `commit` and `title`; the default, "Version Packages", does not
+          # match the repo's conventional-commit history.
+          commit-message: "chore(release): version packages"
+          pr-title: "chore(release): version packages"
+        env:
+          # For the action, and for `vendor:verify` in the release gate.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # pnpm 12 reads its settings from PNPM_CONFIG_*, and ignores NPM_CONFIG_PROVENANCE, so
+          # provenance is asked for under pnpm's own name.
+          PNPM_CONFIG_PROVENANCE: "true"
