@@ -21,11 +21,14 @@
 //   closing frame sent, `streamEnded`) keeps the stream's outcome, never a cancel; plus, for a mutation, the request signal's abort (a standalone client
 //   that left, whose body nobody may read). A mutation the core reports as started defers its end
 //   until the core's tracked mutation settles, and ends ok or error (its errors, its answer's
-//   status, a failing body), never cancel. A cancel, or a failed body (the core stops the
-//   executor then), is recorded when it is decided, but with
-//   Effect work still running the span ends once that work has settled (the interrupted
-//   resolvers' fibers have exited, after their finalizers, and every pulled Stream has closed
-//   its scope), never before the spans that work ends.
+//   status, a failing body), never cancel. Any end of a query's or a subscription's response
+//   (docs/plan.html F5) closes its request scope to new work and interrupts the fibers still
+//   running (ClientAbort for a cancel, else the internal RequestEnded); its outcome is recorded
+//   when it is decided, but with Effect work still starting or running the span ends once that
+//   work has settled (the interrupted resolvers' fibers have exited, after their finalizers, and
+//   every pulled Stream has closed its scope), never before the spans that work ends. A
+//   mutation's work is never interrupted: its span waits for it only after a cancel or a failed
+//   body, as before.
 //
 // Span times are nanoseconds from the Effect Clock. The core reports performance.now()
 // milliseconds; every such value goes through one per-request anchor, a (clock nanos, perf ms)
@@ -33,6 +36,8 @@
 import { Clock, Context, Effect, Exit, Option, Tracer } from "effect";
 import { HttpServerError } from "effect/http";
 import type { ExecutionResult, OperationDefinitionNode } from "graphql";
+
+import { RequestEnded } from "./errors.ts";
 
 import { isCancelled } from "../core/errors.ts";
 import { payloadErrors } from "../core/payload.ts";
@@ -46,7 +51,7 @@ import {
 } from "../core/requestState.ts";
 import type { Phase, Plugin } from "../core/types.ts";
 import { OperationType } from "./guard.ts";
-import { bindScope, enterScope, routeOf, settled } from "./state.ts";
+import { bindScope, enterScope, hasWork, routeOf, settled, stopAnnotation } from "./state.ts";
 import type { RequestScope } from "./state.ts";
 
 export interface EffectPluginOptions {
@@ -109,8 +114,16 @@ interface SpanState {
   answerStatus: number | undefined;
   /** The latest end time of a child span (a phase, a resolver), in Clock nanoseconds. */
   childEnd: bigint;
-  /** The request scope onContext bound, with what interrupts its fibers (a client abort). */
-  scope: { readonly scope: RequestScope; readonly interrupt: () => void } | undefined;
+  /**
+   * The request scope onContext bound, with what stops it: interrupts its fibers with the given
+   * annotation and closes it to new work (a query's or subscription's; a no-op for a mutation's).
+   */
+  scope:
+    | {
+        readonly scope: RequestScope;
+        readonly stop: (annotation: Context.Context<never>) => void;
+      }
+    | undefined;
   /** Set once the end is decided (its outcome recorded); the span may end later. */
   ended: boolean;
 }
@@ -166,20 +179,24 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
     span.attribute("http.response.status_code", status);
     const scope = state.scope;
     const cancelled = Exit.hasInterrupts(exit);
+    // Counted before the stop: a fiber whose start is under way (one that cancelled its own
+    // response) is work still to wait for.
+    const working = scope !== undefined && hasWork(scope.scope);
+    // A query's or subscription's response is over, however it ended: its scope takes no new
+    // work (a later Effect never starts), and the fibers still running are interrupted, as the
+    // client's when it left, else with the internal annotation (graphql-js has already
+    // interrupted a sibling left by a non-null short-circuit; on warmed jit nothing is left).
+    scope?.stop(cancelled ? HttpServerError.ClientAbort.annotation : RequestEnded.annotation);
     if (
-      (cancelled || state.trigger === "error") &&
       scope !== undefined &&
-      (scope.scope.fibers.size > 0 || scope.scope.streams.size > 0)
+      working &&
+      (scope.scope.interruptOnAbort || cancelled || state.trigger === "error")
     ) {
-      // The client left, or the streamed response failed (the core stops its executor then),
-      // with Effect work still running: its outcome is recorded now, but the span ends once that
-      // work has settled (interrupted resolvers have exited, after their finalizers; pulled
-      // Streams have closed their scopes), after the spans it still ends. The transport is not
-      // held: the response is over for it already. A failed stream's executor is stopped by the
-      // core (its signal aborts, which interrupts the fibers), so only a cancel interrupts here.
-      if (cancelled && scope.scope.interruptOnAbort) {
-        scope.interrupt();
-      }
+      // Effect work still starting or running: the outcome is recorded now, but the span ends
+      // once that work has settled (interrupted resolvers have exited, after their finalizers;
+      // pulled Streams have closed their scopes), after the spans it still ends. The transport is
+      // not held: the response is over for it already. A mutation's work is never interrupted,
+      // and its span waits for it only after a cancel or a failed body.
       void settled(scope.scope)
         .then(() => {
           endSpan(state, span, exit);
@@ -394,31 +411,38 @@ export const effect = (options: EffectPluginOptions = {}): Plugin => {
         type,
       ),
       fibers: new Set(),
+      starts: new Set(),
       streams: new Set(),
       interruptOnAbort: type !== "mutation",
       signal: signalOf(request),
-      aborted: false,
+      stopped: undefined,
       spanEnded: (endTime) => {
         childEnded(state, endTime);
       },
     };
     bindScope(request, scope);
-    const interrupt = (): void => {
-      if (scope.aborted) {
+    /** The first stop wins: its annotation is the one later starts get. */
+    const stop = (annotation: Context.Context<never>): void => {
+      if (!scope.interruptOnAbort || scope.stopped !== undefined) {
         return;
       }
-      scope.aborted = true;
+      scope.stopped = annotation;
       for (const fiber of scope.fibers) {
-        fiber.interruptUnsafe(undefined, HttpServerError.ClientAbort.annotation);
+        fiber.interruptUnsafe(undefined, annotation);
       }
     };
-    state.scope = { scope, interrupt };
+    state.scope = { scope, stop };
     const signal = signalOf(request);
+    // The core signal aborts: the client left (its reason, or a body cancel's), or the core
+    // stopped the execution itself (a reason of its own kind). Its reason gives the annotation.
+    const aborted = (): void => {
+      stop(stopAnnotation(scope, undefined) ?? HttpServerError.ClientAbort.annotation);
+    };
     if (scope.interruptOnAbort && signal !== undefined) {
       if (signal.aborted) {
-        interrupt();
+        aborted();
       } else {
-        signal.addEventListener("abort", interrupt, { once: true });
+        signal.addEventListener("abort", aborted, { once: true });
       }
     }
   };

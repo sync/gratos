@@ -21,7 +21,6 @@
 // assertNonNull, so a null item is one event with an error and the subscription carries on.
 import { Context, Effect, Exit, Predicate, Stream } from "effect";
 import type { Fiber, Tracer } from "effect";
-import { HttpServerError } from "effect/http";
 import { isObjectType } from "graphql";
 import type {
   GraphQLField,
@@ -35,7 +34,7 @@ import type { PromiseOrValue } from "../core/types.ts";
 import { fromCause } from "./errors.ts";
 import { OperationType } from "./guard.ts";
 import type { FromCauseOptions } from "./errors.ts";
-import { currentScope, servicesFor } from "./state.ts";
+import { currentScope, servicesFor, stopAnnotation } from "./state.ts";
 import type { RequestScope } from "./state.ts";
 
 export type EffectSchemaOptions<E> = FromCauseOptions<E>;
@@ -55,10 +54,11 @@ const unboundScopeOf = (type: OperationKind): RequestScope => ({
   operations: new Set(),
   context: Context.make(OperationType, type),
   fibers: new Set(),
+  starts: new Set(),
   streams: new Set(),
   interruptOnAbort: false,
   signal: undefined,
-  aborted: false,
+  stopped: undefined,
   spanEnded: () => {},
 });
 
@@ -101,9 +101,31 @@ const signalOfExecution = (info: GraphQLResolveInfo): AbortSignal | undefined =>
 };
 
 /**
+ * Records a fiber about to start in its request scope (see RequestScope.starts), until `done`.
+ * An unbound scope tracks nothing.
+ */
+const beginStart = (scope: RequestScope): { readonly done: () => void } | undefined => {
+  if (isUnbound(scope)) {
+    return undefined;
+  }
+  const { promise, resolve } = Promise.withResolvers<void>();
+  scope.starts.add(promise);
+  return {
+    done: () => {
+      scope.starts.delete(promise);
+      resolve();
+    },
+  };
+};
+
+/**
  * Starts tracking a running fiber in its request scope; it removes itself when it completes.
- * `signal` is its execution's (`info.getAbortSignal()`): one that is not the core signal (a
- * claim's `next()`) interrupts the fiber when it aborts, as the core signal does.
+ * `signal` is its execution's (`info.getAbortSignal()`, graphql-js's own for the execution, which
+ * graphql-js aborts with the core signal's reason, or by itself once the execution completed):
+ * one that is not the core signal interrupts the fiber when it aborts, as the core signal does,
+ * with the annotation the reasons give (stopAnnotation). A fiber whose scope has stopped already
+ * (its start ran while the client left, the core stopped the execution or the response ended)
+ * is interrupted at once, with the stop's annotation.
  */
 const track = (
   scope: RequestScope,
@@ -121,10 +143,10 @@ const track = (
     return;
   }
   const interrupt = (): void => {
-    fiber.interruptUnsafe(undefined, HttpServerError.ClientAbort.annotation);
+    fiber.interruptUnsafe(undefined, stopAnnotation(scope, signal));
   };
   // Tracked still: an interrupted fiber runs its finalizers before it exits.
-  if (scope.aborted || signal?.aborted === true) {
+  if (scope.stopped !== undefined || signal?.aborted === true) {
     interrupt();
   } else if (signal !== undefined && signal !== scope.signal) {
     signal.addEventListener("abort", interrupt, { once: true });
@@ -156,32 +178,44 @@ const makeRunner = <E>(options: EffectSchemaOptions<E>, spanName: string, nonNul
     }
     // The execution scope (effect()'s wrapExecution): a thenable's continuation inherits it.
     const scope = currentScope(info) ?? unboundScope(info);
-    if (scope.aborted && scope.interruptOnAbort) {
-      // The client has left (a Promise-wrapped resolver settled after the abort): the Effect is
-      // never started. track() still interrupts a fiber whose own startup saw the abort.
+    if (scope.stopped !== undefined) {
+      // The request no longer needs the work (a Promise-wrapped resolver settled after the
+      // client left, the core stopped the execution, or the response ended): the Effect is never
+      // started, so it opens no span. track() still interrupts a fiber whose own start saw the
+      // stop.
       throw cancelled();
     }
     // As Effect.withSpan, keeping the span to report its end time to the request scope.
     let span: Tracer.Span | undefined;
-    const fiber = internals.runForkWith(servicesFor<unknown>(scope.context))(
-      // oxlint-disable-next-line react-hooks/rules-of-hooks -- Effect.useSpan is not a React hook.
-      Effect.useSpan(spanName, (opened) => {
-        span = opened;
-        return Effect.withParentSpan(effect, opened);
-      }),
-    );
     /** The span ends in the fiber, before its exit is observed. */
     const spanEnded = (): void => {
       if (span?.status._tag === "Ended") {
         scope.spanEnded(span.status.endTime);
       }
     };
-    const exit = fiber.pollUnsafe();
+    // Registered before the fiber starts: a stop during its synchronous start waits for it.
+    const start = beginStart(scope);
+    let fiber: Fiber.Fiber<unknown, unknown>;
+    let exit: Exit.Exit<unknown, unknown> | undefined;
+    try {
+      fiber = internals.runForkWith(servicesFor<unknown>(scope.context))(
+        // oxlint-disable-next-line react-hooks/rules-of-hooks -- Effect.useSpan is not a React hook.
+        Effect.useSpan(spanName, (opened) => {
+          span = opened;
+          return Effect.withParentSpan(effect, opened);
+        }),
+      );
+      exit = fiber.pollUnsafe();
+      if (exit === undefined) {
+        track(scope, fiber, signalOfExecution(info));
+      }
+    } finally {
+      start?.done();
+    }
     if (exit !== undefined) {
       spanEnded();
       return settleExit(exit);
     }
-    track(scope, fiber, signalOfExecution(info));
     return new Promise<unknown>((resolve, reject) => {
       fiber.addObserver((done) => {
         spanEnded();

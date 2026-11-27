@@ -4,7 +4,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { Context, Fiber } from "effect";
+import { HttpServerError } from "effect/http";
 import type { GraphQLResolveInfo, OperationDefinitionNode } from "graphql";
+
+import { abortKindOf } from "../core/abortReason.ts";
+import { RequestEnded } from "./errors.ts";
 
 /** What effectRoute records for a request it serves. */
 export interface RouteState {
@@ -46,7 +50,8 @@ export const closeRoute = (state: RouteState): void => {
 
 /**
  * The runtime of one request's resolvers: the context they are forked with, and the fibers still
- * running, which a client abort interrupts (except a mutation's).
+ * running, which a stop interrupts (except a mutation's): the client leaving, the core stopping the
+ * execution, or the response ending (docs/plan.html F5).
  */
 export interface RequestScope {
   /**
@@ -59,12 +64,21 @@ export interface RequestScope {
   readonly context: Context.Context<never>;
   readonly fibers: Set<Fiber.Fiber<unknown, unknown>>;
   /**
+   * The resolver fibers being started: each entry is added before runForkWith and settles once
+   * its fiber is tracked (in `fibers`) or has already finished. A stop that comes while a fiber's
+   * synchronous start runs (the resolver cancels its own response) counts it, and waits for it.
+   */
+  readonly starts: Set<Promise<void>>;
+  /**
    * The closes of the request's Stream sources that were pulled and are not closed yet: each
    * settles once its Stream's scope has closed (its finalizers ran). Its iterator's `return()`,
    * a failed pull or the end of the stream closes it.
    */
   readonly streams: Set<Promise<void>>;
-  /** Interrupt fibers on a client abort (false for a mutation: its fibers always finish). */
+  /**
+   * Interrupt fibers on a stop, and close the scope to new work once the response ends (false
+   * for a mutation: its fibers always finish).
+   */
   readonly interruptOnAbort: boolean;
   /**
    * The core signal (`signalOf(req)`). A fiber whose execution has a signal of its own (one a
@@ -72,8 +86,13 @@ export interface RequestScope {
    * when that signal aborts too.
    */
   readonly signal: AbortSignal | undefined;
-  /** Set once the client has left: a fiber forked later is interrupted at once. */
-  aborted: boolean;
+  /**
+   * Set once the request no longer needs its work, to the annotation its fibers are interrupted
+   * with: ClientAbort once the client has left, RequestEnded once the core stopped the execution
+   * or the response ended. A fiber forked later is interrupted at once with it, and an Effect that
+   * arrives later is never started. Never set for a mutation's scope.
+   */
+  stopped: Context.Context<never> | undefined;
   /**
    * Records a resolver span's end time (Clock nanoseconds): the operation span never ends before
    * it, even when the Clock reads earlier by then (a wall clock set back).
@@ -146,13 +165,51 @@ export function servicesFor(context: Context.Context<never>): Context.Context<ne
   return context;
 }
 
+/** Whether the request still has Effect work: fibers starting or running, or open Streams. */
+export const hasWork = (scope: RequestScope): boolean =>
+  scope.fibers.size > 0 || scope.starts.size > 0 || scope.streams.size > 0;
+
 /**
- * Resolves once the request's Effect work has settled: every fiber it tracks has exited (an
- * interrupted one after its finalizers) and every Stream source it pulled has closed. The
- * operation span of a client that left ends then, after the spans that work still ends.
+ * The annotation a fiber of the request is interrupted with (docs/plan.html F5, "Reasons"):
+ * ClientAbort when the client left, else the internal RequestEnded. `execution` is the fiber's
+ * execution signal (`info.getAbortSignal()`), if any.
+ *
+ * The core signal (`signalOf(req)`) is read first, once it has aborted: a reason the core made
+ * carries its kind, and any other reason is the client's own, which the core forwards as it came.
+ * graphql-js forwards that reason to an execution's signal only while the execution runs: once an
+ * incremental result's initial payload is built, it aborts the signal of the deferred work with a
+ * reason of its own, the client's leaving included. Otherwise the execution's signal is read: the
+ * core's abort of a claim's `next()` (its kind), or graphql-js's own abort of an execution it
+ * completed (a non-null field's short-circuit), which is not the client leaving. Else the scope's
+ * stop, once there is one.
+ */
+export const stopAnnotation = (
+  scope: RequestScope,
+  execution: AbortSignal | undefined,
+): Context.Context<never> | undefined => {
+  const core = scope.signal;
+  if (core?.aborted === true) {
+    const kind = abortKindOf(core.reason);
+    return kind === undefined || kind === "client"
+      ? HttpServerError.ClientAbort.annotation
+      : RequestEnded.annotation;
+  }
+  if (execution?.aborted === true) {
+    return abortKindOf(execution.reason) === "client"
+      ? HttpServerError.ClientAbort.annotation
+      : RequestEnded.annotation;
+  }
+  return scope.stopped;
+};
+
+/**
+ * Resolves once the request's Effect work has settled: every fiber being started is tracked or
+ * done, every fiber it tracks has exited (an interrupted one after its finalizers) and every
+ * Stream source it pulled has closed. The operation span ends then, after the spans that work
+ * still ends.
  */
 export const settled = async (scope: RequestScope): Promise<void> => {
-  while (scope.fibers.size > 0 || scope.streams.size > 0) {
+  while (hasWork(scope)) {
     const fibers = [...scope.fibers].map(
       (fiber) =>
         new Promise<void>((resolve) => {
@@ -161,6 +218,6 @@ export const settled = async (scope: RequestScope): Promise<void> => {
           });
         }),
     );
-    await Promise.all([...fibers, ...scope.streams]);
+    await Promise.all([...fibers, ...scope.starts, ...scope.streams]);
   }
 };
