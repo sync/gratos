@@ -277,9 +277,9 @@ export interface BaseServerOptions {
    * digits) says so, without reading it, else once the bytes read pass the limit, counted before
    * decoding whatever Content-Length says. It covers every POST body, APQ ones included, and
    * every adapter (for effectRoute it is the only limit: Effect's `MaxBodySize` does not bound
-   * the stream the route reads). A positive integer, or `Infinity` for no limit; createServer
-   * throws a RangeError for anything else (0, a negative number, a fraction, NaN).
-   * `undefined` is the default.
+   * the stream the route reads). A positive safe integer (at most `Number.MAX_SAFE_INTEGER`), or
+   * `Infinity` for no limit; createServer throws a RangeError for anything else (0, a negative
+   * number, a fraction, NaN, a larger number, null). Only `undefined` is the default.
    */
   readonly maxBodyBytes?: number | undefined;
   readonly logger?: Logger;

@@ -248,9 +248,19 @@ const optional = <T extends JsonValue>(
 /** A Content-Length the core trusts for its fast path: plain decimal digits (RFC 9110 §8.6). */
 const DECIMAL_DIGITS = /^[0-9]+$/;
 
+/**
+ * The intrinsic `%TypedArray%.prototype[Symbol.toStringTag]` getter. It reads a typed array's
+ * internal name, so neither a custom `Symbol.toStringTag` nor another realm fools it, and it
+ * returns undefined for anything that is not a typed array (a DataView included).
+ */
+const typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+);
+
 /** A Uint8Array (a Buffer included), from any realm: what `request.text()` accepts as a chunk. */
 const isUint8Array = (value: unknown): value is Uint8Array =>
-  ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === "[object Uint8Array]";
+  typedArrayTag?.get?.call(value) === "Uint8Array";
 
 /** The body was larger than the limit. */
 const TOO_LARGE = Symbol("tooLarge");

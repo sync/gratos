@@ -236,9 +236,11 @@ describe("a Content-Length that is not the truth", () => {
 
 describe("chunks request.text() would refuse", () => {
   it("a body a caller has already started reading gets 400, even when the rest is valid JSON", async () => {
-    const { server, seen } = counted(20);
+    // The first chunk is whitespace, and the rest is a complete JSON body under the limit: only
+    // the earlier read refuses it.
+    const { server, seen } = counted(100);
     const json = encoder.encode(countBodyOf(60));
-    const request = streamed(source(splitAt(json, [30])).stream);
+    const request = streamed(source([encoder.encode("   "), json]).stream);
     const reader = request.body?.getReader();
     await reader?.read();
     reader?.releaseLock();
@@ -268,6 +270,38 @@ describe("chunks request.text() would refuse", () => {
     );
     expect(sent.status).toBe(400);
     expect(seen.resolver).toBe(0);
+  });
+
+  it("a DataView whose Symbol.toStringTag says Uint8Array still gets 400", async () => {
+    const { server } = counted();
+    const json = encoder.encode(countBodyOf(60));
+    const view = new DataView(json.buffer);
+    Object.defineProperty(view, Symbol.toStringTag, { value: "Uint8Array" });
+    const stream = new ReadableStream({
+      start: (controller) => {
+        controller.enqueue(view);
+        controller.close();
+      },
+    });
+    const sent = await send(
+      server,
+      new Request(URL_, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: stream,
+        duplex: "half",
+      }),
+    );
+    expect(sent.status).toBe(400);
+  });
+
+  it("a Uint8Array with a custom Symbol.toStringTag is read like any other", async () => {
+    const { server } = counted();
+    const chunk = encoder.encode(countBodyOf(60));
+    Object.defineProperty(chunk, Symbol.toStringTag, { value: "Something" });
+    const sent = await send(server, streamed(source([chunk]).stream));
+    expect(sent.status).toBe(200);
+    expect(sent.body).toEqual({ data: { count: 1 } });
   });
 
   it("a Buffer chunk is read like any Uint8Array", async () => {
