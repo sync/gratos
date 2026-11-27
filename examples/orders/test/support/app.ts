@@ -96,11 +96,16 @@ export const start = async (
   env: Record<string, string>,
 ): Promise<Running> => {
   const port = await freePort();
+  // A child never inherits the OTLP endpoint (src/tracing.ts): a developer's or a runner's own
+  // setting would switch the exporter on behind a test's back. A test that wants it passes it.
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => name !== "OTEL_EXPORTER_OTLP_ENDPOINT"),
+  );
   const child: ChildProcess = spawn(process.execPath, args, {
     cwd,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1", NO_COLOR: "1" },
+    env: { ...inherited, ...env, PORT: String(port), HOST: "127.0.0.1", NO_COLOR: "1" },
   });
   let output = "";
   child.stdout?.on("data", (chunk: Buffer) => {

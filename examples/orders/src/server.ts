@@ -8,15 +8,23 @@
 // load, every request, on any path, answers 500 GRATS_ERROR with the diagnostics until the next
 // good save restarts the process. This file therefore imports nothing from the watched folders.
 // A production start loads the same two modules and never loads the compiler or TypeScript.
+//
+// Tracing is optional: set OTEL_EXPORTER_OTLP_ENDPOINT to export every request's trace over OTLP
+// (src/tracing.ts). Without it, the exporter is never loaded.
 import { createServer as createHttpServer } from "node:http";
 
 import type { GratsDevError } from "@dblechoc/gratos/dev";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Config, Effect, Layer, Result } from "effect";
 import type { FileSystem } from "effect";
-import { HttpServer, HttpServerResponse } from "effect/http";
+import { FetchHttpClient, HttpServer, HttpServerResponse } from "effect/http";
+
+import { tracingLayer } from "./tracing.ts";
 
 const dev = process.env["GRATS_DEV"] === "1";
+
+/** The OTLP tracer when OTEL_EXPORTER_OTLP_ENDPOINT is set, posting with fetch; otherwise none. */
+const tracing = tracingLayer().pipe(Layer.provide(FetchHttpClient.layer));
 
 /**
  * The app: the generated schema served by the wiring in graphql.ts. Imported, never
@@ -28,7 +36,7 @@ const loadApp = async () => {
     import("./generated/schema.ts"),
     import("./graphql.ts"),
   ]);
-  return app.appLayer(schema.getSchema());
+  return app.appLayer(schema.getSchema(), { tracing });
 };
 
 type AppLayer = Awaited<ReturnType<typeof loadApp>>;
