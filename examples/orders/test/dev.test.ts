@@ -2,16 +2,19 @@
 // --watch-path over a copy of the app. A save restarts the server once, the boot step
 // regenerates the schema, broken models answer GRATS_ERROR until the next good save, and each
 // restart starts the APQ cache and open subscriptions over. Save-to-first-good-response is
-// bounded at 2 s locally and 3 s (+50%) when CI is set.
+// asserted within 10 s everywhere, and within the 2 s budget only when CI is unset; in CI the
+// bench job reports it (support/budget.ts, docs/plan.html F3).
 import { writeFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { AUTHORIZATION, copyApp, devCommand, post, start, until } from "./support/app.ts";
 import type { AppCopy, Answer, Payload, Running } from "./support/app.ts";
+import { devLoopBounds, timingsReport } from "./support/budget.ts";
+import type { DevLoopTiming } from "./support/budget.ts";
 
-const BUDGET_MS = process.env["CI"] === undefined ? 2000 : 3000;
+const BOUNDS = devLoopBounds(process.env);
 /** Bounds for waits that are not measured against the budget (a first boot, a failure). */
 const BOOT_MS = 15_000;
 
@@ -77,10 +80,28 @@ const addLabel = (source: string) =>
 const lineOf = (source: string, text: string): number =>
   source.split("\n").findIndex((line) => line.includes(text)) + 1;
 
-const timings: Array<string> = [];
+const timings: Array<DevLoopTiming> = [];
+
+/** Records a save-to-first-good-response and asserts the bounds that apply here. */
+const measured = (name: string, savedAt: number): void => {
+  const ms = performance.now() - savedAt;
+  timings.push({ name, ms: Math.round(ms) });
+  expect(ms, `${name}: the correctness bound`).toBeLessThanOrEqual(BOUNDS.correctnessBoundMs);
+  if (BOUNDS.latencyBudgetMs !== undefined) {
+    expect(ms, `${name}: the latency budget`).toBeLessThanOrEqual(BOUNDS.latencyBudgetMs);
+  }
+};
+
+afterAll(() => {
+  // Written even when a test failed, so the bench job reports what was measured; the failure
+  // still fails its step.
+  if (BOUNDS.timingsFile !== undefined) {
+    writeFileSync(BOUNDS.timingsFile, timingsReport(timings));
+  }
+});
 
 describe("pnpm dev", () => {
-  it("edits a model and sees the new field after one restart, within the budget", async () => {
+  it("edits a model and sees the new field after one restart", async () => {
     const { app, dev } = await startDev();
     await firstGood(dev, ORDER, { order: { id: "o-1", status: "open" } }, BOOT_MS);
     expect(dev.output()).toContain("Gratos: the schema is up to date");
@@ -88,9 +109,7 @@ describe("pnpm dev", () => {
 
     const savedAt = save(app, MODEL, addLabel);
     await firstGood(dev, LABEL, { order: { label: "o-1:open" } }, BOOT_MS);
-    const elapsed = performance.now() - savedAt;
-    timings.push(`edit → new field: ${Math.round(elapsed)} ms`);
-    expect(elapsed).toBeLessThanOrEqual(BUDGET_MS);
+    measured("edit → new field", savedAt);
 
     // The boot step wrote the generated files, which are not watched: no second restart.
     expect(app.read("src/generated/schema.graphql")).toContain("label: String");
@@ -163,9 +182,7 @@ describe("pnpm dev", () => {
       source.replace("  status: string = ;", "  status: string;"),
     );
     await firstGood(dev, ORDER, { order: { id: "o-1", status: "open" } }, BOOT_MS);
-    const elapsed = performance.now() - fixedAt;
-    timings.push(`fix → recovered: ${Math.round(elapsed)} ms`);
-    expect(elapsed).toBeLessThanOrEqual(BUDGET_MS);
+    measured("fix → recovered", fixedAt);
     expect(dev.restarts()).toBe(3);
   });
 
@@ -250,9 +267,7 @@ describe("pnpm dev", () => {
       source.replace('\nthrow new Error("FakeApi is broken");\n', ""),
     );
     await firstGood(dev, ORDER, { order: { id: "o-1", status: "open" } }, BOOT_MS);
-    const elapsed = performance.now() - fixedAt;
-    timings.push(`service fix → recovered: ${Math.round(elapsed)} ms`);
-    expect(elapsed).toBeLessThanOrEqual(BUDGET_MS);
+    measured("service fix → recovered", fixedAt);
   });
 
   it("starts the APQ cache and open subscriptions over on each save", async () => {
@@ -328,9 +343,7 @@ describe("pnpm dev", () => {
       app: dev,
     });
     await firstGood(dev, ORDER, { order: { id: "o-1", status: "open" } }, BOOT_MS);
-    const elapsed = performance.now() - savedAt;
-    timings.push(`save with an open subscription → answered: ${Math.round(elapsed)} ms`);
-    expect(elapsed).toBeLessThanOrEqual(BUDGET_MS);
+    measured("save with an open subscription → answered", savedAt);
     const endedAt = await Promise.race([ended, sleep(1000, undefined)]);
     expect(endedAt).toBeDefined();
     expect(dev.output()).toContain("Gratos: the schema is up to date");
@@ -354,7 +367,15 @@ describe("pnpm dev", () => {
 
   it("reports its timings", () => {
     // oxlint-disable-next-line no-console
-    console.log(`dev-loop timings (budget ${BUDGET_MS} ms):\n  ${timings.join("\n  ")}`);
+    console.log(
+      `dev-loop timings (${
+        BOUNDS.latencyBudgetMs === undefined
+          ? "CI: reported, not asserted"
+          : `budget ${BOUNDS.latencyBudgetMs} ms`
+      }; correctness bound ${BOUNDS.correctnessBoundMs} ms):\n  ${timings
+        .map(({ name, ms }) => `${name}: ${ms} ms`)
+        .join("\n  ")}`,
+    );
     expect(timings.length).toBeGreaterThan(0);
   });
 });
