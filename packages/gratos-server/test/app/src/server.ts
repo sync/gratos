@@ -47,6 +47,8 @@ export interface AppOptions {
   readonly confirmationHold?: ((id: string) => Promise<void>) | undefined;
   /** effect()'s context, for requests that do not come through effectRoute (handle() alone). */
   readonly context?: Context.Context<never> | undefined;
+  /** createServer's request body limit (the default, 1 MiB, when absent). */
+  readonly maxBodyBytes?: number | undefined;
 }
 
 /**
@@ -99,6 +101,7 @@ export const makeServer = (services: Context.Context<Services>, options: AppOpti
       }),
     ],
     logger: options.logger ?? console,
+    maxBodyBytes: options.maxBodyBytes,
   });
 
 /** The services, with the journal the tests read. */
