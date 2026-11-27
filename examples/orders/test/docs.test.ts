@@ -10,7 +10,18 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = join(import.meta.dirname, "..", "..", "..");
 
-const DOCS = ["examples/orders/README.md", "packages/gratos/llm-docs/gratos/effect.md"] as const;
+/**
+ * Every document with tagged code blocks, and how many it has at least: a block that is dropped,
+ * or that the matcher stops seeing, fails its document's count.
+ */
+const DOCS = {
+  "examples/orders/README.md": 8,
+  "packages/gratos/llm-docs/gratos/effect.md": 8,
+  "packages/gratos/llm-docs/gratos/differences.md": 5,
+  "packages/gratos/llm-docs/gratos/server.md": 6,
+  "packages/gratos/README.md": 2,
+  "packages/gratos-server/README.md": 1,
+} as const;
 
 interface Snippet {
   readonly file: string;
@@ -19,7 +30,14 @@ interface Snippet {
   readonly line: number;
 }
 
-const FENCE = /^```\w+ file=(\S+)\n([\s\S]*?)\n```$/gm;
+/**
+ * A tagged block, also inside a list item: its fences share an indentation, and its lines carry
+ * it too (`quotes` takes the lines at any one indentation).
+ */
+const FENCE = /^( *)```\w+ file=(\S+)\n([\s\S]*?)\n\1```$/gm;
+
+/** Every opening fence that names a file, matched by FENCE or not. */
+const TAGGED_FENCE = /^\s*```\S* +file=/gm;
 
 const read = (path: string) => readFileSync(join(repoRoot, path), "utf8");
 
@@ -54,8 +72,8 @@ const quotes = (text: string, snippet: string): boolean => {
 /** The tagged code blocks of `text` (the text of `doc`, or a part of it starting at its `line`). */
 const snippetsIn = (text: string, firstLine = 1): Array<Snippet> =>
   [...text.matchAll(FENCE)].map((match) => ({
-    file: match[1] ?? "",
-    code: match[2] ?? "",
+    file: match[2] ?? "",
+    code: match[3] ?? "",
     line: firstLine + text.slice(0, match.index).split("\n").length - 1,
   }));
 
@@ -77,11 +95,15 @@ const stepsOf = (readme: string) => {
   });
 };
 
-describe.each(DOCS)("%s", (doc) => {
+describe.each(Object.entries(DOCS))("%s", (doc, minimum) => {
   const snippets = snippetsOf(doc);
 
-  it("has code blocks tied to files", () => {
-    expect(snippets.length).toBeGreaterThanOrEqual(5);
+  it(`has at least ${minimum} code blocks tied to files`, () => {
+    expect(snippets.length).toBeGreaterThanOrEqual(minimum);
+  });
+
+  it("checks every block that names a file", () => {
+    expect(snippets.length).toBe([...read(doc).matchAll(TAGGED_FENCE)].length);
   });
 
   it.each(snippets.map((snippet) => [`${snippet.file} (line ${snippet.line})`, snippet] as const))(
