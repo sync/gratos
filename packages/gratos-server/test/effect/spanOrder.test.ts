@@ -633,6 +633,10 @@ describe("F5: a subscription source fails while a resolver still runs", () => {
     );
     const events = readSse(await response.text());
     expect(events.names).toEqual(["next", "next", "complete"]);
+    // Event 1 carries its non-null error; event 2 is the source's own error, before complete.
+    expect(events.payloads.map((payload) => payload.errors?.map((error) => error.message))).toEqual(
+      [["failing field"], ["source failed"]],
+    );
     const [request] = built.requests;
     expect(abortKindOf(request === undefined ? undefined : signalOf(request)?.reason)).toBe(
       "source",
