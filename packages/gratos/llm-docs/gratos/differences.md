@@ -129,7 +129,7 @@ None of these ports to the TypeScript 7 API, so all of them were cut (M1b in `do
 | `guides/workflows.md`                                | The script runs `gratos`; there is no `--watch` to pass it (use `node --watch-path`)        |
 | `guides/incremental-migration/gradual-annotation.md` | `gratos`, not `npx grats`                                                                   |
 | `guides/incremental-migration/schema-merging.md`     | The script runs `gratos`, not `grats`                                                       |
-| `guides/performance-profiling.md`                    | Profile `node_modules/@dblechoc/gratos/src/cli.ts`                                          |
+| `guides/performance-profiling.md`                    | Profile `node_modules/@dblechoc/gratos/dist/cli.js`                                         |
 | `resolvers.md`                                       | `GqlInfo` comes from `@dblechoc/gratos`                                                     |
 | `docblock-tags/info.md`                              | Import `GqlInfo` from `@dblechoc/gratos`, not `"grats"`                                     |
 | `docblock-tags/scalars.md`                           | Import `Float`, `Int` and `ID` from `@dblechoc/gratos`, not `"grats"`                       |

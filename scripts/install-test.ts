@@ -193,6 +193,12 @@ interface Packed {
 
 const CARET_RANGE = /^\^(\d+\.\d+\.\d+)$/;
 
+/** Each package's peers, and whether each one is optional. */
+const EXPECTED_PEERS = new Map([
+  ["@dblechoc/gratos", { effect: false, "@effect/platform-node": false, graphql: false }],
+  ["@dblechoc/gratos-server", { graphql: false, effect: true, "graphql-jit": true }],
+]);
+
 /** The catalog's exact pin of `name`, from pnpm-workspace.yaml. */
 const catalogVersion = (name: string): string => {
   const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
@@ -209,10 +215,26 @@ const inspect = (packed: Packed): void => {
     !text.includes("catalog:") && !text.includes("workspace:"),
     `${name}: the manifest has no catalog: or workspace: specifier`,
   );
-  expect(stringAt(manifest, "private") === undefined, `${name}: the manifest is not private`);
+  expect(
+    !isRecord(manifest) || !Object.hasOwn(manifest, "private"),
+    `${name}: the manifest has no private field`,
+  );
 
   const peers = Object.entries(recordAt(manifest, "peerDependencies"));
-  expect(peers.length > 0, `${name}: the manifest has peers`);
+  // Exactly the peers each package declares, and which of them are optional: a dropped peer
+  // would pass the checks below, since the fixture installs it anyway.
+  const expectedPeers = EXPECTED_PEERS.get(name) ?? {};
+  expect(
+    JSON.stringify(peers.map(([peer]) => peer).toSorted()) ===
+      JSON.stringify(Object.keys(expectedPeers).toSorted()),
+    `${name}: the peers are exactly ${Object.keys(expectedPeers).join(", ")}`,
+    JSON.stringify(peers.map(([peer]) => peer)),
+  );
+  const meta = recordAt(manifest, "peerDependenciesMeta");
+  for (const [peer, optional] of Object.entries(expectedPeers)) {
+    const flag = isRecord(meta[peer]) ? meta[peer]["optional"] === true : false;
+    expect(flag === optional, `${name}: the peer ${peer} is ${optional ? "optional" : "required"}`);
+  }
   for (const [peer, range] of peers) {
     const minimum = typeof range === "string" ? CARET_RANGE.exec(range)?.[1] : undefined;
     expect(minimum !== undefined, `${name}: the peer ${peer} is a caret range (${String(range)})`);
@@ -449,6 +471,12 @@ export const ask = async (server: Server, query: string): Promise<string> => {
 `;
 
 /** A production start: the generated schema module and the app, never the compiler. */
+/** Imports a value from the compiler's root entry, so its runtime export is exercised too. */
+const COMPILER_RUNTIME = `import { packageName } from "@dblechoc/gratos";
+
+process.stdout.write(packageName);
+`;
+
 const SERVER_START = `import { ask, makeServer, QUERY } from "./app.ts";
 import { getSchema } from "./generated/schema.ts";
 
@@ -756,6 +784,15 @@ const main = (): void => {
       tsc.status === 0,
       `tsc --noEmit passes with skipLibCheck: false (${tscVersion.stdout.trim()})`,
       show(tsc),
+    );
+
+    // The compiler's root entry at run time, not only for types.
+    write("src/runtime.ts", COMPILER_RUNTIME);
+    const runtime = run(project, process.execPath, ["src/runtime.ts"]);
+    expect(
+      runtime.status === 0 && runtime.stdout === COMPILER,
+      `the compiler's root entry runs: packageName is ${COMPILER}`,
+      show(runtime),
     );
 
     // The core entry alone.
