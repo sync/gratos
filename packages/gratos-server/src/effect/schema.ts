@@ -294,13 +294,26 @@ const streamSource = <A, E, R, F>(
  * The Stream's iterator, recording its close in the request scope (`streams`) from its first
  * pull until its Stream's scope has closed: the iterator settles `return()`, `throw()`, a failed
  * pull and the end only once the close has run its finalizers.
+ *
+ * A pull's synchronous start can close the iterator re-entrantly (a source that aborts the
+ * request while it acquires, docs/plan.html F5). Stream.toAsyncIterableWith runs the pull before
+ * it knows the pull's fiber, so a close then would close the Stream's scope at once and leave the
+ * fiber running, its finalizer not yet registered. So `return()` and `throw()` called while the
+ * inner `next()` is on the stack (`starting`) wait for that call to return, and only then close
+ * the inner iterator, which interrupts the fiber and waits for its release; meanwhile `next()`
+ * pulls nothing more. Any other call goes straight to the inner iterator.
+ * (Upstream fact: test/effect/spanOrder.test.ts, "upstream facts".)
  */
-const tracked = <A>(iterator: AsyncIterator<A>, scope: RequestScope): AsyncIterator<A> => {
+export const tracked = <A>(iterator: AsyncIterator<A>, scope: RequestScope): AsyncIterator<A> => {
   if (isUnbound(scope)) {
     return iterator;
   }
   let closing: PromiseWithResolvers<void> | undefined;
   let closed = false;
+  /** Set while the inner `next()` call is on the stack. */
+  let starting: PromiseWithResolvers<void> | undefined;
+  /** Set once a re-entrant `return()` or `throw()` waits for that call to return. */
+  let returning = false;
   const open = (): void => {
     if (closing === undefined && !closed) {
       closing = Promise.withResolvers();
@@ -314,11 +327,38 @@ const tracked = <A>(iterator: AsyncIterator<A>, scope: RequestScope): AsyncItera
       closing.resolve();
     }
   };
+  /**
+   * The end of the inner `next()` call on the stack, if any (a re-entrant close), marking the
+   * iterator as returning; undefined otherwise, so any other close takes no extra microtask.
+   */
+  const reentered = (): Promise<void> | undefined => {
+    if (starting === undefined) {
+      return undefined;
+    }
+    returning = true;
+    return starting.promise;
+  };
+  /** Calls the inner `next()`, marking it as on the stack (the gate is always released). */
+  const pull = (): Promise<IteratorResult<A>> => {
+    const start = Promise.withResolvers<void>();
+    starting = start;
+    try {
+      return iterator.next();
+    } finally {
+      if (starting === start) {
+        starting = undefined;
+      }
+      start.resolve();
+    }
+  };
   return {
     next: async () => {
+      if (returning) {
+        return { done: true, value: undefined };
+      }
       open();
       try {
-        const result = await iterator.next();
+        const result = await pull();
         if (result.done === true) {
           close();
         }
@@ -330,6 +370,10 @@ const tracked = <A>(iterator: AsyncIterator<A>, scope: RequestScope): AsyncItera
     },
     return: async (value?: unknown) => {
       try {
+        const start = reentered();
+        if (start !== undefined) {
+          await start;
+        }
         return (await iterator.return?.(value)) ?? { done: true, value: undefined };
       } finally {
         close();
@@ -337,6 +381,10 @@ const tracked = <A>(iterator: AsyncIterator<A>, scope: RequestScope): AsyncItera
     },
     throw: async (error?: unknown) => {
       try {
+        const start = reentered();
+        if (start !== undefined) {
+          await start;
+        }
         if (iterator.throw === undefined) {
           throw error;
         }

@@ -1,14 +1,16 @@
 // The operation span ends after every span it parents (docs/plan.html F5, "Done when"), each case on
 // the executor it is about. Each test records start, finalizer and span-end events in one log and
 // orders them with gates (deferreds): no sleeps, no wall-clock comparisons.
-import { Cause, Effect, Exit, Fiber, Predicate, Stream, Tracer } from "effect";
+import { Cause, Context, Effect, Exit, Fiber, Predicate, Stream, Tracer } from "effect";
 import type { Scope } from "effect";
 import { HttpServerError } from "effect/http";
+import { Kind, parse } from "graphql";
 import type {
   GraphQLError,
   GraphQLFieldResolver,
   GraphQLResolveInfo,
   GraphQLSchema,
+  OperationDefinitionNode,
 } from "graphql";
 import { describe, expect, it, onTestFinished } from "vitest";
 
@@ -24,6 +26,8 @@ import {
 import type { Plugin, Server } from "../../src/index.ts";
 import { effect, effectSchema, fromCause } from "../../src/effect/index.ts";
 import { RequestEnded } from "../../src/effect/errors.ts";
+import { tracked } from "../../src/effect/schema.ts";
+import type { RequestScope } from "../../src/effect/state.ts";
 import { flush, gate, gql, post, send } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
 import { readSse } from "../support/stream.ts";
@@ -299,47 +303,81 @@ describe("F5: deferred startup (incremental executor)", () => {
   });
 });
 
-describe("F5: first pull (subscription path)", () => {
-  // Written first (docs/plan.html F5): it fails on the base, so this is a gap, located but not
-  // fixed here. The client's abort inside the source's first pull closes the stream at once, and
-  // the iterator's return() reaches Stream.toAsyncIterableWith re-entrantly, while that first
-  // next() is still forking its pull fiber: the iterator closes its scope before it knows the
-  // fiber, its return() resolves before the source's finalizer has run, and the span ends while
-  // the finalizer is still open. The fix needs a mechanism the plan does not describe, so it waits
-  // for a council; `it.fails` turns red once it is fixed.
-  it.fails("runs the source's finalizer before the span ends when the source aborts the request during its first pull, once", async () => {
-    const log: Array<string> = [];
-    const controller = new AbortController();
-    const source = held(log, "source", () => {
-      controller.abort();
-    });
-    onTestFinished(() => {
-      source.hold.resolve();
-    });
-    const built = build(log, [], {
-      Subscription: {
-        source: () => Stream.unwrap(source.resource.pipe(Effect.as(Stream.never))),
-      },
-    });
-    const response = await built.server.handle(
-      post(
-        { query: "subscription FirstPull { source }" },
-        { accept: "text/event-stream", signal: controller.signal },
+/** A Stream whose one pull never ends, logging `${name} pull exit` once its fiber exits. */
+const pendingPull = (log: Array<string>, name: string): Stream.Stream<never> =>
+  Stream.fromEffect(
+    Effect.never.pipe(
+      Effect.onExit(() =>
+        Effect.sync(() => {
+          log.push(`${name} pull exit`);
+        }),
       ),
-    );
-    // Reading pulls the source: it acquires, aborts the request, and the body ends.
-    expect(await response.text()).toBe("");
-    await source.releasing.promise;
-    await flush();
-    const [operation] = built.operations();
-    expect(operation?.ended).toBe(false);
-    source.hold.resolve();
-    await built.spanEnded;
-    expect(at(log, "source released")).toBeLessThan(at(log, "end graphql FirstPull"));
-    expect(operation?.outcome).toBe("cancel");
-    expect(operation?.endCalls).toBe(1);
-    expect(built.endCount()).toBe(1);
-  });
+    ),
+  );
+
+/** How many times `entry` is in the log. */
+const count = (log: ReadonlyArray<string>, entry: string): number =>
+  log.filter((logged) => logged === entry).length;
+
+describe("F5: a source aborts the request during a pull's synchronous start (subscription path)", () => {
+  // The client's abort inside the pull closes the stream at once, and the iterator's return()
+  // reaches Stream.toAsyncIterableWith re-entrantly, while next() is still forking the pull's
+  // fiber. tracked() waits for that next() to return before it closes the inner iterator, which
+  // then interrupts the fiber and waits for the release (see "upstream facts" below).
+  it.each([
+    {
+      pull: "first",
+      events: 0,
+      streamOf: (log: Array<string>, resource: Effect.Effect<void, never, Scope.Scope>) =>
+        Stream.unwrap(resource.pipe(Effect.as(pendingPull(log, "source")))),
+    },
+    {
+      pull: "a later",
+      events: 1,
+      // The first pull's batch runs out; the next pull forks again and aborts in its acquire.
+      streamOf: (log: Array<string>, resource: Effect.Effect<void, never, Scope.Scope>) =>
+        Stream.make("first").pipe(
+          Stream.concat(Stream.unwrap(resource.pipe(Effect.as(pendingPull(log, "source"))))),
+        ),
+    },
+  ])(
+    "runs the source's finalizer once, before the span ends, and settles the pull's fiber ($pull pull)",
+    async ({ events, streamOf }) => {
+      const log: Array<string> = [];
+      const controller = new AbortController();
+      const acquired = held(log, "source", () => {
+        controller.abort();
+      });
+      onTestFinished(() => {
+        acquired.hold.resolve();
+      });
+      const built = build(log, [], {
+        Subscription: { source: () => streamOf(log, acquired.resource) },
+      });
+      const response = await built.server.handle(
+        post(
+          { query: "subscription Pulled { source }" },
+          { accept: "text/event-stream", signal: controller.signal },
+        ),
+      );
+      // Reading pulls the source: it acquires, aborts the request, and the body ends.
+      expect(readSse(await response.text()).names).toEqual(Array<string>(events).fill("next"));
+      await acquired.releasing.promise;
+      await flush();
+      const [operation] = built.operations();
+      expect(operation?.ended).toBe(false);
+      acquired.hold.resolve();
+      await built.spanEnded;
+      // The pull's fiber was interrupted (it never leaks), then the scope ran the release.
+      expect(at(log, "source pull exit")).toBeLessThan(at(log, "source finalizer"));
+      expect(at(log, "source released")).toBeLessThan(at(log, "end graphql Pulled"));
+      expect(count(log, "source finalizer")).toBe(1);
+      expect(count(log, "end graphql Pulled")).toBe(1);
+      expect(operation?.outcome).toBe("cancel");
+      expect(operation?.endCalls).toBe(1);
+      expect(built.endCount()).toBe(1);
+    },
+  );
 });
 
 describe("F5: a non-null field fails while a sibling runs", () => {
@@ -830,5 +868,205 @@ describe("F5: the core's own aborts carry a reason the Effect layer reads", () =
     expect((await pending).status).toBe(499);
     await until(() => stops.length === 1);
     expect(stops).toEqual(["client"]);
+  });
+});
+
+/** A bound request scope, for tracked() on its own. */
+const boundScope = (): RequestScope => {
+  const [operation] = parse("subscription Pulled { source }").definitions.filter(
+    (definition): definition is OperationDefinitionNode =>
+      definition.kind === Kind.OPERATION_DEFINITION,
+  );
+  if (operation === undefined) {
+    throw new Error("no operation");
+  }
+  return {
+    operations: new Set([operation]),
+    context: Context.empty(),
+    fibers: new Set(),
+    starts: new Set(),
+    streams: new Set(),
+    interruptOnAbort: true,
+    signal: undefined,
+    stopped: undefined,
+    spanEnded: () => {},
+  };
+};
+
+/**
+ * A stub inner iterator that logs its calls. Its `next()` runs `during` synchronously (where a
+ * test closes the tracked iterator re-entrantly), then returns; `closed` holds its `return()` and
+ * `throw()` open.
+ */
+const stubIterator = (
+  log: Array<string>,
+  during: () => void,
+  closed: Promise<void> = Promise.resolve(),
+) => {
+  const calls = { next: 0 };
+  const iterator: AsyncIterator<string> = {
+    next: () => {
+      calls.next += 1;
+      log.push("inner next");
+      during();
+      log.push("inner next returned");
+      return Promise.resolve({ done: false, value: "a" });
+    },
+    return: () => {
+      log.push("inner return");
+      return closed.then(() => ({ done: true, value: undefined }));
+    },
+    throw: () => {
+      log.push("inner throw");
+      return closed.then(() => ({ done: true, value: undefined }));
+    },
+  };
+  return { calls, iterator };
+};
+
+describe("F5: tracked() waits for a pull's synchronous start before it closes the iterator", () => {
+  it("(a) calls the inner return() of a re-entrant return() only once next() has returned", async () => {
+    const log: Array<string> = [];
+    const scope = boundScope();
+    let returned: Promise<IteratorResult<string>> | undefined;
+    const { iterator } = stubIterator(log, () => {
+      returned = wrapped.return?.();
+    });
+    const wrapped = tracked(iterator, scope);
+    const pulled = wrapped.next();
+    expect(log).toEqual(["inner next", "inner next returned"]);
+    expect(scope.streams.size).toBe(1);
+    expect(await returned).toEqual({ done: true, value: undefined });
+    expect(log).toEqual(["inner next", "inner next returned", "inner return"]);
+    expect(scope.streams.size).toBe(0);
+    await pulled;
+  });
+
+  it("(b) calls the inner return() of any other return() in the same tick (pinning)", async () => {
+    const log: Array<string> = [];
+    const scope = boundScope();
+    const { iterator } = stubIterator(log, () => {});
+    const wrapped = tracked(iterator, scope);
+    await wrapped.next();
+    const returned = wrapped.return?.();
+    expect(log).toEqual(["inner next", "inner next returned", "inner return"]);
+    await returned;
+    expect(scope.streams.size).toBe(0);
+  });
+
+  it("(c) releases the gate when the inner next() throws synchronously", async () => {
+    const log: Array<string> = [];
+    const scope = boundScope();
+    let returned: Promise<IteratorResult<string>> | undefined;
+    let settled = false;
+    const iterator: AsyncIterator<string> = {
+      next: () => {
+        log.push("inner next");
+        returned = wrapped.return?.();
+        void returned?.then(() => {
+          settled = true;
+        });
+        log.push("inner next throws");
+        throw new Error("pull failed");
+      },
+      return: () => {
+        log.push("inner return");
+        return Promise.resolve({ done: true, value: undefined });
+      },
+    };
+    const wrapped = tracked(iterator, scope);
+    await expect(wrapped.next()).rejects.toThrow("pull failed");
+    await flush();
+    // The re-entrant return() went on once the throw left the stack.
+    expect(settled).toBe(true);
+    expect(log).toEqual(["inner next", "inner next throws", "inner return"]);
+    expect(scope.streams.size).toBe(0);
+  });
+
+  it("(d) resolves a next() called while the return is in progress as done, without the inner next()", async () => {
+    const log: Array<string> = [];
+    const scope = boundScope();
+    const hold = gate();
+    let returned: Promise<IteratorResult<string>> | undefined;
+    const { calls, iterator } = stubIterator(
+      log,
+      () => {
+        returned = wrapped.return?.();
+      },
+      hold.promise,
+    );
+    const wrapped = tracked(iterator, scope);
+    const pulled = wrapped.next();
+    // Before the waiting return() has called the inner one, then while that is held open.
+    const early = wrapped.next();
+    await flush();
+    expect(log).toEqual(["inner next", "inner next returned", "inner return"]);
+    const late = wrapped.next();
+    expect(await early).toEqual({ done: true, value: undefined });
+    expect(await late).toEqual({ done: true, value: undefined });
+    expect(calls.next).toBe(1);
+    hold.resolve();
+    await returned;
+    await pulled;
+    expect(calls.next).toBe(1);
+  });
+
+  it("(e) gates a re-entrant throw() the same way", async () => {
+    const log: Array<string> = [];
+    const scope = boundScope();
+    let thrown: Promise<IteratorResult<string>> | undefined;
+    const { iterator } = stubIterator(log, () => {
+      thrown = wrapped.throw?.(new Error("closed"));
+    });
+    const wrapped = tracked(iterator, scope);
+    const pulled = wrapped.next();
+    expect(log).toEqual(["inner next", "inner next returned"]);
+    expect(await thrown).toEqual({ done: true, value: undefined });
+    expect(log).toEqual(["inner next", "inner next returned", "inner throw"]);
+    expect(scope.streams.size).toBe(0);
+    await pulled;
+  });
+});
+
+// Upstream facts (docs/plan.html F3's style, test/jit.test.ts): the raw library behaviour behind a
+// workaround. It fails when Effect changes the behaviour, and its message names the workaround to
+// review then.
+describe("upstream facts", () => {
+  it("Stream.toAsyncIterableWith resolves a re-entrant return() before the release has finished (workaround: tracked()'s first-pull gate)", async () => {
+    const log: Array<string> = [];
+    const hold = gate();
+    onTestFinished(() => {
+      hold.resolve();
+    });
+    let returned: Promise<IteratorResult<never>> | undefined;
+    const iterator: AsyncIterator<never> = Stream.toAsyncIterableWith(
+      Stream.unwrap(
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            // Re-entrantly, inside the first pull's synchronous start.
+            returned = iterator.return?.();
+          }),
+          () =>
+            Effect.sync(() => {
+              log.push("release");
+            }).pipe(
+              Effect.andThen(Effect.promise(() => hold.promise)),
+              Effect.andThen(
+                Effect.sync(() => {
+                  log.push("released");
+                }),
+              ),
+            ),
+        ).pipe(Effect.as(Stream.never)),
+      ),
+      Context.empty(),
+    )[Symbol.asyncIterator]();
+    void iterator.next();
+    await returned;
+    log.push("returned");
+    expect(
+      log,
+      "An upstream fact changed: review the workaround in src/effect/schema.ts, tracked() (the first-pull gate)",
+    ).toEqual(["release", "returned"]);
   });
 });
