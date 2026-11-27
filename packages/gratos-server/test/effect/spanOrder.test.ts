@@ -265,6 +265,16 @@ interface Client {
 
 const incrementalPlugins = (): ReadonlyArray<Plugin> => [incremental()];
 
+/**
+ * Waits up to `turns` event-loop turns for `check()` to hold, and never fails: the test asserts on
+ * what it waited for itself, so a failure names what changed rather than a timeout.
+ */
+const settles = async (check: () => boolean, turns = 100): Promise<void> => {
+  for (let turn = 0; turn < turns && !check(); turn += 1) {
+    await flush();
+  }
+};
+
 /** Waits, at most two seconds, for `check()` to hold, once per event-loop turn. */
 const until = async (check: () => boolean): Promise<void> => {
   for (let turn = 0; !check(); turn += 1) {
@@ -1139,10 +1149,15 @@ describe("F5: tracked() waits for a pull's synchronous start before it closes th
 describe("upstream facts", () => {
   it("Stream.toAsyncIterableWith resolves a re-entrant return() before the release has finished (workaround: tracked()'s first-pull gate)", async () => {
     const log: Array<string> = [];
+    // The release's latch, which the test holds until it has seen whether return() settled.
     const hold = gate();
     onTestFinished(() => {
       hold.resolve();
     });
+    // Resolves once the release has run to its end.
+    const released = gate();
+    let holding = true;
+    let settledWhileHeld: boolean | undefined;
     let returned: Promise<IteratorResult<never>> | undefined;
     const iterator: AsyncIterator<never> = Stream.toAsyncIterableWith(
       Stream.unwrap(
@@ -1150,6 +1165,10 @@ describe("upstream facts", () => {
           Effect.sync(() => {
             // Re-entrantly, inside the first pull's synchronous start.
             returned = iterator.return?.();
+            void returned?.then(() => {
+              settledWhileHeld = holding;
+              log.push("returned");
+            });
           }),
           () =>
             Effect.sync(() => {
@@ -1159,6 +1178,7 @@ describe("upstream facts", () => {
               Effect.andThen(
                 Effect.sync(() => {
                   log.push("released");
+                  released.resolve();
                 }),
               ),
             ),
@@ -1166,12 +1186,21 @@ describe("upstream facts", () => {
       ),
       Context.empty(),
     )[Symbol.asyncIterator]();
+    // The pull itself stays pending on 4.1.5, released or not: only return() is joined.
     void iterator.next();
-    await returned;
-    log.push("returned");
+    try {
+      // Bounded by event-loop turns: a return() that waits for the release never settles here.
+      await settles(() => settledWhileHeld !== undefined);
+    } finally {
+      holding = false;
+      hold.resolve();
+    }
+    // return() and the release both finish once the latch is released.
+    await Promise.all([returned, released.promise]);
     expect(
-      log,
+      settledWhileHeld,
       "An upstream fact changed: review the workaround in src/effect/schema.ts, tracked() (the first-pull gate)",
-    ).toEqual(["release", "returned"]);
+    ).toBe(true);
+    expect(log).toEqual(["release", "returned", "released"]);
   });
 });
