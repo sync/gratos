@@ -7,6 +7,7 @@
 // third-party files read as empty (fast loading). Called from effectTypeReference, before
 // upstream reports the qualified name.
 import {
+  isEnumDeclaration,
   isIdentifier,
   isImportDeclaration,
   isImportEqualsDeclaration,
@@ -16,7 +17,7 @@ import {
   isStringLiteral,
   SyntaxKind,
 } from "#typescript";
-import type { EntityName, ImportDeclaration, Node } from "#typescript";
+import type { EntityName, ImportDeclaration, Node, Statement } from "#typescript";
 
 import { renamedWrapperImport } from "./errors.ts";
 import type { EffectWrapper } from "./wrappers.ts";
@@ -50,23 +51,68 @@ const bindsWrapper = (
   );
 };
 
+/** Whether `statements` declare `alias` as a name `alias.X` can resolve through in a type. */
+const declares = (statements: ReadonlyArray<Statement>, alias: string): boolean =>
+  statements.some(
+    (statement) =>
+      (isModuleDeclaration(statement) ||
+        isImportEqualsDeclaration(statement) ||
+        isEnumDeclaration(statement)) &&
+      isIdentifier(statement.name) &&
+      statement.name.text === alias,
+  );
+
 /**
- * Whether a namespace enclosing `node` declares `alias` itself (`namespace Fx {}` or
- * `import Fx = …`), so `Fx` there is that local namespace and not the file's import. Only a
- * namespace body can shadow a file-level namespace name in a type position: a top-level
- * declaration of the same name would conflict with the import.
+ * The statements of every block of the namespace `path` among `statements`. A namespace may be
+ * declared in several blocks, which TypeScript merges, and a dotted `namespace A.B {}` nests one
+ * declaration in another.
+ */
+const namespaceBodies = (
+  statements: ReadonlyArray<Statement>,
+  path: ReadonlyArray<string>,
+): Array<ReadonlyArray<Statement>> => {
+  const [head, ...rest] = path;
+  if (head === undefined) {
+    return [statements];
+  }
+  const bodies: Array<ReadonlyArray<Statement>> = [];
+  for (const statement of statements) {
+    if (
+      !isModuleDeclaration(statement) ||
+      !isIdentifier(statement.name) ||
+      statement.name.text !== head
+    ) {
+      continue;
+    }
+    const { body } = statement;
+    if (body !== undefined && isModuleBlock(body)) {
+      bodies.push(...namespaceBodies(body.statements, rest));
+    } else if (body !== undefined && isModuleDeclaration(body)) {
+      bodies.push(...namespaceBodies([body], rest));
+    }
+  }
+  return bodies;
+};
+
+/**
+ * Whether a namespace enclosing `node` declares `alias` itself (`namespace Fx {}`,
+ * `import Fx = …` or `enum Fx {}`), in any of its merged blocks, so `Fx` there is not the file's
+ * import. Only a namespace can shadow a file-level name this way: a top-level declaration of the
+ * same name would conflict with the import. Conservative: a declaration in another block of the
+ * same namespace counts whether or not it is exported, so a doubtful name gets upstream's error,
+ * never a wrong hint. Namespaces merge across files only in scripts, and a file with imports is a
+ * module.
  */
 const isShadowed = (node: Node, alias: string): boolean => {
+  const path: Array<string> = [];
   for (let current = node.parent; !isSourceFile(current); current = current.parent) {
-    if (
-      isModuleBlock(current) &&
-      current.statements.some(
-        (statement) =>
-          (isModuleDeclaration(statement) || isImportEqualsDeclaration(statement)) &&
-          isIdentifier(statement.name) &&
-          statement.name.text === alias,
-      )
-    ) {
+    if (isModuleDeclaration(current) && isIdentifier(current.name)) {
+      path.unshift(current.name.text);
+    }
+  }
+  const { statements } = node.getSourceFile();
+  for (let depth = path.length; depth > 0; depth--) {
+    if (namespaceBodies(statements, path.slice(0, depth)).some((body) => declares(body, alias))) {
       return true;
     }
   }
