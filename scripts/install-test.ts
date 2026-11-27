@@ -4,9 +4,18 @@
 //
 //   pnpm --filter "./packages/*" pack --pack-destination <dir>
 //
-// writes, which are the ones a release publishes:
+// writes, and `pnpm run release` runs it on the ones that
+//
+//   changeset pack --out-dir <dir>
+//
+// writes, which are the ones `changeset publish --from-pack-dir <dir>` then publishes:
 //
 //   node scripts/install-test.ts <dir> --peers min|newest|core [--keep]
+//
+// A <dir> that holds a publish-plan.json is a `changeset pack` output: the test takes the
+// tarballs that plan publishes, checks each one's integrity against the plan, and passes with
+// nothing to test when the plan publishes nothing (every version is already on the registry).
+// Any other <dir> holds the two tarballs.
 //
 // --peers picks what the project installs beside the tarballs:
 //   min     both tarballs, and each peer at the catalog's pin, the minimum its range allows
@@ -18,6 +27,7 @@
 // every module each process loads. It uses only Node's built-ins, plus npm and the project's own
 // tsc. The project is deleted unless the test fails or --keep is passed.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -578,6 +588,52 @@ const copiesOf = (urls: ReadonlyArray<string>, name: string): ReadonlySet<string
 /** True when any module of `name` was loaded. */
 const loads = (urls: ReadonlyArray<string>, name: string): boolean => copiesOf(urls, name).size > 0;
 
+const PUBLISH_PLAN = "publish-plan.json";
+
+/** A release a `changeset pack` publish plan publishes, with its tarball's path below the dir. */
+interface PlannedRelease {
+  readonly name: string;
+  readonly version: string;
+  readonly tarball: string;
+}
+
+/**
+ * The releases `dir`'s publish-plan.json publishes, each tarball checked against the plan's
+ * integrity (so the tarballs tested are the ones `changeset publish --from-pack-dir` publishes),
+ * or undefined when `dir` holds no plan. The plan's tag-only releases have no tarball.
+ */
+const publishPlan = (dir: string): ReadonlyArray<PlannedRelease> | undefined => {
+  const file = join(dir, PUBLISH_PLAN);
+  if (!existsSync(file)) {
+    return undefined;
+  }
+  const plan = parseJson(readFileSync(file, "utf8"));
+  const version = isRecord(plan) ? plan["version"] : undefined;
+  const chunks = isRecord(plan) ? plan["plan"] : undefined;
+  if (version !== 1 || !Array.isArray(chunks)) {
+    return stop(`${file} is not a version 1 publish plan`);
+  }
+  return chunks.flat().flatMap((release: Json): ReadonlyArray<PlannedRelease> => {
+    if (stringAt(release, "kind") !== "publish") {
+      return [];
+    }
+    const name = stringAt(release, "name") ?? stop(`${file} has a release with no name`);
+    const tarball = recordAt(release, "tarball");
+    const path = stringAt(tarball, "path") ?? stop(`${file} has no tarball for ${name}`);
+    const integrity =
+      stringAt(tarball, "integrity") ?? stop(`${file} has no integrity for ${name}`);
+    const actual = `sha256-${createHash("sha256")
+      .update(readFileSync(join(dir, path)))
+      .digest("base64")}`;
+    if (actual !== integrity) {
+      return stop(
+        `${path} is not the tarball ${file} names (integrity ${actual}, not ${integrity})`,
+      );
+    }
+    return [{ name, version: stringAt(release, "version") ?? "", tarball: path }];
+  });
+};
+
 const main = (): void => {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
@@ -593,7 +649,14 @@ const main = (): void => {
 
   // The tarballs, by package name.
   const dir = resolve(tarballDir);
-  const tarballs = readdirSync(dir).filter((file) => file.endsWith(".tgz"));
+  const planned = publishPlan(dir);
+  if (planned !== undefined && planned.length === 0) {
+    log(`${join(dir, PUBLISH_PLAN)} publishes nothing: there is nothing to test`);
+    return;
+  }
+  const tarballs =
+    planned?.map((release) => release.tarball) ??
+    readdirSync(dir).filter((file) => file.endsWith(".tgz"));
   const packed = new Map<string, Packed>();
   for (const tarball of tarballs) {
     const file = join(dir, tarball);
@@ -601,6 +664,13 @@ const main = (): void => {
     const manifest = parseJson(files.get("package.json")?.toString("utf8") ?? "null");
     const name = stringAt(manifest, "name") ?? stop(`${tarball} has no package name`);
     packed.set(name, { name, file, manifest, files });
+  }
+  for (const release of planned ?? []) {
+    const manifest = packed.get(release.name)?.manifest;
+    expect(
+      manifest !== undefined && stringAt(manifest, "version") === release.version,
+      `${release.tarball} is ${release.name}@${release.version}, as the publish plan says`,
+    );
   }
   const compiler = packed.get(COMPILER) ?? stop(`no ${COMPILER} tarball in ${dir}`);
   const server = packed.get(SERVER) ?? stop(`no ${SERVER} tarball in ${dir}`);
