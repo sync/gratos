@@ -158,16 +158,25 @@ export interface Listening {
   readonly close: () => Promise<void>;
 }
 
+export interface ListenOptions {
+  /**
+   * Hands `handle` the request body as a stream (`Readable.toWeb`) instead of buffering it
+   * first, as NodeHttpServer's route does: the core reads it as it arrives, and a client still
+   * uploading reaches `handle`.
+   */
+  readonly streamBody?: boolean;
+}
+
 /**
  * Serves `handle(Request)` over node:http. Like the Effect platform's server, a client that
  * leaves before the Response exists aborts the Request's signal; once the Response is being
  * written, a disconnect is visible only as a cancel of its body (the pipeline destroys the
- * readable, which cancels the web stream). A client that leaves during its upload is a
- * cancellation: its request never reaches `handle`. Any other failure of the adapter fails the
- * test through `close()`, told apart by where it came from (not by the final socket state: a
- * body error makes the pipeline destroy the socket too).
+ * readable, which cancels the web stream). With the body buffered (the default), a client that
+ * leaves during its upload is a cancellation: its request never reaches `handle`. Any other
+ * failure of the adapter fails the test through `close()`, told apart by where it came from (not
+ * by the final socket state: a body error makes the pipeline destroy the socket too).
  */
-export const listen = async (server: Server): Promise<Listening> => {
+export const listen = async (server: Server, options: ListenOptions = {}): Promise<Listening> => {
   const failures: Array<unknown> = [];
   const http = createHttpServer((req, res) => {
     const controller = new AbortController();
@@ -189,15 +198,22 @@ export const listen = async (server: Server): Promise<Listening> => {
     });
 
     const serve = async (): Promise<void> => {
-      const bytes = await buffer(req);
       const method = req.method ?? "GET";
-      const init: RequestInit = {
+      const init: RequestInit & { duplex?: "half" } = {
         method,
         headers: toHeaders(req.headers),
         signal: controller.signal,
       };
-      if (method !== "GET" && method !== "HEAD") {
-        init.body = bytes;
+      if (options.streamBody === true) {
+        if (method !== "GET" && method !== "HEAD") {
+          init.body = Readable.toWeb(req);
+          init.duplex = "half";
+        }
+      } else {
+        const bytes = await buffer(req);
+        if (method !== "GET" && method !== "HEAD") {
+          init.body = bytes;
+        }
       }
       const request = new Request(`http://localhost${req.url ?? "/"}`, init);
       const response = await server.handle(request);

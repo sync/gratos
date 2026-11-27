@@ -425,6 +425,7 @@ ol.q li{margin:0 0 10px}
     <ul>
       <li>POST only. GET and HEAD return 405 with <code>Allow: POST</code> and a null body.</li>
       <li>Non-JSON or no <code>query</code>: 400. Unsupported content type: 415. Unsupported Accept: 406.</li>
+      <li>A body over <code>maxBodyBytes</code> (default 1 MiB): 413, as JSON for every client, before <code>onParams</code>. A Content-Length of plain decimal digits over the limit is refused unread; otherwise the bytes are counted as they arrive. <em>(Added by follow-up F1.)</em></li>
       <li><code>application/graphql-response+json</code> is the default. Parse, validation and variable errors give 400. Any non-null data gives 200.</li>
       <li><code>application/json</code> gives 200 for any well-formed request.</li>
       <li><code>gqlError(msg, status)</code> puts the status in <code>extensions.http.status</code>. It changes the HTTP status only when <code>data</code> is null.</li>
@@ -722,7 +723,7 @@ ol.q li{margin:0 0 10px}
 <p><strong>Out of scope.</strong> Abort reasons (they move to F5). Rate limiting, upload timeouts and decompression: those belong to the HTTP server or a proxy.</p>
 <p><strong>Approach.</strong></p>
 <ul>
-  <li><strong>The option.</strong> <code>createServer</code> validates it when the server is created: a positive finite integer, or <code>Infinity</code>, which restores today's behaviour. It rejects <code>0</code>, a negative number, a fraction and <code>NaN</code> with a thrown error.</li>
+  <li><strong>The option.</strong> <code>createServer</code> validates it when the server is created: a positive safe integer (at most <code>Number.MAX_SAFE_INTEGER</code>, so comparing it with a declared length is exact), or <code>Infinity</code>, which restores today's behaviour. It rejects <code>0</code>, a negative number, a fraction, <code>NaN</code>, a value above <code>Number.MAX_SAFE_INTEGER</code> and <code>null</code> with a thrown error.</li>
   <li><strong>Fast path.</strong> When <code>Content-Length</code> is present and larger than the limit, answer 413 without reading the body. A <code>Content-Length</code> that is not plain decimal digits (RFC 9110 §8.6) is ignored, and the body is counted; <code>Number()</code> alone would accept <code>1e9</code>.</li>
   <li><strong>Counting.</strong> Otherwise read <code>request.body</code> chunk by chunk with a running byte count. The header is not trusted: a body that sends more than it declared is still counted. On the first chunk past the limit, cancel the reader and answer 413. Decode and <code>JSON.parse</code> only a body that fit. The count is in bytes, before decoding, so a multibyte character that straddles the limit cannot slip through.</li>
   <li><strong>Where.</strong> In <code>readParams</code>, before <code>onParams</code>. The limit covers every POST body, APQ ones included.</li>
