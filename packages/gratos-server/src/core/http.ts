@@ -4,7 +4,9 @@
 // text/event-stream for subscriptions, with the status rules for each. A client that accepts
 // text/event-stream and no JSON type gets request errors (parse, validation, refusals…) as
 // GraphQL-over-SSE, one `next` event then `complete`, with a 200 (graphql-sse's protocol,
-// distinct connections mode); see `respond` in server.ts.
+// distinct connections mode); see `respond` in server.ts. A body larger than `maxBodyBytes`
+// (createServer's option, default 1 MiB) gets 413: by its Content-Length when that is plain
+// decimal digits, else once the bytes read pass the limit.
 import type { ExecutionResult, GraphQLError } from "graphql";
 
 import { statusFromErrors } from "./errors.ts";
@@ -221,7 +223,8 @@ export const isJsonContentType = (contentType: string | null): boolean =>
 /** Why a body is not a well-formed GraphQL-over-HTTP request, or the params it holds. */
 export type ReadParams =
   | { readonly _tag: "ok"; readonly params: Params }
-  | { readonly _tag: "bad"; readonly message: string };
+  | { readonly _tag: "bad"; readonly message: string }
+  | { readonly _tag: "tooLarge" };
 
 const isString = (value: JsonValue | undefined): value is string => typeof value === "string";
 
@@ -242,13 +245,85 @@ const optional = <T extends JsonValue>(
   return is(value) ? { ok: true, value } : { ok: false };
 };
 
-/** Reads and checks the JSON body. */
-export const readParams = async (request: Request): Promise<ReadParams> => {
+/** A Content-Length the core trusts for its fast path: plain decimal digits (RFC 9110 §8.6). */
+const DECIMAL_DIGITS = /^[0-9]+$/;
+
+/** The body was larger than the limit. */
+const TOO_LARGE = Symbol("tooLarge");
+
+/** The body could not be read as bytes (a failed stream, a chunk that is not bytes). */
+const UNREADABLE = Symbol("unreadable");
+
+/**
+ * Reads the body as text, at most `maxBodyBytes` bytes of it. A declared Content-Length over the
+ * limit refuses the body unread; one that is not plain decimal digits is ignored (`Number()`
+ * alone would read `1e9`). The header is never trusted otherwise: the bytes are counted as they
+ * arrive, before decoding, so a body that sends more than it declared, or a multibyte character
+ * that straddles the limit, is still stopped. On the first chunk past the limit the reader is
+ * cancelled without waiting for the cancellation (a source's cancel may never settle), and only
+ * a body that fit is decoded.
+ */
+const readBody = async (
+  request: Request,
+  maxBodyBytes: number,
+): Promise<string | typeof TOO_LARGE | typeof UNREADABLE> => {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && DECIMAL_DIGITS.test(declared) && Number(declared) > maxBodyBytes) {
+    return TOO_LARGE;
+  }
+  const { body } = request;
+  if (body === null) {
+    return "";
+  }
+  const chunks: Array<Uint8Array> = [];
+  let received = 0;
+  try {
+    // A body already read or locked throws here, as `request.text()` would reject.
+    const reader = body.getReader();
+    for (;;) {
+      const read = await reader.read();
+      if (read.done) {
+        break;
+      }
+      // A source passed to `new Request` may enqueue anything; `request.text()` would reject it.
+      const chunk: unknown = read.value;
+      if (!ArrayBuffer.isView(chunk)) {
+        reader.cancel().catch(() => {});
+        return UNREADABLE;
+      }
+      received += chunk.byteLength;
+      if (received > maxBodyBytes) {
+        reader.cancel().catch(() => {});
+        return TOO_LARGE;
+      }
+      chunks.push(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+    }
+  } catch {
+    return UNREADABLE;
+  }
+  const decoder = new TextDecoder();
+  let text = "";
+  for (const chunk of chunks) {
+    text += decoder.decode(chunk, { stream: true });
+  }
+  return text + decoder.decode();
+};
+
+/** Reads and checks the JSON body, at most `maxBodyBytes` bytes of it (see readBody). */
+export const readParams = async (request: Request, maxBodyBytes: number): Promise<ReadParams> => {
+  const text = await readBody(request, maxBodyBytes);
+  if (text === TOO_LARGE) {
+    return { _tag: "tooLarge" };
+  }
+  const notJson: ReadParams = { _tag: "bad", message: "The request body is not valid JSON." };
+  if (text === UNREADABLE) {
+    return notJson;
+  }
   let body: unknown;
   try {
-    body = JSON.parse(await request.text());
+    body = JSON.parse(text);
   } catch {
-    return { _tag: "bad", message: "The request body is not valid JSON." };
+    return notJson;
   }
   if (!isJsonObject(body)) {
     return { _tag: "bad", message: "The request body must be a JSON object." };

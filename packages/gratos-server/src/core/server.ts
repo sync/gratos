@@ -75,6 +75,19 @@ import type {
 
 const DEFAULT_DOCUMENT_CACHE_SIZE = 1000;
 const DEFAULT_MAX_TOKENS = 10_000;
+/** 1 MiB. */
+const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+
+/** `maxBodyBytes`, checked: a positive integer, or Infinity (no limit). */
+const maxBodyBytesOf = (value: number | undefined): number => {
+  const limit = value ?? DEFAULT_MAX_BODY_BYTES;
+  if (limit !== Number.POSITIVE_INFINITY && !(Number.isInteger(limit) && limit > 0)) {
+    throw new RangeError(
+      `gratos-server: maxBodyBytes must be a positive integer or Infinity, got ${String(limit)}.`,
+    );
+  }
+  return limit;
+};
 
 /** The status of the response sent when the client has gone (it never reads it). */
 export const CLIENT_CLOSED_REQUEST = 499;
@@ -314,6 +327,7 @@ const serve = <Ctx>(
 ): Server => {
   let schema = options.schema;
   assertValidSchema(schema);
+  const maxBodyBytes = maxBodyBytesOf(options.maxBodyBytes);
   let generation = 0;
   const cache = new DocumentCache(options.documentCacheSize ?? DEFAULT_DOCUMENT_CACHE_SIZE);
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
@@ -559,9 +573,10 @@ const serve = <Ctx>(
 
   /**
    * A failure of the HTTP exchange itself, not of the GraphQL request: an unsupported Accept or
-   * Content-Type, a body that is not a GraphQL-over-HTTP request, or a streamed response the
-   * client does not accept. It is JSON with its status (the M4a HTTP matrix) for every client,
-   * an SSE-only one included: only GraphQL request errors go out as GraphQL-over-SSE events.
+   * Content-Type, a body over `maxBodyBytes` (413), a body that is not a GraphQL-over-HTTP
+   * request, or a streamed response the client does not accept. It is JSON with its status (the
+   * M4a HTTP matrix) for every client, an SSE-only one included: only GraphQL request errors go
+   * out as GraphQL-over-SSE events.
    */
   /**
    * Aborts the core signal inside the request's execution wrappers (a JSON body cancelled
@@ -605,13 +620,18 @@ const serve = <Ctx>(
     run.accepted = accepted;
     // A client that accepts no JSON type gets GraphQL request errors as GraphQL-over-SSE when it
     // accepts text/event-stream, else (multipart/mixed only) as JSON, the default. Transport
-    // failures (below: 415, 400 for the body) are JSON for every client.
+    // failures (below: 415, 413 and 400 for the body) are JSON for every client.
     run.mediaType = accepted.json ?? GRAPHQL_RESPONSE_JSON;
     run.errorsAsEvents = accepted.json === undefined && accepted.eventStream;
     if (!isJsonContentType(request.headers.get("content-type"))) {
       return answer(transportError(run, `Content-Type must be ${APPLICATION_JSON}.`, 415));
     }
-    const read = await readParams(request);
+    const read = await readParams(request, maxBodyBytes);
+    if (read._tag === "tooLarge") {
+      return answer(
+        transportError(run, `The request body is larger than ${maxBodyBytes} bytes.`, 413),
+      );
+    }
     if (read._tag === "bad") {
       return answer(transportError(run, read.message, 400));
     }
