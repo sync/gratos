@@ -24,7 +24,7 @@
 import { GraphQLError } from "graphql";
 import type { ExecutionResult } from "graphql";
 
-import { abortReason } from "./abortReason.ts";
+import { abortAs } from "./abortReason.ts";
 import type { AbortKind } from "./abortReason.ts";
 import { DEFER_SPEC, MULTIPART_BOUNDARY, MULTIPART_MIXED, TEXT_EVENT_STREAM } from "./http.ts";
 import type { Logger } from "./types.ts";
@@ -189,7 +189,7 @@ const streamResponse = (framing: Framing, options: StreamOptions): Response => {
    */
   const abortCore = (kind: AbortKind): void => {
     enterOrRun(enter, logger, "gratos-server: a wrapExecution wrapper failed on an abort.", () => {
-      controller.abort(abortReason(kind));
+      abortAs(controller, kind);
     });
   };
 

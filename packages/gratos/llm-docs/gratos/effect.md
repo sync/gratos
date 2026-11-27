@@ -157,8 +157,10 @@ ignores it (Effect 4.1.5), so setting it does not stop a large GraphQL body. Rai
 When a client leaves, its query and subscription fibers are interrupted and nothing is reported.
 So are they when the request no longer needs their work: the core stopped the execution (a
 failed subscription source or streamed response, a result it never sends), or the response
-ended with the work still running. The `graphql <operation>` span always ends after the resolver
-spans it parents. After a sibling's non-null short-circuit on graphql-js, the operation span now
+ended with the work still running. For a query or a subscription, the `graphql <operation>` span
+always ends after the resolver spans it parents. A mutation's span still ends before the drain
+releases services, but a nested resolver left running by a sibling's non-null short-circuit may
+end after it. After a sibling's non-null short-circuit on graphql-js, the operation span now
 waits for the cancelled sibling's finalizers (on warmed `jit()`, graphql-jit itself waits for the
 sibling to finish), and an Effect that arrives after the response ended (a resolver's Promise
 that resolves to one later) is no longer run, side effects included. A mutation is never

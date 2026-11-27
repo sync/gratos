@@ -29,3 +29,39 @@ export const abortReason = (kind: AbortKind): DOMException => {
 /** The kind of a reason the core made, or `undefined` for any other value. */
 export const abortKindOf = (reason: unknown): AbortKind | undefined =>
   typeof reason === "object" && reason !== null ? kinds.get(reason) : undefined;
+
+/**
+ * Why the core aborted each of its own signals, recorded on the signal itself. The reason object
+ * alone cannot tell: a client's abort is forwarded with the client's own reason, which may be any
+ * value, a reason the core made for another request included.
+ */
+const origins = new WeakMap<AbortSignal, AbortKind>();
+
+/** Aborts `controller` with a new reason of `kind`, recording `kind` as its signal's origin. */
+export const abortAs = (controller: AbortController, kind: AbortKind): void => {
+  if (controller.signal.aborted) {
+    return;
+  }
+  origins.set(controller.signal, kind);
+  controller.abort(abortReason(kind));
+};
+
+/**
+ * Aborts `controller` because `incoming` aborted, with `incoming`'s own reason. Its origin is
+ * `incoming`'s when the core aborted that one (a claim's signal linked to the core signal), else
+ * `client`: the Request's signal, which the client aborted, with whatever reason it chose.
+ */
+export const forwardAbort = (controller: AbortController, incoming: AbortSignal): void => {
+  if (controller.signal.aborted) {
+    return;
+  }
+  origins.set(controller.signal, origins.get(incoming) ?? "client");
+  controller.abort(incoming.reason);
+};
+
+/**
+ * Why `signal` was aborted: its recorded origin when the core aborted it, else the kind of its
+ * reason (a signal the core did not make, such as graphql-js's own, aborted with a core reason).
+ */
+export const abortKindOfSignal = (signal: AbortSignal): AbortKind | undefined =>
+  origins.get(signal) ?? abortKindOf(signal.reason);

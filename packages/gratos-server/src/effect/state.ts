@@ -7,7 +7,7 @@ import type { Context, Fiber } from "effect";
 import { HttpServerError } from "effect/http";
 import type { GraphQLResolveInfo, OperationDefinitionNode } from "graphql";
 
-import { abortKindOf } from "../core/abortReason.ts";
+import { abortKindOfSignal } from "../core/abortReason.ts";
 import { RequestEnded } from "./errors.ts";
 
 /** What effectRoute records for a request it serves. */
@@ -189,13 +189,13 @@ export const stopAnnotation = (
 ): Context.Context<never> | undefined => {
   const core = scope.signal;
   if (core?.aborted === true) {
-    const kind = abortKindOf(core.reason);
+    const kind = abortKindOfSignal(core);
     return kind === undefined || kind === "client"
       ? HttpServerError.ClientAbort.annotation
       : RequestEnded.annotation;
   }
   if (execution?.aborted === true) {
-    return abortKindOf(execution.reason) === "client"
+    return abortKindOfSignal(execution) === "client"
       ? HttpServerError.ClientAbort.annotation
       : RequestEnded.annotation;
   }

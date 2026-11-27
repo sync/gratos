@@ -14,7 +14,7 @@ import type {
 } from "graphql";
 import { describe, expect, it, onTestFinished } from "vitest";
 
-import { abortKindOf } from "../../src/core/abortReason.ts";
+import { abortKindOf, abortReason } from "../../src/core/abortReason.ts";
 import {
   createServer,
   incremental,
@@ -507,10 +507,12 @@ describe("F5: a non-null field fails while a sibling runs", () => {
     { name: "jit", plugins: (): ReadonlyArray<Plugin> => [jit({ after: 2 })], warmUp: 1 },
   ])(
     "never interrupts the sibling under a mutation, and ends the span before drain() resolves ($name executor, pinning)",
-    async ({ plugins, warmUp }) => {
+    async ({ name, plugins, warmUp }) => {
       const log: Array<string> = [];
       const stops: Array<Stop> = [];
       let measured = false;
+      // Whether the measured resolver ran with info.getAbortSignal (graphql-js) or without (jit).
+      const signals: Array<boolean> = [];
       const go = gate();
       const started = gate();
       const failed = gate();
@@ -525,18 +527,21 @@ describe("F5: a non-null field fails while a sibling runs", () => {
               : Effect.succeed({}),
         },
         Box: {
-          slow: () =>
-            measured
-              ? recording(
-                  log,
-                  "slow",
-                  stops,
-                  sibling.resource.pipe(
-                    Effect.andThen(Effect.promise(() => failed.promise)),
-                    Effect.as("slow"),
-                  ),
-                )
-              : Effect.succeed("warm"),
+          slow: (_source: unknown, _args: unknown, _context: unknown, info: GraphQLResolveInfo) => {
+            if (!measured) {
+              return Effect.succeed("warm");
+            }
+            signals.push("getAbortSignal" in info);
+            return recording(
+              log,
+              "slow",
+              stops,
+              sibling.resource.pipe(
+                Effect.andThen(Effect.promise(() => failed.promise)),
+                Effect.as("slow"),
+              ),
+            );
+          },
           failing: () =>
             measured
               ? Effect.promise(() => sibling.started.promise).pipe(
@@ -574,6 +579,8 @@ describe("F5: a non-null field fails while a sibling runs", () => {
       await until(() => stops.length === 1);
       expect(stops).toEqual(["success"]);
       expect(operation?.endCalls).toBe(1);
+      // The measured request ran on the executor named: graphql-jit gives no execution signal.
+      expect(signals).toEqual([name !== "jit"]);
     },
   );
 });
@@ -793,16 +800,26 @@ describe("F5: the core's own aborts carry a reason the Effect layer reads", () =
     const log: Array<string> = [];
     const stops: Array<Stop> = [];
     let measured = false;
+    // Whether the measured resolver ran with info.getAbortSignal (graphql-js) or without (jit).
+    const signals: Array<boolean> = [];
     const sibling = held(log, "slow");
     const built = build(
       log,
       [jit({ after: 2 })],
       {
         Query: {
-          slow: () =>
-            measured
-              ? recording(log, "slow", stops, sibling.resource.pipe(Effect.andThen(Effect.never)))
-              : Effect.succeed("warm"),
+          slow: (_source: unknown, _args: unknown, _context: unknown, info: GraphQLResolveInfo) => {
+            if (!measured) {
+              return Effect.succeed("warm");
+            }
+            signals.push("getAbortSignal" in info);
+            return recording(
+              log,
+              "slow",
+              stops,
+              sibling.resource.pipe(Effect.andThen(Effect.never)),
+            );
+          },
         },
       },
       {
@@ -834,6 +851,8 @@ describe("F5: the core's own aborts carry a reason the Effect layer reads", () =
     );
     sibling.hold.resolve();
     expect((await pending).status).toBe(500);
+    // The measured request ran on graphql-jit: its resolver had no execution signal.
+    expect(signals).toEqual([false]);
     expect(stops).toEqual(["internal"]);
   });
 
@@ -863,6 +882,33 @@ describe("F5: the core's own aborts carry a reason the Effect layer reads", () =
     const pending = built.server.handle(post({ query }, { signal: controller.signal }));
     await sibling.started.promise;
     controller.abort();
+    await sibling.releasing.promise;
+    sibling.hold.resolve();
+    expect((await pending).status).toBe(499);
+    await until(() => stops.length === 1);
+    expect(stops).toEqual(["client"]);
+  });
+
+  it("keeps ClientAbort for a client that leaves with a reason the core made for another request", async () => {
+    const log: Array<string> = [];
+    const stops: Array<Stop> = [];
+    const sibling = held(log, "slow");
+    const built = build(log, [], {
+      Query: {
+        slow: () =>
+          recording(log, "slow", stops, sibling.resource.pipe(Effect.andThen(Effect.never))),
+      },
+    });
+    const controller = new AbortController();
+    const pending = built.server.handle(
+      post({ query: "query Left { slow }" }, { signal: controller.signal }),
+    );
+    await sibling.started.promise;
+    // The client's own reason is any value: here one the core made for another request's unsent
+    // result. Its kind is the other request's; this request's client still left.
+    const reused = abortReason("unsent");
+    expect(abortKindOf(reused)).toBe("unsent");
+    controller.abort(reused);
     await sibling.releasing.promise;
     sibling.hold.resolve();
     expect((await pending).status).toBe(499);

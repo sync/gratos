@@ -23,7 +23,7 @@ import type {
   ValidationRule,
 } from "graphql";
 
-import { abortReason } from "./abortReason.ts";
+import { abortAs, forwardAbort } from "./abortReason.ts";
 import type { AbortKind } from "./abortReason.ts";
 import { DocumentCache, operationEntry } from "./documents.ts";
 import type { DocumentEntry } from "./documents.ts";
@@ -253,7 +253,7 @@ const linkedController = (
 ): AbortController => {
   const controller = new AbortController();
   const abort = (): void => {
-    controller.abort(incoming.reason);
+    forwardAbort(controller, incoming);
   };
   if (incoming.aborted) {
     abort();
@@ -600,7 +600,7 @@ const serve = <Ctx>(
       logger,
       "gratos-server: a wrapExecution wrapper failed on an abort.",
       () => {
-        controller.abort(abortReason(kind));
+        abortAs(controller, kind);
       },
     );
   };
@@ -787,7 +787,7 @@ const serve = <Ctx>(
           logger,
           "gratos-server: a wrapExecution wrapper failed on an abort.",
           () => {
-            controller.abort(abortReason("abandoned"));
+            abortAs(controller, "abandoned");
           },
         );
       }
