@@ -22,12 +22,19 @@ and the shipped plugins). Code blocks tagged `file=` are compared with that file
 
 - **The binary is `gratos`**, not `grats`: `npx grats`, `npm run grats` and
   `node_modules/grats/dist/src/cli.js` become `gratos` (in a package script, say) and
-  `node_modules/@dblechoc/gratos/src/cli.ts`. Node runs it from source, with no build step.
+  `node_modules/@dblechoc/gratos/dist/cli.js`. In this workspace Node runs it from source, with no
+  build step; the published package's `bin` is the release build's (`publishConfig`):
 
   ```json file=packages/gratos/package.json
     "bin": {
       "gratos": "./src/cli.ts"
     },
+  ```
+
+  ```json file=packages/gratos/package.json
+      "bin": {
+        "gratos": "./dist/cli.js"
+      },
   ```
 
 - **`libraryImport` is a new config option**, under the same `grats` key of `tsconfig.json`. It is

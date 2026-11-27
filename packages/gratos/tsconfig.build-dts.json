@@ -1,0 +1,13 @@
+{
+  // The release build's declarations (docs/plan.html F7): only the public entries, src/index.ts
+  // (which re-exports the types of src/upstream/Types.ts) and src/devApi.ts. The engine ships as
+  // JavaScript only: its declarations would need TypeScript 5.9.2's, which a consumer does not
+  // have. This pass emits exactly dist/index.d.ts, dist/devApi.d.ts and dist/upstream/Types.d.ts.
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "declaration": true,
+    "emitDeclarationOnly": true
+  },
+  "files": ["src/index.ts", "src/devApi.ts"],
+  "include": []
+}

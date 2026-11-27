@@ -11,11 +11,16 @@ source of truth for scope, milestones and acceptance criteria.
 - `@dblechoc/gratos-server` (`packages/gratos-server`): the GraphQL server core and plugins, with the Effect layer at `@dblechoc/gratos-server/effect`.
 - `examples/orders`: the example app. `pnpm dev` there is the live-rebuild loop (`node --watch-path`); its Grats config is `src/tsconfig.json`.
 
-All packages are `private: true` until publishing is decided.
+`@dblechoc/gratos` and `@dblechoc/gratos-server` are publishable (public npm, docs/plan.html F7);
+`examples/orders` and the root stay `private: true`. The two packages' peers are literal caret ranges, never
+`catalog:` (pnpm would pack the catalog's exact version), with the same packages as `catalog:`
+devDependencies.
 
 ## Toolchain
 
-- Node 26 (`.node-version`). Packages run from source through Node's type stripping; there is no build step.
+- Node 26 (`.node-version`). Packages run from source through Node's type stripping; there is no build step in the workspace.
+  The tarballs are built only by each package's `prepack` (`tsconfig.build*.json` into the gitignored `dist/`), and
+  `publishConfig` points `exports`, `bin` and `imports` at `dist/`.
 - pnpm 12 (`packageManager`). Node 26 has no corepack: install with `npm i -g pnpm@12.23.0`. In CI, `pnpm/action-setup`.
 - Turborepo: `pnpm check` runs everything (`turbo run check`). Read `node_modules/turbo/docs` before changing `turbo.json`.
 - TypeScript 7 (`tsc --noEmit` per package). The compiler talks to TypeScript only through `packages/gratos/src/ts/`.

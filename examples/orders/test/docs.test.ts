@@ -17,7 +17,7 @@ const repoRoot = join(import.meta.dirname, "..", "..", "..");
 const DOCS = {
   "examples/orders/README.md": 11,
   "packages/gratos/llm-docs/gratos/effect.md": 8,
-  "packages/gratos/llm-docs/gratos/differences.md": 5,
+  "packages/gratos/llm-docs/gratos/differences.md": 6,
   "packages/gratos/llm-docs/gratos/server.md": 6,
   "packages/gratos/README.md": 2,
   "packages/gratos-server/README.md": 1,

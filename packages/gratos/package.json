@@ -1,11 +1,23 @@
 {
   "name": "@dblechoc/gratos",
   "version": "0.0.0",
-  "private": true,
+  "description": "Grats, the GraphQL server generator for TypeScript, on the TypeScript 7 API and taught to read Effect return types.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sync/gratos.git",
+    "directory": "packages/gratos"
+  },
   "bin": {
     "gratos": "./src/cli.ts"
   },
+  "files": [
+    "dist",
+    "llm-docs",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
   "type": "module",
   "imports": {
     "#typescript": "./src/ts/index.ts"
@@ -17,27 +29,55 @@
       "default": "./src/dev.ts"
     }
   },
+  "publishConfig": {
+    "bin": {
+      "gratos": "./dist/cli.js"
+    },
+    "imports": {
+      "#typescript": "./dist/ts/index.js"
+    },
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./dev": {
+        "types": "./dist/devApi.d.ts",
+        "default": "./dist/dev.js"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run && vitest run --config vitest.parity.config.ts",
     "codegen": "node src/cli.ts --tsconfig test/smoke/tsconfig.json",
     "codegen:check": "node src/cli.ts --check --tsconfig test/smoke/tsconfig.json",
     "vendor:verify": "node scripts/verify-vendor.ts",
-    "bench": "node bench/run.ts"
+    "bench": "node bench/run.ts",
+    "prepack": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json && tsc -p tsconfig.build-dts.json"
   },
   "dependencies": {
-    "@effect/platform-node": "catalog:",
-    "effect": "catalog:",
-    "graphql": "catalog:",
     "jsonc-parser": "catalog:",
     "typescript": "catalog:"
   },
   "devDependencies": {
+    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
+    "effect": "catalog:",
+    "graphql": "catalog:",
     "grats-upstream": "npm:grats@0.0.36",
     "typescript-baseline": "npm:typescript@5.9.2",
     "vite": "catalog:",
     "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@effect/platform-node": "^4.1.5",
+    "effect": "^4.1.5",
+    "graphql": "^17.1.0"
+  },
+  "engines": {
+    "node": ">=26.13.0"
   }
 }
