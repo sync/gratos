@@ -15,15 +15,9 @@ import type {
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { abortKindOf, abortReason } from "../../src/core/abortReason.ts";
-import {
-  createServer,
-  incremental,
-  isCancelled,
-  jit,
-  reportErrors,
-  signalOf,
-} from "../../src/index.ts";
+import { createServer, incremental, isCancelled, reportErrors, signalOf } from "../../src/index.ts";
 import type { Plugin, Server } from "../../src/index.ts";
+import { jit } from "../../src/jit.ts";
 import { effect, effectSchema, fromCause } from "../../src/effect/index.ts";
 import { RequestEnded } from "../../src/effect/errors.ts";
 import { tracked } from "../../src/effect/schema.ts";

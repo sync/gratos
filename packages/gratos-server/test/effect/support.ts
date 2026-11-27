@@ -8,8 +8,9 @@ import type { Duration } from "effect";
 import { HttpRouter, HttpServer } from "effect/http";
 import { expect } from "vitest";
 
-import { incremental, jit } from "../../src/index.ts";
+import { incremental } from "../../src/index.ts";
 import type { Plugin } from "../../src/index.ts";
+import { jit } from "../../src/jit.ts";
 
 /** A span that counts its `end` calls (a span must end exactly once). */
 export class RecordedSpan extends Tracer.NativeSpan {

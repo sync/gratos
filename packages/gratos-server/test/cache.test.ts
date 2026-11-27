@@ -5,8 +5,9 @@
 import { GraphQLSchema } from "graphql";
 import { describe, expect, it } from "vitest";
 
-import { createServer, jit } from "../src/index.ts";
+import { createServer } from "../src/index.ts";
 import type { Plugin } from "../src/index.ts";
+import { jit } from "../src/jit.ts";
 import { gate, gql, sleep } from "./support/http.ts";
 import { basicSchema, makeSchema } from "./support/schema.ts";
 

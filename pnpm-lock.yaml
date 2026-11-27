@@ -290,6 +290,9 @@ importers:
       graphql:
         specifier: 'catalog:'
         version: 17.1.0
+      graphql-jit:
+        specifier: 'catalog:'
+        version: 0.10.1(graphql@17.1.0)
     devDependencies:
       '@apollo/client':
         specifier: 'catalog:'

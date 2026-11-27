@@ -21,13 +21,12 @@ import {
   CLIENT_CLOSED_REQUEST,
   createServer,
   gqlError,
-  isSelectionSafe,
-  jit,
   maxDepth,
   readOnly,
   sha256Hex,
 } from "../src/index.ts";
 import type { Executor, JsonObject, Plugin, Server } from "../src/index.ts";
+import { isSelectionSafe, jit } from "../src/jit.ts";
 import { withIncrementalDirectives } from "../src/plugins/incremental.ts";
 import { gql, post, send } from "./support/http.ts";
 import { watchedJit } from "./support/jit.ts";

@@ -1,6 +1,7 @@
 // @dblechoc/gratos-server: the GraphQL server core and its plugins (docs/plan.html M4a, M4b). The core
 // never imports `effect`; the Effect layer is the separate `@dblechoc/gratos-server/effect` entry
-// (M5, src/effect/index.ts).
+// (M5, src/effect/index.ts). The jit() plugin is the `@dblechoc/gratos-server/jit` entry (src/jit.ts),
+// so this entry never loads graphql-jit, an optional peer.
 export { CLIENT_CLOSED_REQUEST, createServer } from "./core/server.ts";
 export { mutationOf, signalOf, startOf } from "./core/requestState.ts";
 export { cancelled, gqlError, httpStatusOf, isCancelled } from "./core/errors.ts";
@@ -49,8 +50,6 @@ export {
   withIncrementalDirectives,
 } from "./plugins/incremental.ts";
 export type { ApqOptions, ApqStore } from "./plugins/apq.ts";
-export { isJitDisabled, isSelectionSafe, jit, usesOneOfVariable } from "./plugins/jit.ts";
-export type { FieldPredicate, JitOptions } from "./plugins/jit.ts";
 export { isUnexpectedError, maskErrors } from "./plugins/maskErrors.ts";
 export type { MaskErrorsOptions } from "./plugins/maskErrors.ts";
 export { maxDepth, selectionDepth } from "./plugins/maxDepth.ts";

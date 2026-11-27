@@ -13,10 +13,10 @@ import {
   TEXT_EVENT_STREAM,
   createServer,
   incremental,
-  jit,
   maskErrors,
 } from "../src/index.ts";
 import type { ContextServerOptions, Plugin, Server } from "../src/index.ts";
+import { jit } from "../src/jit.ts";
 import { gate, gql, post, send } from "./support/http.ts";
 import { basicSchema, makeSchema } from "./support/schema.ts";
 

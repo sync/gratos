@@ -183,6 +183,10 @@ client must accept depends on the operation:
 
 ## The shipped plugins, and their order
 
+Every plugin comes from `@dblechoc/gratos-server`, except `jit()`, which is the
+`@dblechoc/gratos-server/jit` entry: the main entry never loads `graphql-jit`, an optional peer
+that only an app using `jit()` installs.
+
 | Plugin                    | What it does                                                                                                                            |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `apq({ store, max })`     | Apollo's automatic persisted queries. Stores a query only once it has passed validation. Never claims an operation                      |

@@ -6,9 +6,10 @@ import { Clock, Context, Duration, Effect, Logger, Stream, Tracer } from "effect
 import type { ExecutionResult, GraphQLFieldResolver, GraphQLSchema } from "graphql";
 import { describe, expect, it } from "vitest";
 
-import { createServer, gqlError, jit, serverTiming } from "../../src/index.ts";
+import { createServer, gqlError, serverTiming } from "../../src/index.ts";
 import type { Plugin, Server } from "../../src/index.ts";
 import { effect, effectSchema } from "../../src/effect/index.ts";
+import { jit } from "../../src/jit.ts";
 import { closeRoute, registerRoute } from "../../src/effect/state.ts";
 import { flush, gate, gql, post, URL_ } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";

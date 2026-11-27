@@ -14,13 +14,13 @@ import {
   CLIENT_CLOSED_REQUEST,
   createServer,
   incremental,
-  jit,
   maskErrors,
   reportErrors,
   serverTiming,
   signalOf,
 } from "../src/index.ts";
 import type { JsonObject, Plugin, Server } from "../src/index.ts";
+import { jit } from "../src/jit.ts";
 import { subscribeOnce } from "../src/core/subscribe.ts";
 import { flush, gate, gql, post, send, sleep } from "./support/http.ts";
 import { makeSchema } from "./support/schema.ts";
