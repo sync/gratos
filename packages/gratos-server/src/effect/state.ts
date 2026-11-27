@@ -174,12 +174,15 @@ export const hasWork = (scope: RequestScope): boolean =>
  * ClientAbort when the client left, else the internal RequestEnded. `execution` is the fiber's
  * execution signal (`info.getAbortSignal()`), if any.
  *
- * The core signal (`signalOf(req)`) is read first, once it has aborted: a reason the core made
- * carries its kind, and any other reason is the client's own, which the core forwards as it came.
+ * The core signal (`signalOf(req)`) is read first, once it has aborted. Its kind is the origin the
+ * core recorded on it when it aborted it (abortReason.ts): its own kind for an abort it made,
+ * `client` for the client's abort, forwarded with the client's reason whatever that reason is. The
+ * reason's own kind is only a fallback, for a signal the core did not make.
  * graphql-js forwards that reason to an execution's signal only while the execution runs: once an
  * incremental result's initial payload is built, it aborts the signal of the deferred work with a
- * reason of its own, the client's leaving included. Otherwise the execution's signal is read: the
- * core's abort of a claim's `next()` (its kind), or graphql-js's own abort of an execution it
+ * reason of its own, the client's leaving included. Otherwise the execution's signal is read, the
+ * same way: the core's abort of a claim's `next()` (its recorded origin), or graphql-js's own
+ * abort of an execution it
  * completed (a non-null field's short-circuit), which is not the client leaving. Else the scope's
  * stop, once there is one.
  */
