@@ -1,9 +1,11 @@
 // Temporary projects for tests, written under test/.scratch/ (gitignored) so that their imports
 // of `effect`, `graphql` and `@dblechoc/gratos` resolve through this package's node_modules.
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-const scratchRoot = join(import.meta.dirname, "..", ".scratch");
+// Physical, so a project path has no symlinked ancestor (a checkout under a symlinked directory):
+// the symlink walk tests count every hop under the project.
+const scratchRoot = join(realpathSync(join(import.meta.dirname, "..")), ".scratch");
 const smokeDir = join(import.meta.dirname, "..", "smoke");
 
 export interface ScratchProject {

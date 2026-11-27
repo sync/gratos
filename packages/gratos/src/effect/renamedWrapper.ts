@@ -7,17 +7,16 @@
 // third-party files read as empty (fast loading). Called from effectTypeReference, before
 // upstream reports the qualified name.
 import {
+  forEachChild,
   isEnumDeclaration,
   isIdentifier,
   isImportDeclaration,
   isImportEqualsDeclaration,
-  isModuleBlock,
   isModuleDeclaration,
-  isSourceFile,
   isStringLiteral,
   SyntaxKind,
 } from "#typescript";
-import type { EntityName, ImportDeclaration, Node, Statement } from "#typescript";
+import type { EntityName, ImportDeclaration, Node } from "#typescript";
 
 import { renamedWrapperImport } from "./errors.ts";
 import type { EffectWrapper } from "./wrappers.ts";
@@ -51,85 +50,25 @@ const bindsWrapper = (
   );
 };
 
-/** Whether `statements` declare `alias` as a name `alias.X` can resolve through in a type. */
-const declares = (statements: ReadonlyArray<Statement>, alias: string): boolean =>
-  statements.some(
-    (statement) =>
-      (isModuleDeclaration(statement) ||
-        isImportEqualsDeclaration(statement) ||
-        isEnumDeclaration(statement)) &&
-      isIdentifier(statement.name) &&
-      statement.name.text === alias,
-  );
+/** Whether `node` declares `alias` as a name `alias.X` can resolve through in a type. */
+const declaresAlias = (node: Node, alias: string): boolean =>
+  (isModuleDeclaration(node) || isImportEqualsDeclaration(node) || isEnumDeclaration(node)) &&
+  isIdentifier(node.name) &&
+  node.name.text === alias;
 
 /**
- * The statements of every block of the namespace `path` among `statements`. A namespace may be
- * declared in several blocks, which TypeScript merges, and a dotted `namespace A.B {}` nests one
- * declaration in another.
- */
-const namespaceBodies = (
-  statements: ReadonlyArray<Statement>,
-  path: ReadonlyArray<string>,
-): Array<ReadonlyArray<Statement>> => {
-  const [head, ...rest] = path;
-  if (head === undefined) {
-    return [statements];
-  }
-  const bodies: Array<ReadonlyArray<Statement>> = [];
-  for (const statement of statements) {
-    if (
-      !isModuleDeclaration(statement) ||
-      !isIdentifier(statement.name) ||
-      statement.name.text !== head
-    ) {
-      continue;
-    }
-    const { body } = statement;
-    if (body !== undefined && isModuleBlock(body)) {
-      bodies.push(...namespaceBodies(body.statements, rest));
-    } else if (body !== undefined && isModuleDeclaration(body)) {
-      bodies.push(...namespaceBodies([body], rest));
-    }
-  }
-  return bodies;
-};
-
-/**
- * Whether a namespace enclosing `node` declares `alias` itself (`namespace Fx {}`,
- * `import Fx = …` or `enum Fx {}`), in any of its merged blocks, so `Fx` there is not the file's
- * import. Only a namespace can shadow a file-level name this way: a top-level declaration of the
- * same name would conflict with the import. Conservative: a declaration in another block of the
- * same namespace counts whether or not it is exported, so a doubtful name gets upstream's error,
- * never a wrong hint. Namespaces merge across files only in scripts, and a file with imports is a
- * module.
+ * Whether anything in the file, at any depth, declares `alias` itself: a `namespace Fx {}`, an
+ * `import Fx = …` or an `enum Fx {}` (which makes `Fx.Effect` a type). Any of these may shadow the
+ * file's import where the reference is: in an enclosing namespace, any of its merged blocks, a
+ * module augmentation (or one merged with it), or a function's block. Deliberately conservative:
+ * the hint is only advice, so a name that may be shadowed gets upstream's error, never a wrong
+ * hint, and no scope rules are reimplemented here. A top-level declaration of the same name would
+ * conflict with the import anyway.
  */
 const isShadowed = (node: Node, alias: string): boolean => {
-  // The enclosing namespace names, outermost first, up to the nearest `declare module "…"`
-  // augmentation (whose block is then the root the merged lookup starts from), else the file.
-  const path: Array<string> = [];
-  let root: ReadonlyArray<Statement> = node.getSourceFile().statements;
-  for (let current = node.parent; !isSourceFile(current); current = current.parent) {
-    // Every enclosing block itself, a string-named module augmentation's included.
-    if (isModuleBlock(current) && declares(current.statements, alias)) {
-      return true;
-    }
-    if (isModuleDeclaration(current)) {
-      if (!isIdentifier(current.name)) {
-        if (current.body !== undefined && isModuleBlock(current.body)) {
-          root = current.body.statements;
-        }
-        break;
-      }
-      path.unshift(current.name.text);
-    }
-  }
-  // The other blocks of each enclosing namespace, which TypeScript merges with this one.
-  for (let depth = path.length; depth > 0; depth--) {
-    if (namespaceBodies(root, path.slice(0, depth)).some((body) => declares(body, alias))) {
-      return true;
-    }
-  }
-  return false;
+  const visit = (child: Node): boolean =>
+    declaresAlias(child, alias) || forEachChild(child, visit) === true;
+  return forEachChild(node.getSourceFile(), visit) === true;
 };
 
 /**
