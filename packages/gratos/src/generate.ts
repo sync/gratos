@@ -6,7 +6,7 @@
 // caller's Scope), builds the schema and writes each output file only when its content differs.
 // check(tsconfig) does the same without writing, and fails with StaleFilesError when a file is
 // missing or out of date.
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 import { Data, Effect, FileSystem, Option, Result } from "effect";
 import type { PlatformError } from "effect";
@@ -206,55 +206,81 @@ const readOutput = (fs: FileSystem.FileSystem, path: string) =>
 /** A path key: letter case and Unicode spelling never tell two outputs apart. */
 const pathKey = (physical: string): string => `path:${physical.normalize("NFC").toLowerCase()}`;
 
+/** The symlink hops one walk may take, as Linux bounds the links of one path lookup. */
+const maxHops = 40;
+
+/** A path's segments, in order. Only Windows also separates them with a backslash. */
+const segmentsOf = (path: string): Array<string> =>
+  path.split(sep === "/" ? "/" : /[\\/]/).filter((segment) => segment !== "" && segment !== ".");
+
+/**
+ * Where `path` really is: the path applied one segment at a time to a physical path, starting at
+ * its root. A segment that is a symlink is read with `readLink` and its target expanded in place,
+ * one hop at a time, so a `..` in the target climbs from where the path really is, as the OS
+ * does (resolving the target as text would cancel `link/..` without following `link`). Once a
+ * segment is missing, the rest is appended as text.
+ *
+ * Links are never followed with `realPath`, which can take several hops in one call. The hops
+ * share one budget for the whole walk, nested targets included: when it runs out, the walk stops,
+ * and the path is treated as missing at the link it stopped on.
+ *
+ * Only for a file system that does not change during the walk: a link retargeted between this
+ * check and the write is not covered.
+ */
+const physicalPathOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, path: string) {
+  let current = parse(path).root;
+  // The segments still to apply, last first.
+  const pending = segmentsOf(path).reverse();
+  let hops = 0;
+  let exists = true;
+  for (let segment = pending.pop(); segment !== undefined; segment = pending.pop()) {
+    if (segment === "..") {
+      // `current` is physical (or, once missing, text), so climbing it is what the OS does.
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, segment);
+    if (exists) {
+      const info = yield* Effect.option(fs.lstat(next));
+      if (Option.isSome(info) && info.value.type === "SymbolicLink" && hops < maxHops) {
+        hops += 1;
+        const target = yield* Effect.option(fs.readLink(next));
+        if (Option.isSome(target)) {
+          if (isAbsolute(target.value)) {
+            current = parse(target.value).root;
+          }
+          pending.push(...segmentsOf(target.value).reverse());
+          continue;
+        }
+      }
+      // A file or directory keeps the path physical. Missing, unreadable, or a link past the
+      // budget: the rest is text from here.
+      exists = Option.isSome(info) && info.value.type !== "SymbolicLink";
+    }
+    current = next;
+  }
+  return { path: current, exists };
+});
+
 /**
  * Where a generated file lands, as keys for comparing outputs: two outputs collide when they share
  * any key.
- * - Always a path key: the real path (symlinks resolved, a symlink to a missing file followed to
- *   where its target would be) of the nearest existing ancestor joined with the rest, in Unicode
- *   NFC and lowercased. Letter case and Unicode spelling then never tell two outputs apart, on
- *   any file system and whether or not the files exist yet.
+ * - Always a path key: the physical path (see physicalPathOf: symlinks followed one hop at a time,
+ *   a symlink to a missing file followed to where its target would be), in Unicode NFC and
+ *   lowercased. Letter case and Unicode spelling then never tell two outputs apart, on any file
+ *   system and whether or not the files exist yet.
  * - For an existing file, also its device and inode, which catches hard links.
  */
 const destinationKeysOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, path: string) {
-  const keys: Array<string> = [];
-  let target = path;
-  // A chain of symlinks to missing files, bounded as the OS bounds symlink loops.
-  for (let hops = 0; hops < 40; hops += 1) {
-    const info = yield* Effect.option(fs.stat(target));
-    if (Option.isSome(info)) {
-      if (Option.isSome(info.value.ino)) {
-        keys.push(`inode:${info.value.dev}:${info.value.ino.value}`);
-      }
-      break;
+  const physical = yield* physicalPathOf(fs, path);
+  const keys = [pathKey(physical.path)];
+  if (physical.exists) {
+    const info = yield* Effect.option(fs.stat(physical.path));
+    if (Option.isSome(info) && Option.isSome(info.value.ino)) {
+      keys.push(`inode:${info.value.dev}:${info.value.ino.value}`);
     }
-    const link = yield* Effect.option(fs.readLink(target));
-    if (Option.isNone(link)) {
-      break;
-    }
-    // Relative to the link's physical directory: `..` in the target climbs from where the link
-    // really is, not from the symlinked directory it was reached through.
-    const parent = yield* Effect.option(fs.realPath(dirname(target)));
-    target = resolve(
-      Option.getOrElse(parent, () => dirname(target)),
-      link.value,
-    );
   }
-  const rest: Array<string> = [];
-  let current = target;
-  for (;;) {
-    const real = yield* Effect.option(fs.realPath(current));
-    if (Option.isSome(real)) {
-      keys.push(pathKey(join(real.value, ...rest)));
-      return keys;
-    }
-    const parent = dirname(current);
-    if (parent === current) {
-      keys.push(pathKey(target));
-      return keys;
-    }
-    rest.unshift(basename(current));
-    current = parent;
-  }
+  return keys;
 });
 
 const utf8 = new TextEncoder();

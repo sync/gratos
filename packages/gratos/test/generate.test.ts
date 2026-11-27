@@ -2,12 +2,20 @@
 // TypeScript itself (tsgo) reads the project's sources from disk; every file the shell reads or
 // writes (the tsconfig and the generated files) goes through the FileSystem service, so a fake
 // one shows exactly which files it writes.
-import { linkSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import { NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
-import { Effect, Exit, FileSystem, PlatformError, Scope } from "effect";
+import { Effect, Exit, FileSystem, Layer, PlatformError, Scope } from "effect";
 
 import {
   check,
@@ -86,6 +94,36 @@ const memoryFileSystem = (
           }),
   });
   return { layer, writes, contents };
+};
+
+/**
+ * NodeFileSystem, recording the paths it reads links of (inside `dir`, as a physical path) and
+ * counting its realPath calls.
+ */
+const spiedFileSystem = (dir: string) => {
+  const physicalDir = realpathSync(dir);
+  const readLinks: Array<string> = [];
+  let realPaths = 0;
+  const layer = Layer.effect(
+    FileSystem.FileSystem,
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      return FileSystem.FileSystem.of({
+        ...fs,
+        readLink: (path) => {
+          if (path.startsWith(physicalDir)) {
+            readLinks.push(path);
+          }
+          return fs.readLink(path);
+        },
+        realPath: (path) => {
+          realPaths += 1;
+          return fs.realPath(path);
+        },
+      });
+    }),
+  ).pipe(Layer.provide(NodeFileSystem.layer));
+  return { layer, readLinks, realPaths: () => realPaths };
 };
 
 const smokeConfig = readFileSync(smokeTsconfig, "utf8");
@@ -261,6 +299,11 @@ describe("generate", () => {
   // Real projects on disk: the outputs alias one file only through the file system. The schema's
   // name has an "é" (composed, U+00E9) so that a decomposed spelling can alias it.
   const schemaName = "sch\u00e9ma.ts";
+  /** What each output path holds (following links), or null when nothing is there. */
+  const outputsOnDisk = (dir: string) =>
+    ["schema.graphql", join("real", schemaName), "enums.ts", join("link", "enums.ts")].map((name) =>
+      existsSync(join(dir, name)) ? readFileSync(join(dir, name), "utf8") : null,
+    );
   for (const [alias, tsClientEnums, prepare] of [
     [
       "a symlinked directory",
@@ -310,6 +353,20 @@ describe("generate", () => {
       },
     ],
     [
+      "a symlink whose target climbs through another symlink",
+      "./enums.ts",
+      (dir: string) => {
+        // enums.ts -> sub/link/../../../real/schéma.ts: the OS follows sub/link to
+        // elsewhere/deep/deeper first, so the three `..` climb back to the project's real/. Read
+        // as text, `link/..` cancels and the target points outside the project.
+        mkdirSync(join(dir, "real"));
+        mkdirSync(join(dir, "sub"));
+        mkdirSync(join(dir, "elsewhere", "deep", "deeper"), { recursive: true });
+        symlinkSync("../elsewhere/deep/deeper", join(dir, "sub", "link"));
+        symlinkSync(`sub/link/../../../real/${schemaName}`, join(dir, "enums.ts"));
+      },
+    ],
+    [
       "a hard link",
       "./enums.ts",
       (dir: string) => {
@@ -334,6 +391,7 @@ describe("generate", () => {
       );
       expect(config).toContain("tsClientEnums");
       writeFileSync(tsconfig, config);
+      const before = outputsOnDisk(project.dir);
       return Effect.gen(function* () {
         const error = yield* Effect.flip(Effect.scoped(generate(tsconfig)));
         assert.instanceOf(error, ConfigError);
@@ -341,7 +399,72 @@ describe("generate", () => {
         // A ConfigError, not StaleFilesError: no output exists yet, so check() would fail anyway.
         const checked = yield* Effect.flip(Effect.scoped(check(tsconfig)));
         assert.instanceOf(checked, ConfigError);
+        expect(outputsOnDisk(project.dir)).toEqual(before);
       }).pipe(Effect.provide(NodeFileSystem.layer), Effect.ensuring(Effect.sync(project.remove)));
+    });
+  }
+
+  /**
+   * enums.ts -> a1/b1/schéma.ts, where a1 -> a2 -> … -> level/ (a directory) and
+   * level/b1 -> level/b2 -> … -> real/: followed to the end, enums.ts is real/schéma.ts, the
+   * schema. The walk takes 1 + `aLinks` + `bLinks` hops, over two levels of one target.
+   */
+  const linkChains = (aLinks: number, bLinks: number) => (dir: string) => {
+    mkdirSync(join(dir, "real"));
+    mkdirSync(join(dir, "level"));
+    for (let i = 1; i <= aLinks; i += 1) {
+      symlinkSync(i === aLinks ? "level" : `a${i + 1}`, join(dir, `a${i}`));
+    }
+    for (let i = 1; i <= bLinks; i += 1) {
+      symlinkSync(i === bLinks ? "../real" : `b${i + 1}`, join(dir, "level", `b${i}`));
+    }
+    symlinkSync(`a1/b1/${schemaName}`, join(dir, "enums.ts"));
+  };
+
+  for (const [layout, prepare, readLinks, outcome] of [
+    // 39 hops: followed to the end, enums.ts is the schema.
+    ["links within the hop budget, over two levels", linkChains(20, 18), 39, "collision"],
+    // 46 hops: each level is under 40, but the budget is for the whole walk. The walk stops at
+    // level/b20 and treats enums.ts as missing there, so no collision is found; reading it then
+    // fails (ELOOP: the OS bounds a lookup at 40 links on Linux, 32 on macOS).
+    ["links over the hop budget, over two levels", linkChains(20, 25), 40, "unreadable"],
+    [
+      "a symlink to itself",
+      (dir: string) => {
+        mkdirSync(join(dir, "real"));
+        symlinkSync("enums.ts", join(dir, "enums.ts"));
+      },
+      40,
+      "unreadable",
+    ],
+  ] as const) {
+    it.effect(`follows ${layout} one readLink per hop, with no realPath`, () => {
+      const project = smokeCopy("output-hops");
+      prepare(project.dir);
+      const tsconfig = project.path("tsconfig.json");
+      const config = readFileSync(tsconfig, "utf8").replace(
+        '"tsSchema": "./schema.ts",',
+        `"tsSchema": "./real/${schemaName}", "tsClientEnums": "./enums.ts",`,
+      );
+      expect(config).toContain("tsClientEnums");
+      writeFileSync(tsconfig, config);
+      const spy = spiedFileSystem(project.dir);
+      const before = outputsOnDisk(project.dir);
+      return Effect.gen(function* () {
+        const error = yield* Effect.flip(Effect.scoped(generate(tsconfig)));
+        expect(spy.readLinks).toHaveLength(readLinks);
+        expect(spy.realPaths()).toBe(0);
+        if (outcome === "collision") {
+          assert.instanceOf(error, ConfigError);
+          expect(error.message).toContain("Two generated files would both be written to");
+        } else {
+          assert.instanceOf(error, OutputError);
+          expect(error.path).toBe(project.path("enums.ts"));
+        }
+        const checked = yield* Effect.flip(Effect.scoped(check(tsconfig)));
+        expect(checked._tag).toBe(outcome === "collision" ? "ConfigError" : "OutputError");
+        expect(outputsOnDisk(project.dir)).toEqual(before);
+      }).pipe(Effect.provide(spy.layer), Effect.ensuring(Effect.sync(project.remove)));
     });
   }
 
