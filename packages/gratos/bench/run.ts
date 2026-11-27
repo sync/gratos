@@ -15,17 +15,22 @@
 // `--project <tsconfig>` measures an existing project instead of the synthetic fixture (M7:
 // `pnpm --filter orders-example bench:compiler` for examples/orders), against the same spec
 // targets, with its own baseline file (`--baseline <path>`, relative to the working directory).
+//
+// A number above its bound (bench/bounds.ts: the targets, +20% when CI is set) exits 1. With
+// `--warn-only` (the informational bench job in .github/workflows/ci.yml) it prints a
+// `::warning::` instead and exits 0; a crash still fails. `--out <path>` also writes the result to
+// a file (for bench/report.ts), `--bound <measure>=<n>` replaces one bound (how a run with a
+// lowered bound is shown), and `--runs <n>` sets the number of measured runs (default 5).
 import { spawn } from "node:child_process";
 import { writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { CI_TOLERANCE, TARGETS } from "./bounds.ts";
+import { boundsFor, exitCodeFor, missesOf, TARGETS, warningCommand } from "./bounds.ts";
 import { fileStats, MODEL_COUNT, readBaseline, syntheticFixtureFiles } from "./fixture.ts";
 import { requireValidPeak, samplePeakRss } from "./rss.ts";
 
-const RUNS = 5;
 const SAMPLE_INTERVAL_MS = 5;
 
 const { values: flags } = parseArgs({
@@ -33,8 +38,20 @@ const { values: flags } = parseArgs({
     record: { type: "boolean", default: false },
     project: { type: "string" },
     baseline: { type: "string" },
+    "warn-only": { type: "boolean", default: false },
+    out: { type: "string" },
+    bound: { type: "string", multiple: true, default: [] },
+    runs: { type: "string", default: "5" },
   },
 });
+
+const runs = Number(flags.runs);
+if (!Number.isSafeInteger(runs) || runs < 1) {
+  throw new Error(`bench: --runs takes a positive integer, got ${JSON.stringify(flags.runs)}`);
+}
+const isCi = process.env["CI"] !== undefined && process.env["CI"] !== "";
+// Checked before any build, so a bad flag fails at once.
+const bounds = boundsFor(isCi, flags.bound);
 
 const packageDir = join(import.meta.dirname, "..");
 const baselinePath =
@@ -111,7 +128,7 @@ if (flags.project === undefined) {
 // One warm-up run (OS file cache, Node compile cache), not counted.
 await coldBuild();
 const builds: Array<Awaited<ReturnType<typeof coldBuild>>> = [];
-for (let run = 0; run < RUNS; run++) {
+for (let run = 0; run < runs; run++) {
   builds.push(await coldBuild());
 }
 const files = fileStats(tsconfigPath);
@@ -121,23 +138,23 @@ const measured = {
   peakRssMb: Math.round(median(builds.map((build) => build.peakRssKb)) / 1024),
 };
 
-const isCi = process.env["CI"] !== undefined && process.env["CI"] !== "";
-const bounds = Object.fromEntries(
-  Object.entries(TARGETS).map(([key, target]) => [key, isCi ? target * CI_TOLERANCE : target]),
-);
 const baseline = existsSync(baselinePath) ? readBaseline(baselinePath) : null;
 const versus = (key: keyof typeof measured) =>
   baseline === null ? null : `${Math.round((measured[key] / baseline[key] - 1) * 100)}%`;
 
+const misses = missesOf(measured, bounds);
 const result = {
-  project: flags.project === undefined ? `synthetic (${MODEL_COUNT} models)` : tsconfigPath,
+  project:
+    flags.project === undefined
+      ? `synthetic (${MODEL_COUNT} models)`
+      : relative(process.cwd(), tsconfigPath),
   measured,
   targets: TARGETS,
   bounds,
   withinBounds: {
-    filesLoaded: measured.filesLoaded <= (bounds["filesLoaded"] ?? 0),
-    coldBuildMs: measured.coldBuildMs <= (bounds["coldBuildMs"] ?? 0),
-    peakRssMb: measured.peakRssMb <= (bounds["peakRssMb"] ?? 0),
+    filesLoaded: measured.filesLoaded <= bounds.filesLoaded,
+    coldBuildMs: measured.coldBuildMs <= bounds.coldBuildMs,
+    peakRssMb: measured.peakRssMb <= bounds.peakRssMb,
   },
   versusBaseline:
     baseline === null
@@ -157,16 +174,25 @@ const result = {
   files,
   runner,
 };
-process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+const report = `${JSON.stringify(result, null, 2)}\n`;
+process.stdout.write(report);
+if (flags.out !== undefined) {
+  writeFileSync(resolve(flags.out), report);
+}
 
 if (flags.record) {
   writeFileSync(baselinePath, `${JSON.stringify({ runner, ...measured }, null, 2)}\n`);
   process.stderr.write(`bench: recorded ${baselinePath}\n`);
 }
-const misses = Object.entries(result.withinBounds).filter(([, within]) => !within);
 if (misses.length > 0) {
   process.stderr.write(
-    `bench: outside the spec bounds: ${misses.map(([key]) => key).join(", ")}\n`,
+    `bench: outside the spec bounds: ${misses.map((miss) => miss.measure).join(", ")}\n`,
   );
-  process.exitCode = 1;
+  if (flags["warn-only"]) {
+    // Workflow commands are read from stdout.
+    for (const miss of misses) {
+      process.stdout.write(`${warningCommand(result.project, miss)}\n`);
+    }
+  }
 }
+process.exitCode = exitCodeFor(misses, flags["warn-only"]);
