@@ -64,6 +64,8 @@ const asSubscriptions = (schema: GraphQLSchema): GraphQLSchema => {
 /** A span that also logs its end, so span ends order against the resolvers' own events. */
 class LoggedSpan extends RecordedSpan {
   log: Array<string> = [];
+  /** Resolves once onSpanEnd has run for this span. */
+  readonly reported = gate();
 
   override end(endTime: bigint, exit: Exit.Exit<unknown, unknown>): void {
     super.end(endTime, exit);
@@ -77,8 +79,11 @@ interface Built {
   /** The operation spans (named `graphql …`). */
   readonly operations: () => Array<LoggedSpan>;
   readonly named: (name: string) => Array<LoggedSpan>;
-  /** Resolves with the operation span once onSpanEnd has run for it. */
-  readonly spanEnded: Promise<Tracer.Span>;
+  /**
+   * Resolves with the latest operation span once onSpanEnd has run for that span: keyed to the
+   * request measured, not to a warm-up request before it.
+   */
+  readonly spanEnded: () => Promise<LoggedSpan>;
   /** How many times onSpanEnd ran. */
   readonly endCount: () => number;
   /** What reportErrors saw, by message. */
@@ -102,7 +107,6 @@ const build = (
       return span;
     },
   });
-  const ended = gate<Tracer.Span>();
   let endCount = 0;
   const reported: Array<string> = [];
   const requests: Array<Request> = [];
@@ -138,7 +142,7 @@ const build = (
         context: Tracer.Tracer.context(tracer),
         onSpanEnd: (span) => {
           endCount += 1;
-          ended.resolve(span);
+          spans.find((candidate) => candidate === span)?.reported.resolve();
         },
       }),
       ...(options.after ?? []),
@@ -150,7 +154,14 @@ const build = (
     spans,
     operations: () => spans.filter((span) => span.name.startsWith("graphql ")),
     named: (name) => spans.filter((span) => span.name === name),
-    spanEnded: ended.promise,
+    spanEnded: async () => {
+      const operation = spans.findLast((span) => span.name.startsWith("graphql "));
+      if (operation === undefined) {
+        throw new Error("no operation span");
+      }
+      await operation.reported.promise;
+      return operation;
+    },
     endCount: () => endCount,
     reported,
     requests,
@@ -179,12 +190,18 @@ const stopOf = (exit: Exit.Exit<unknown, unknown>): Stop => {
 
 /**
  * A resource whose release is held open by a latch: `started` once acquired, `releasing` once
- * its finalizer runs, which then waits for `hold`. Each step is logged under `name`.
+ * its finalizer runs, which then waits for `hold` (released when the test finishes, at the latest).
+ * Each step is logged under `name`.
  */
 const held = (log: Array<string>, name: string, onAcquire: () => void = () => {}) => {
   const started = gate();
   const releasing = gate();
   const hold = gate();
+  // A failing assertion never leaves the finalizer suspended; tests still release it explicitly
+  // where the release sets the order of events.
+  onTestFinished(() => {
+    hold.resolve();
+  });
   const resource = Effect.acquireRelease(
     Effect.sync(() => {
       log.push(`${name} start`);
@@ -290,7 +307,7 @@ describe("F5: deferred startup (incremental executor)", () => {
     // The interrupted resolver is still in its finalizer.
     expect(operation?.ended).toBe(false);
     sibling.hold.resolve();
-    await built.spanEnded;
+    await built.spanEnded();
     const [resolver] = built.named("resolve Item.later");
     expect(at(log, "later finalizer")).toBeLessThan(at(log, "later released"));
     expect(at(log, "end resolve Item.later")).toBeLessThan(at(log, "end graphql Deferred"));
@@ -348,9 +365,6 @@ describe("F5: a source aborts the request during a pull's synchronous start (sub
       const acquired = held(log, "source", () => {
         controller.abort();
       });
-      onTestFinished(() => {
-        acquired.hold.resolve();
-      });
       const built = build(log, [], {
         Subscription: { source: () => streamOf(log, acquired.resource) },
       });
@@ -367,7 +381,7 @@ describe("F5: a source aborts the request during a pull's synchronous start (sub
       const [operation] = built.operations();
       expect(operation?.ended).toBe(false);
       acquired.hold.resolve();
-      await built.spanEnded;
+      await built.spanEnded();
       // The pull's fiber was interrupted (it never leaks), then the scope ran the release.
       expect(at(log, "source pull exit")).toBeLessThan(at(log, "source finalizer"));
       expect(at(log, "source released")).toBeLessThan(at(log, "end graphql Pulled"));
@@ -402,7 +416,7 @@ describe("F5: a non-null field fails while a sibling runs", () => {
     expect(log).not.toContain("slow released");
     expect(operation?.ended).toBe(false);
     sibling.hold.resolve();
-    await built.spanEnded;
+    await built.spanEnded();
     const [resolver] = built.named("resolve Query.slow");
     expect(at(log, "slow released")).toBeLessThan(at(log, "end graphql Short"));
     expect(at(log, "end resolve Query.slow")).toBeLessThan(at(log, "end graphql Short"));
@@ -450,6 +464,8 @@ describe("F5: a non-null field fails while a sibling runs", () => {
     });
     const query = "query Short { slow failing }";
     await gql(built.server, query);
+    // The warm-up's span has ended before the measured request starts.
+    await built.spanEnded();
     built.spans.length = 0;
     log.length = 0;
     measured = true;
@@ -465,8 +481,7 @@ describe("F5: a non-null field fails while a sibling runs", () => {
     sibling.hold.resolve();
     const sent = await pending;
     expect(sent.body?.data).toBeNull();
-    await built.spanEnded;
-    const [operation] = built.operations();
+    const operation = await built.spanEnded();
     const [resolver] = built.named("resolve Query.slow");
     expect(at(log, "slow exit success")).toBeLessThan(at(log, "end graphql Short"));
     endedNotBefore(operation, resolver);
@@ -487,7 +502,7 @@ describe("F5: a non-null field fails while a sibling runs", () => {
     });
     const sent = await send(built.server, post({ query: "query Late { late failing }" }));
     expect(sent.body?.data).toBeNull();
-    await built.spanEnded;
+    await built.spanEnded();
     late.resolve(
       Effect.sync(() => {
         log.push("late start");
@@ -626,7 +641,7 @@ describe("F5: a subscription source fails while a resolver still runs", () => {
     const [operation] = built.operations();
     expect(operation?.ended).toBe(false);
     sibling.hold.resolve();
-    await built.spanEnded;
+    await built.spanEnded();
     expect(at(log, "slow released")).toBeLessThan(at(log, "end graphql Failing"));
     expect(operation?.outcome).toBe("error");
     expect(operation?.endCalls).toBe(1);
@@ -699,7 +714,7 @@ describe("F5: the core's own aborts carry a reason the Effect layer reads", () =
       "stream",
     );
     sibling.hold.resolve();
-    await built.spanEnded;
+    await built.spanEnded();
     expect(at(log, "later released")).toBeLessThan(at(log, "end graphql Failing"));
     expect(stops).toEqual(["internal"]);
   });
@@ -730,7 +745,7 @@ describe("F5: the core's own aborts carry a reason the Effect layer reads", () =
       "unsent",
     );
     sibling.hold.resolve();
-    await built.spanEnded;
+    await built.spanEnded();
     expect(at(log, "slow released")).toBeLessThan(at(log, "end graphql Unsent"));
     expect(stops).toEqual(["internal"]);
   });
