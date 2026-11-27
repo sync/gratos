@@ -23,6 +23,8 @@ import type {
   ValidationRule,
 } from "graphql";
 
+import { abortAs, forwardAbort } from "./abortReason.ts";
+import type { AbortKind } from "./abortReason.ts";
 import { DocumentCache, operationEntry } from "./documents.ts";
 import type { DocumentEntry } from "./documents.ts";
 import { asGraphQLError, serverDraining } from "./errors.ts";
@@ -239,9 +241,10 @@ const noneAbandoned: ReadonlySet<Promise<void>> = new Set();
 const noClaims: ReadonlyArray<Executor> = [];
 
 /**
- * A controller that aborts when `incoming` (the Request's signal: the client left) does. With
- * `enter`, that abort runs inside the request's execution wrappers: execution's listeners on the
- * controller's signal close sources (graphql-js closes the @stream sources from its own).
+ * A controller that aborts when `incoming` (the Request's signal: the client left) does, with
+ * `incoming`'s own reason (the client's, or the core's for a claim's signal linked to its caller's).
+ * With `enter`, that abort runs inside the request's execution wrappers: execution's listeners on
+ * the controller's signal close sources (graphql-js closes the @stream sources from its own).
  */
 const linkedController = (
   incoming: AbortSignal,
@@ -250,7 +253,7 @@ const linkedController = (
 ): AbortController => {
   const controller = new AbortController();
   const abort = (): void => {
-    controller.abort(incoming.reason);
+    forwardAbort(controller, incoming);
   };
   if (incoming.aborted) {
     abort();
@@ -522,7 +525,7 @@ const serve = <Ctx>(
       });
     }
     return jsonResponse(result, answered, run.mediaType, () => {
-      abortInside(run);
+      abortInside(run, "client");
     });
   };
 
@@ -553,7 +556,7 @@ const serve = <Ctx>(
    * A throwing wrapper is logged; the signal still aborts and the result still closes.
    */
   const closeUnsent = async (run: Run, result: ExecutorResult): Promise<void> => {
-    abortInside(run);
+    abortInside(run, "unsent");
     run.controller = linkedController(run.request.signal);
     await closeStreamed(run, result);
   };
@@ -587,23 +590,24 @@ const serve = <Ctx>(
   /**
    * Aborts the core signal inside the request's execution wrappers (a JSON body cancelled
    * unread), so its listeners (signalOf, a source's cleanup) run there, as on every other abort
-   * the core makes. A throwing wrapper is logged and the signal aborted anyway.
+   * the core makes, with a reason of `kind` (abortReason.ts). A throwing wrapper is logged and the
+   * signal aborted anyway.
    */
-  const abortInside = (run: Run): void => {
+  const abortInside = (run: Run, kind: AbortKind): void => {
     const { controller } = run;
     enterOrRun(
       run.enter,
       logger,
       "gratos-server: a wrapExecution wrapper failed on an abort.",
       () => {
-        controller.abort();
+        abortAs(controller, kind);
       },
     );
   };
 
   const transportError = (run: Run, message: string, status: number): Response =>
     jsonResponse(errorResult([new GraphQLError(message)]), status, run.mediaType, () => {
-      abortInside(run);
+      abortInside(run, "client");
     });
 
   /** read: method, Accept, Content-Type, body, onParams, the "no query" check. */
@@ -783,7 +787,7 @@ const serve = <Ctx>(
           logger,
           "gratos-server: a wrapExecution wrapper failed on an abort.",
           () => {
-            controller.abort();
+            abortAs(controller, "abandoned");
           },
         );
       }
@@ -949,7 +953,7 @@ const serve = <Ctx>(
       return;
     }
     if (!mutationStarted) {
-      abortInside(run);
+      abortInside(run, "abandoned");
       run.controller = linkedController(run.request.signal);
     }
     while (abandoned.size > 0) {
