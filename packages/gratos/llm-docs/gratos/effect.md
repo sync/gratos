@@ -126,8 +126,9 @@ yieldable) and fails with itself.
 - `effect({ context })` is the plugin: it creates the `graphql <operation>` span (with child spans
   for the parse, validate and jit phases, backdated to their real start), links each resolver to
   its request's scope, records the operation type (so a guard knows a mutation), counts errors,
-  and ends the span when the response body ends. `context` is the fork context for requests that
-  do not come through a route (a bare `server.handle(request)` in a test).
+  and ends the span once the response body ends: the body's end is the trigger, and the span can
+  stay open after it while the request's work settles (see below). `context` is the fork context
+  for requests that do not come through a route (a bare `server.handle(request)` in a test).
 - `effectRoute(server)` is the `HttpRouter` handler: register it for every method
   (`HttpRouter.add("*", "/graphql", …)`), so a GET reaches the core and gets its 405.
 - `effectRouteLayer(server, { path, warnAfterMs })` is the route as a Layer, with a finalizer that
@@ -158,15 +159,17 @@ When a client leaves, its query and subscription fibers are interrupted and noth
 So are they when the request no longer needs their work: the core stopped the execution (a
 failed subscription source or streamed response, a result it never sends), or the response
 ended with the work still running. For a query or a subscription, the `graphql <operation>` span
-always ends after the resolver spans it parents. A mutation's span still ends before the drain
-releases services, but a nested resolver left running by a sibling's non-null short-circuit may
-end after it. After a sibling's non-null short-circuit on graphql-js, the operation span now
-waits for the cancelled sibling's finalizers (on warmed `jit()`, graphql-jit itself waits for the
-sibling to finish), and an Effect that arrives after the response ended (a resolver's Promise
-that resolves to one later) is no longer run, side effects included. A mutation is never
-interrupted: a half-applied write is worse than a wasted one. Resolvers fork
-without the request's `Scope`; one that needs a scope uses `Effect.scoped`. Build long-lived
-resources (pools, intervals) in Layers, never lazily inside a resolver.
+always ends after the resolver spans it parents: once the response body ends, the span waits for
+the tracked resolver work and the opened streams to settle, so a client can finish reading the
+response while the span is still open (a sibling still in its finalizer, say). A mutation's span
+still ends before the drain releases services, but a nested resolver left running by a sibling's
+non-null short-circuit may end after it. After a sibling's non-null short-circuit on graphql-js,
+the operation span now waits for the cancelled sibling's finalizers (on warmed `jit()`,
+graphql-jit itself waits for the sibling to finish), and an Effect that arrives after the
+response ended (a resolver's Promise that resolves to one later) is no longer run, side effects
+included. A mutation is never interrupted: a half-applied write is worse than a wasted one.
+Resolvers fork without the request's `Scope`; one that needs a scope uses `Effect.scoped`. Build
+long-lived resources (pools, intervals) in Layers, never lazily inside a resolver.
 
 ### runInRequest
 
