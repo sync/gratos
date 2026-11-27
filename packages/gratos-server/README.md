@@ -1,7 +1,7 @@
 # @dblechoc/gratos-server
 
 A small GraphQL-over-HTTP server core: `createServer(options).handle(request)` takes a Web
-`Request` and returns a `Response`, so it runs behind any fetch-style adapter. It has a plugin
+`Request` and returns a `Promise<Response>`, so it runs behind any fetch-style adapter. It has a plugin
 system and ships the plugins the example uses (`apq()`, `incremental()`, `jit()`,
 `reportErrors()`, `maskErrors()`, `serverTiming()`, `maxDepth()`, `readOnly()`). The core never
 imports `effect`; the Effect layer is the `@dblechoc/gratos-server/effect` entry.

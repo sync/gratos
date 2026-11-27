@@ -254,8 +254,8 @@ report sees unmasked errors. Plugins that only observe or refuse (`effect()`, `s
   every method field its own resolver, so they are safe; a hand-written schema with
   function-valued fields keeps them on graphql-js with `jit({ isSafe: (field, type) => … })`.
 - **No `@defer` or `@stream` on mutations**: `incremental()` rejects them as validation errors
-  (a 400, or a 200 under `application/json`), so deferred work never outlives the shutdown
-  drain.
+  (for a JSON response a 400, or a 200 under `application/json`; an SSE-only client gets a
+  200 SSE error event), so deferred work never outlives the shutdown drain.
 - **Incremental delivery speaks `deferSpec=20220824`.** Apollo Client (4.1 or later) needs
   `incrementalHandler: new Defer20220824Handler()`; run `@stream` queries with
   `fetchPolicy: "no-cache"` (Apollo 4.1.0's changelog, #13078: the default merge can truncate a
