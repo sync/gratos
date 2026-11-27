@@ -1,6 +1,7 @@
 // The package's public entries export exactly these values (docs/plan.html F5): the core's abort
 // reasons (core/abortReason.ts) and the Effect layer's RequestEnded annotation stay internal until
-// publishing decides a public API, and any new export has to be added here on purpose.
+// publishing decides a public API, and any new export has to be added here on purpose. jit() is
+// the `/jit` entry only (F7), so the core entry never loads graphql-jit.
 import { describe, expect, it } from "vitest";
 
 /** The names a module exports, sorted. */
@@ -25,10 +26,7 @@ describe("@dblechoc/gratos-server's public entries", () => {
       "incremental",
       "isCancelled",
       "isIncrementalPayload",
-      "isJitDisabled",
-      "isSelectionSafe",
       "isUnexpectedError",
-      "jit",
       "mapPayloadErrors",
       "maskErrors",
       "maxDepth",
@@ -42,8 +40,16 @@ describe("@dblechoc/gratos-server's public entries", () => {
       "signalOf",
       "startOf",
       "usesIncrementalDelivery",
-      "usesOneOfVariable",
       "withIncrementalDirectives",
+    ]);
+  });
+
+  it("export only jit() and its helpers from the jit entry", async () => {
+    expect(await exportsOf(() => import("../src/jit.ts"))).toEqual([
+      "isJitDisabled",
+      "isSelectionSafe",
+      "jit",
+      "usesOneOfVariable",
     ]);
   });
 

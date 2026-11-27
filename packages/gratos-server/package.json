@@ -1,21 +1,47 @@
 {
   "name": "@dblechoc/gratos-server",
   "version": "0.0.0",
-  "private": true,
+  "description": "A small, plugin-based GraphQL-over-HTTP server core for Web Request and Response, with an Effect layer.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sync/gratos.git",
+    "directory": "packages/gratos-server"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./effect": "./src/effect/index.ts"
+    "./effect": "./src/effect/index.ts",
+    "./jit": "./src/jit.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./effect": {
+        "types": "./dist/effect/index.d.ts",
+        "default": "./dist/effect/index.js"
+      },
+      "./jit": {
+        "types": "./dist/jit.d.ts",
+        "default": "./dist/jit.js"
+      }
+    },
+    "access": "public"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "codegen": "gratos --tsconfig test/app/tsconfig.json",
-    "codegen:check": "gratos --check --tsconfig test/app/tsconfig.json"
-  },
-  "dependencies": {
-    "graphql": "catalog:",
-    "graphql-jit": "catalog:"
+    "codegen:check": "gratos --check --tsconfig test/app/tsconfig.json",
+    "prepack": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json"
   },
   "devDependencies": {
     "@dblechoc/gratos": "workspace:*",
@@ -23,16 +49,26 @@
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "effect": "catalog:",
+    "graphql": "catalog:",
+    "graphql-jit": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "effect": "catalog:"
+    "effect": "^4.1.5",
+    "graphql": "^17.1.0",
+    "graphql-jit": "^0.10.1"
   },
   "peerDependenciesMeta": {
     "effect": {
       "optional": true
+    },
+    "graphql-jit": {
+      "optional": true
     }
+  },
+  "engines": {
+    "node": ">=26.13.0"
   }
 }

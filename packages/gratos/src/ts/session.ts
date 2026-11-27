@@ -3,7 +3,9 @@
 // A session owns one `API` child process, acquired and released as an Effect resource. Its
 // `fs.readFile` callback serves virtual tsconfigs and implements fast loading (spec §5): code
 // files whose realpath is under `node_modules` are served as `export {};`, except TypeScript's
-// own bundled lib files. `package.json` and other non-code files are always read in full, and so
+// own bundled lib files and this package's own public declarations (an installed
+// @dblechoc/gratos sits under `node_modules`, and its models import `ID`, `Int`, `Float` and
+// `GqlInfo` from them). `package.json` and other non-code files are always read in full, and so
 // are workspace packages, whose realpath is outside `node_modules`.
 import type { ChildProcess } from "node:child_process";
 import { realpathSync } from "node:fs";
@@ -33,6 +35,20 @@ export const bundledLibDirectory: string = (() => {
   return realpathOrSelf(join(dirname(typescriptRequire.resolve(platformPackage)), "lib"));
 })();
 
+/**
+ * The public declaration files of an installed @dblechoc/gratos, which fast loading serves in
+ * full: the `.` and `./dev` entries' types, and the Types module that `.` re-exports. The release
+ * build (tsconfig.build-dts.json) emits exactly these, beside the JavaScript, so they are found
+ * from where this module really is: `dist/ts/session.js` in the package, `src/ts/session.ts` in
+ * the workspace, where they do not exist and nothing under `node_modules` matches.
+ */
+export const ownPublicDeclarations: ReadonlySet<string> = (() => {
+  const outDir = dirname(dirname(realpathOrSelf(import.meta.filename)));
+  return new Set(
+    ["index.d.ts", "devApi.d.ts", join("upstream", "Types.d.ts")].map((file) => join(outDir, file)),
+  );
+})();
+
 const isUnderNodeModules = (realpath: string): boolean =>
   realpath.split(sep).includes("node_modules");
 
@@ -60,11 +76,13 @@ export interface Session {
 
 /**
  * The readFile policy, exported for tests: the source to serve for `fileName`, or `undefined` to
- * let tsgo read the real file.
+ * let tsgo read the real file. `servedInFull` (realpaths) is this package's own public
+ * declarations, or a stand-in for them in a test.
  */
 export const readFileOverride = (
   session: Pick<Session, "blankThirdParty" | "virtualFiles" | "filesRead" | "blanked">,
   fileName: string,
+  servedInFull: ReadonlySet<string> = ownPublicDeclarations,
 ): string | undefined => {
   const virtual = session.virtualFiles.get(fileName);
   if (virtual !== undefined) {
@@ -75,7 +93,11 @@ export const readFileOverride = (
     return undefined;
   }
   const realpath = realpathOrSelf(fileName);
-  if (realpath.startsWith(bundledLibDirectory + sep) || !isUnderNodeModules(realpath)) {
+  if (
+    realpath.startsWith(bundledLibDirectory + sep) ||
+    servedInFull.has(realpath) ||
+    !isUnderNodeModules(realpath)
+  ) {
     // An earlier snapshot of this session may have blanked it (a symlink into node_modules since
     // retargeted); it is served in full now.
     session.blanked.delete(fileName);

@@ -78,11 +78,60 @@ jobs:
           --build "$RUNNER_TEMP/bench-orders.json"
           --dev "$RUNNER_TEMP/dev-timings.json"
 
-  # The required check. It needs `check` only: `bench` is informational and never gates a merge.
+  # The packages as a registry would ship them (docs/plan.html F7): pnpm packs both, each
+  # package's prepack building dist/, and scripts/install-test.ts installs those tarballs with npm
+  # into a project outside the workspace and runs them there: at the catalog's pins, the minimum
+  # of every peer range, and with the server core alone (no effect, graphql-jit or typescript).
+  # Required, through `ci`.
+  pack-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Pack the packages
+        run: pnpm --filter "./packages/*" pack --pack-destination "$RUNNER_TEMP/tarballs"
+      - name: Install test, minimum peers
+        run: node scripts/install-test.ts "$RUNNER_TEMP/tarballs" --peers min
+      - name: Install test, the core alone
+        run: node scripts/install-test.ts "$RUNNER_TEMP/tarballs" --peers core
+      - name: Upload the tested tarballs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarballs
+          path: ${{ runner.temp }}/tarballs/*.tgz
+          retention-days: 7
+
+  # Informational, like `bench`: the same tarballs at the newest versions the peer ranges allow.
+  # An upstream release inside a range can break it without any change here, so it never gates a
+  # merge (docs/plan.html F3, F7); the canary covers the top of each range too.
+  pack-check-newest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Pack the packages
+        run: pnpm --filter "./packages/*" pack --pack-destination "$RUNNER_TEMP/tarballs"
+      - name: Install test, newest peers
+        run: node scripts/install-test.ts "$RUNNER_TEMP/tarballs" --peers newest
+
+  # The required check. It needs `check` and `pack-check` only: `bench` and `pack-check-newest`
+  # are informational and never gate a merge.
   ci:
     if: always()
-    needs: [check]
+    needs: [check, pack-check]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job to succeed
-        run: test "${{ needs.check.result }}" = "success"
+        run: >-
+          test "${{ needs.check.result }}" = "success" &&
+          test "${{ needs.pack-check.result }}" = "success"

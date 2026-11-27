@@ -12,7 +12,6 @@ import {
   createServer,
   gqlError,
   isCancelled,
-  jit,
   maskErrors,
   maxDepth,
   mutationOf,
@@ -24,6 +23,7 @@ import {
   signalOf,
 } from "../src/index.ts";
 import type { Plugin } from "../src/index.ts";
+import { jit } from "../src/jit.ts";
 import { gate, gql, post, send } from "./support/http.ts";
 import { watchedJit } from "./support/jit.ts";
 import { basicSchema } from "./support/schema.ts";

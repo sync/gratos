@@ -9,7 +9,6 @@ import {
   CLIENT_CLOSED_REQUEST,
   createServer,
   incremental,
-  jit,
   mapPayloadErrors,
   maskErrors,
   payloadErrors,
@@ -20,6 +19,7 @@ import {
   withIncrementalDirectives,
 } from "../src/index.ts";
 import type { ExecuteInput, Plugin } from "../src/index.ts";
+import { jit } from "../src/jit.ts";
 import { flush, gate, gql, post, sleep } from "./support/http.ts";
 import { makeSchema } from "./support/schema.ts";
 import {

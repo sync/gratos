@@ -15,7 +15,6 @@ import {
   createServer,
   gqlError,
   incremental,
-  jit,
   maskErrors,
   reportErrors,
   serverTiming,
@@ -27,6 +26,7 @@ import {
   effectSchema,
   runInRequest,
 } from "@dblechoc/gratos-server/effect";
+import { jit } from "@dblechoc/gratos-server/jit";
 import { Effect, Layer, Match } from "effect";
 import type { Context } from "effect";
 import { HttpRouter } from "effect/http";

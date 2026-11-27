@@ -18,7 +18,8 @@
     "@dblechoc/gratos-server": "workspace:*",
     "@effect/platform-node": "catalog:",
     "effect": "catalog:",
-    "graphql": "catalog:"
+    "graphql": "catalog:",
+    "graphql-jit": "catalog:"
   },
   "devDependencies": {
     "@apollo/client": "catalog:",

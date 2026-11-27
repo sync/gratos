@@ -22,12 +22,19 @@ and the shipped plugins). Code blocks tagged `file=` are compared with that file
 
 - **The binary is `gratos`**, not `grats`: `npx grats`, `npm run grats` and
   `node_modules/grats/dist/src/cli.js` become `gratos` (in a package script, say) and
-  `node_modules/@dblechoc/gratos/src/cli.ts`. Node runs it from source, with no build step.
+  `node_modules/@dblechoc/gratos/dist/cli.js`. In this workspace Node runs it from source, with no
+  build step; the published package's `bin` is the release build's (`publishConfig`):
 
   ```json file=packages/gratos/package.json
     "bin": {
       "gratos": "./src/cli.ts"
     },
+  ```
+
+  ```json file=packages/gratos/package.json
+      "bin": {
+        "gratos": "./dist/cli.js"
+      },
   ```
 
 - **`libraryImport` is a new config option**, under the same `grats` key of `tsconfig.json`. It is
@@ -122,7 +129,7 @@ None of these ports to the TypeScript 7 API, so all of them were cut (M1b in `do
 | `guides/workflows.md`                                | The script runs `gratos`; there is no `--watch` to pass it (use `node --watch-path`)        |
 | `guides/incremental-migration/gradual-annotation.md` | `gratos`, not `npx grats`                                                                   |
 | `guides/incremental-migration/schema-merging.md`     | The script runs `gratos`, not `grats`                                                       |
-| `guides/performance-profiling.md`                    | Profile `node_modules/@dblechoc/gratos/src/cli.ts`                                          |
+| `guides/performance-profiling.md`                    | Profile `node_modules/@dblechoc/gratos/dist/cli.js`                                         |
 | `resolvers.md`                                       | `GqlInfo` comes from `@dblechoc/gratos`                                                     |
 | `docblock-tags/info.md`                              | Import `GqlInfo` from `@dblechoc/gratos`, not `"grats"`                                     |
 | `docblock-tags/scalars.md`                           | Import `Float`, `Int` and `ID` from `@dblechoc/gratos`, not `"grats"`                       |

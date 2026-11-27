@@ -1,0 +1,13 @@
+{
+  // The release build (docs/plan.html F7), run only by `prepack`: src/ as JavaScript and
+  // declarations in dist/, with the same layout. Inside the workspace nothing is built; Node runs
+  // src/ through type stripping.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true
+  },
+  "include": ["src/**/*.ts"]
+}
