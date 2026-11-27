@@ -1,9 +1,7 @@
 // `pnpm --filter @dblechoc/gratos bench`: cold build of a synthetic 300-model project with the
 // `gratos` CLI, compared with the committed baseline (bench/baseline.json at the repo root).
 //
-// It writes the fixture to bench/.fixture/ (gitignored): 300 @gqlType classes with Promise
-// fields and @gqlQueryField functions, each importing effect, @effect/platform-node and graphql,
-// so fast loading really blanks third-party files. It then runs the CLI in fresh Node processes
+// It writes the fixture (bench/fixture.ts) to bench/.fixture/ (gitignored). It then runs the CLI in fresh Node processes
 // (each spawns its own tsgo, so every run is a cold build) and records, per docs/plan.html M3:
 //
 // - files loaded: the program's source files, with third-party files read as empty;
@@ -18,23 +16,16 @@
 // `pnpm --filter orders-example bench:compiler` for examples/orders), against the same spec
 // targets, with its own baseline file (`--baseline <path>`, relative to the working directory).
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { Schema } from "effect";
-
-import { getParsedCommandLineOfConfigFile } from "../src/ts/program.ts";
-import { closeDefaultSessions } from "../src/ts/session.ts";
-
+import { CI_TOLERANCE, TARGETS } from "./bounds.ts";
+import { fileStats, MODEL_COUNT, readBaseline, syntheticFixtureFiles } from "./fixture.ts";
 import { requireValidPeak, samplePeakRss } from "./rss.ts";
 
-const MODEL_COUNT = 300;
 const RUNS = 5;
-/** Spec targets (local). CI allows +20%, because shared runners are noisy. */
-const TARGETS = { filesLoaded: 530, coldBuildMs: 900, peakRssMb: 380 } as const;
-const CI_TOLERANCE = 1.2;
 const SAMPLE_INTERVAL_MS = 5;
 
 const { values: flags } = parseArgs({
@@ -51,87 +42,16 @@ const baselinePath =
     ? join(packageDir, "..", "..", "bench", "baseline.json")
     : resolve(flags.baseline);
 const fixtureDir = join(import.meta.dirname, ".fixture");
-const modelsDir = join(fixtureDir, "models");
 /** The tsconfig measured: the project's, or the synthetic fixture's. */
 const tsconfigPath =
   flags.project === undefined ? join(fixtureDir, "tsconfig.json") : resolve(flags.project);
 
-const model = (index: number): string => {
-  const next = index + 1 < MODEL_COUNT ? `Model${index + 1}` : null;
-  return `import type { NodeRuntime } from "@effect/platform-node";
-import { Effect } from "effect";
-import type { GraphQLResolveInfo } from "graphql";
-import type { Int } from "@dblechoc/gratos";
-${next === null ? "" : `import { ${next} } from "./${next}.ts";\n`}
-/** Model number ${index}. */
-/** @gqlType */
-export class Model${index} {
-  /** @gqlField */
-  id: string;
-  /** @gqlField */
-  rank: Int;
-  /** @gqlField */
-  active: boolean;
-
-  constructor(id: string, rank: Int) {
-    this.id = id;
-    this.rank = rank;
-    this.active = rank % 2 === 0;
-  }
-
-  /** @gqlField */
-  async label(): Promise<string> {
-    return \`model-\${this.id}\`;
-  }
-${
-  next === null
-    ? ""
-    : `
-  /** @gqlField */
-  async next(): Promise<${next}> {
-    return new ${next}(\`\${this.id}+\`, this.rank + 1);
-  }
-`
-}}
-
-/** @gqlQueryField */
-export async function model${index}(): Promise<Model${index}> {
-  return new Model${index}("${index}", ${index});
-}
-
-export const load${index} = Effect.succeed(new Model${index}("${index}", ${index}));
-export type Runtime${index} = typeof NodeRuntime;
-export type Info${index} = GraphQLResolveInfo;
-`;
-};
-
 const writeFixture = (): void => {
   rmSync(fixtureDir, { recursive: true, force: true });
-  mkdirSync(modelsDir, { recursive: true });
-  writeFileSync(
-    join(fixtureDir, "tsconfig.json"),
-    `${JSON.stringify(
-      {
-        compilerOptions: {
-          target: "es2022",
-          lib: ["es2022"],
-          module: "nodenext",
-          moduleResolution: "nodenext",
-          types: ["node"],
-          strict: true,
-          noEmit: true,
-          skipLibCheck: true,
-          allowImportingTsExtensions: true,
-        },
-        include: ["models/**/*.ts"],
-        grats: { importModuleSpecifierEnding: ".ts", schemaHeader: null, tsSchemaHeader: null },
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  for (let index = 0; index < MODEL_COUNT; index++) {
-    writeFileSync(join(modelsDir, `Model${index}.ts`), model(index));
+  for (const file of syntheticFixtureFiles()) {
+    const path = join(fixtureDir, file.path);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, file.content);
   }
 };
 
@@ -174,39 +94,8 @@ const coldBuild = async (): Promise<{
   };
 };
 
-const fileStats = () => {
-  const parsed = getParsedCommandLineOfConfigFile(tsconfigPath);
-  const { session, project } = parsed.program;
-  const programFiles = project.program.getSourceFileNames();
-  const stats = {
-    /** The spec's "files loaded": every source file in the program. */
-    filesLoaded: programFiles.length,
-    libFiles: programFiles.filter(
-      (fileName) => project.program.getSourceFileMetadata(fileName)?.isDefaultLibrary,
-    ).length,
-    filesRead: session.filesRead.size,
-    blankedFiles: programFiles.filter((fileName) => session.blanked.has(fileName)).length,
-    fullyLoadedFiles: programFiles.filter((fileName) => !session.blanked.has(fileName)).length,
-  };
-  closeDefaultSessions();
-  return stats;
-};
-
 const median = (values: ReadonlyArray<number>): number =>
   values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
-
-const Baseline = Schema.Struct({
-  runner: Schema.Struct({
-    platform: Schema.String,
-    cpu: Schema.String,
-    cores: Schema.Number,
-    memoryGb: Schema.Number,
-    node: Schema.String,
-  }),
-  filesLoaded: Schema.Number,
-  coldBuildMs: Schema.Number,
-  peakRssMb: Schema.Number,
-});
 
 const runner = {
   platform: `${process.platform}-${process.arch}`,
@@ -225,7 +114,7 @@ const builds: Array<Awaited<ReturnType<typeof coldBuild>>> = [];
 for (let run = 0; run < RUNS; run++) {
   builds.push(await coldBuild());
 }
-const files = fileStats();
+const files = fileStats(tsconfigPath);
 const measured = {
   filesLoaded: files.filesLoaded,
   coldBuildMs: Math.round(median(builds.map((build) => build.ms))),
@@ -236,9 +125,7 @@ const isCi = process.env["CI"] !== undefined && process.env["CI"] !== "";
 const bounds = Object.fromEntries(
   Object.entries(TARGETS).map(([key, target]) => [key, isCi ? target * CI_TOLERANCE : target]),
 );
-const baseline = existsSync(baselinePath)
-  ? Schema.decodeUnknownSync(Baseline)(JSON.parse(readFileSync(baselinePath, "utf8")))
-  : null;
+const baseline = existsSync(baselinePath) ? readBaseline(baselinePath) : null;
 const versus = (key: keyof typeof measured) =>
   baseline === null ? null : `${Math.round((measured[key] / baseline[key] - 1) * 100)}%`;
 
