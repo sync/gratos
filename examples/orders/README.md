@@ -11,8 +11,8 @@ resolver in the request's fiber context, with one trace per request.
   `Match` (`src/graphql.ts`).
 - **Services:** `Api` (the orders backend) and `Bus` (order events), with `FakeApi.layer`, an
   in-memory backend for development and tests.
-- **Wiring:** `src/graphql.ts` (the server, the context factory, the plugins) and `src/server.ts`
-  (NodeHttpServer).
+- **Wiring:** `src/graphql.ts` (the server, the context factory, the plugins), `src/server.ts`
+  (NodeHttpServer) and `src/tracing.ts` (the optional OTLP tracer).
 
 The Effect chapter of the compiler's docs,
 [`packages/gratos/llm-docs/gratos/effect.md`](../../packages/gratos/llm-docs/gratos/effect.md),
@@ -191,6 +191,70 @@ Plugin order: `apq()` first, `incremental()` before `jit()` (graphql-jit would i
 `reportErrors()` before `maskErrors()` (the report sees the unmasked errors). `appLayer` serves
 it with `effectRouteLayer` on the Effect HTTP router, provided with `FakeApi.layer`: on shutdown
 the route's finalizer waits for in-flight mutations before the services are released.
+
+## Tracing
+
+Each request is one trace. Its root is the HTTP span, with two children: `session.read` (the
+context factory's `runInRequest`) and `graphql <operation>`, which holds the phases (`parse`,
+`validate`) and the resolver spans, with the backend's `rpc …` spans below them. A
+subscription's operation span stays open while events flow and ends after the last one.
+`test/trace.test.ts` checks all of it on this wiring, with an in-memory tracer.
+
+To export the traces, point `OTEL_EXPORTER_OTLP_ENDPOINT` at an OTLP/HTTP collector (the
+OpenTelemetry Collector, Jaeger, or a vendor's endpoint):
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 pnpm start   # posts to …/v1/traces
+```
+
+`src/server.ts` builds the tracer and hands it to the app:
+
+```ts file=examples/orders/src/server.ts
+const tracing = tracingLayer().pipe(Layer.provide(FetchHttpClient.layer));
+```
+
+`src/tracing.ts` reads the variable. Without it the layer is empty and the exporter is never
+imported (`test/production.test.ts` checks that a production start loads none of it):
+
+```ts file=examples/orders/src/tracing.ts
+export const tracingLayer = (
+  options: TracingOptions = {},
+): Layer.Layer<never, never, HttpClient.HttpClient> =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const endpoint = yield* Config.option(Config.URL("OTEL_EXPORTER_OTLP_ENDPOINT"));
+      if (Option.isNone(endpoint)) {
+        return Layer.empty;
+      }
+      const { OtlpSerialization, OtlpTracer } = yield* Effect.promise(
+        () => import("effect/observability"),
+      );
+      return OtlpTracer.layer({
+        url: tracesUrl(endpoint.value),
+        resource: { serviceName: "orders-example" },
+        exportInterval: options.exportInterval,
+        shutdownTimeout: options.shutdownTimeout,
+      }).pipe(Layer.provide(OtlpSerialization.layerJson));
+    }).pipe(Effect.orDie),
+  );
+```
+
+`appLayer` provides the tracer with the services, outside the route layer, as the Effect chapter
+asks: on shutdown the route drains first, then the services are released, then the tracer, whose
+last export carries the drained requests' spans.
+
+```ts file=examples/orders/src/graphql.ts
+  ).pipe(
+    Layer.provide(options.backend ?? FakeApi.layer),
+    Layer.provide(options.tracing ?? Layer.empty),
+  );
+```
+
+The exporter is Effect's own (`effect/observability`; its OTLP modules are marked unstable in
+Effect 4.1.5). It posts buffered spans every 5 s and once more on shutdown, which waits for that
+last post up to 3 s. A test swaps the tracer with `appLayer`'s `tracing` option:
+`test/support/serve.ts` passes the in-memory one, and `test/otlp.test.ts` runs the OTLP one
+against a controlled HTTP client.
 
 ## Apollo Client
 

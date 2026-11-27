@@ -15,7 +15,7 @@ const repoRoot = join(import.meta.dirname, "..", "..", "..");
  * or that the matcher stops seeing, fails its document's count.
  */
 const DOCS = {
-  "examples/orders/README.md": 8,
+  "examples/orders/README.md": 11,
   "packages/gratos/llm-docs/gratos/effect.md": 8,
   "packages/gratos/llm-docs/gratos/differences.md": 5,
   "packages/gratos/llm-docs/gratos/server.md": 6,
