@@ -399,7 +399,7 @@ ol.q li{margin:0 0 10px}
   <ul>
     <li>new fixtures cover <code>Effect</code>, <code>Stream</code>, a user-named <code>Effect</code> type, a bare <code>Effect</code> and input-position errors, plus <code>.invalid</code> fixtures for <code>Stream.Stream</code> on <code>@gqlQueryField</code> and on <code>@gqlField</code>;</li>
     <li>the upstream fixtures are still green, except snapshot changes caused by §8 (explicit method resolvers), the jit marker and the reworded <code>subscriptionFieldNotAsyncIterable</code> diagnostic, each listed with its cause;</li>
-    <li>on the synthetic fixture, these spec targets are measured. A miss is reported, with the number, in the PR and in the final report. It does not block the merge gate, but a miss of more than 20% triggers a suggested council before merging: ≤ 530 files are loaded with third-party files read as empty, the cold build is ≤ 0.9 s, and peak RSS (process tree) is ≤ 380 MB, measured locally, with the CI bound at +20% because shared runners are noisy.</li>
+    <li>on the synthetic fixture, these spec targets are measured. A miss is reported, with the number, in the PR and in the final report. It does not block the merge gate, but a miss of more than 20% triggers a suggested council before merging: ≤ 530 files are loaded with third-party files read as empty, the cold build is ≤ 0.9 s, and peak RSS (process tree) is ≤ 380 MB, measured locally, with the CI bound at +20% because shared runners are noisy. <em>(Amended during F3: in CI, cold build and peak RSS are reported numbers, not a bound. The informational <code>bench</code> job prints them in its summary, with a <code>::warning::</code> for a number above the +20% bound (1,080 ms, 456 MB), and never gates a merge. Files loaded is the same on every machine, so it became a required test instead: <code>packages/gratos/test/filesLoaded.test.ts</code> checks the 530 bound and the 363 of <code>bench/baseline.json</code>. The evidence is CI run <code>45686661556</code>, where a shared runner missed the dev-loop bound twice with no code change.)</em></li>
   </ul>
 </div>
 </div></details>
@@ -597,7 +597,7 @@ ol.q li{margin:0 0 10px}
   <ul>
     <li>it edits a model and sees the new field after one restart;</li>
     <li>it breaks the model and gets <code>GRATS_ERROR</code>, then fixes it and the server recovers;</li>
-    <li>save-to-first-good-response takes ≤ 2 s locally, with a CI bound at +50%;</li>
+    <li>save-to-first-good-response takes ≤ 2 s locally, with a CI bound at +50%; <em>(Amended during F3: the required check asserts the 2 s budget only when <code>CI</code> is unset. In CI it asserts a 10 s correctness bound, and the <code>bench</code> job measures the latency and reports it against the +50% bound (3 s), with a <code>::warning::</code> above it. CI run <code>45686661556</code> missed 3 s twice in one run, at 4,498 ms and 3,333 ms, for no code reason.)</em></li>
     <li>a production start (no watch) never loads <code>typescript</code>, asserted by checking that it is absent from the loaded modules.</li>
   </ul>
 </div>
@@ -625,7 +625,7 @@ ol.q li{margin:0 0 10px}
   <div class="card"><div class="t">Parity bar</div><p><strong>(a) Vendored vs the oracle</strong> (<code>grats@0.0.36</code>, TS 5.9.2, graphql 16): the oracle's SDL is re-printed through graphql 17's <code>parse</code>/<code>print</code> and must match byte for byte; <code>findBreakingChanges</code> and <code>findDangerousChanges</code> must be empty; "Query Result" must be identical on all 29 integration fixtures.<br><strong>(b) TS 7 vs TS 5.9.2</strong> (same engine, both facades): zero diffs in SDL and Error Report sections. TypeScript-section diffs are allowed only for formatting, and each is listed.</p></div>
   <div class="card"><div class="t">Behaviour</div><p>vitest with <code>@effect/vitest</code>. Resolvers are tested as plain Effects with fake layers, the server through <code>handle(Request)</code>, and end-to-end over real HTTP with Apollo Client.</p></div>
   <div class="card"><div class="t">Tracing</div><p>An in-memory span exporter checks the span tree, the single trace id, the backdated phase timings, and that no span is left open.</p></div>
-  <div class="card"><div class="t">Performance</div><p><code>bench/baseline.json</code> records the runner class. Local targets are taken from the spec; CI bounds are +20% for builds and +50% for dev restarts.</p></div>
+  <div class="card"><div class="t">Performance</div><p><code>bench/baseline.json</code> records the runner class. Local targets are taken from the spec; CI bounds are +20% for builds and +50% for dev restarts. <em>(Amended during F3: the CI bounds are reported by the informational <code>bench</code> job, never a gate.)</em></p></div>
 </div>
 
 <section id="follow-up">

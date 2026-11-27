@@ -36,6 +36,16 @@ All packages are `private: true` until publishing is decided.
 - Code blocks in the docs tagged `file=<path>` must match that file (`examples/orders/test/docs.test.ts`): change both together.
 - Vendored upstream files (`packages/gratos/src/upstream/`, `llm-docs/` except `llm-docs/gratos/`, `test/fixtures/`, `test/integrationFixtures/`, `test/configParserFixtures/`, `LICENSE`) change only in separate, listed commits. `pnpm --filter @dblechoc/gratos vendor:verify` reports any difference from upstream v0.0.36.
 
+## Upgrading a pinned dependency
+
+Every version is pinned exactly in `pnpm-workspace.yaml`'s `catalog:`. The weekly canary (`.github/workflows/canary.yml`) shows which newer release breaks `pnpm check`. An upgrade is its own PR:
+
+1. Bump the `catalog:` entry, with the `@effect/*` packages at the same version as `effect`, then run `pnpm install` (a release younger than `minimumReleaseAge` needs `minimumReleaseAgeExclude` lines).
+2. Run both parity runs with `pnpm --filter @dblechoc/gratos test` (TypeScript 7, then 5.9.2, same snapshots), then `npx turbo run check --force`.
+3. Run `GITHUB_TOKEN=$(gh auth token) pnpm --filter @dblechoc/gratos vendor:verify`.
+4. Run the bench: `pnpm --filter @dblechoc/gratos bench` and `pnpm --filter orders-example bench:compiler`. If the file count changes, `test/filesLoaded.test.ts` fails: record it with `bench --record`.
+5. Run the upstream-fact tests: `pnpm --filter @dblechoc/gratos-server exec vitest run test/jit.test.ts -t "the premise|upstream facts"` and the late-source test in `test/subscriptions.test.ts` ("while the source is set up"). A changed fact means a workaround to review: the failure names it.
+
 ## Delivery
 
 One pull request per milestone, run as a full send: prove the change, review it with
