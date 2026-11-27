@@ -1,4 +1,5 @@
 // The TypeScript 7 facade (src/ts/): fast loading, the printer and config reading.
+import { realpathSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
@@ -10,6 +11,7 @@ import {
   BLANK_SOURCE,
   bundledLibDirectory,
   closeDefaultSessions,
+  ownPublicDeclarations,
   readFileOverride,
 } from "../src/ts/session.ts";
 import { getParsedTsConfig } from "../src/upstream/index.ts";
@@ -52,6 +54,26 @@ describe("fast loading (readFile policy)", () => {
     expect(
       readFileOverride(policy(true), join(bundledLibDirectory, "lib.es2022.d.ts")),
     ).toBeUndefined();
+  });
+
+  it("serves this package's own public declarations in full, also under node_modules", () => {
+    // An installed @dblechoc/gratos is under node_modules: its declarations stand in here for the
+    // ones it would serve, so this fails if the policy blanks them.
+    const installed = join(graphqlDir, "index.d.mts");
+    expect(readFileOverride(policy(true), installed, new Set([installed]))).toBeUndefined();
+    expect(
+      readFileOverride(policy(true), join(graphqlDir, "index.mjs"), new Set([installed])),
+    ).toBe(BLANK_SOURCE);
+  });
+
+  it("finds its own public declarations beside the build of this module", () => {
+    // src/ts/session.ts here; dist/ts/session.js once built (tsconfig.build-dts.json).
+    const outDir = realpathSync(join(import.meta.dirname, "..", "src"));
+    expect([...ownPublicDeclarations].map((file) => file.slice(outDir.length + 1))).toEqual([
+      "index.d.ts",
+      "devApi.d.ts",
+      join("upstream", "Types.d.ts"),
+    ]);
   });
 
   it("serves workspace files in full", () => {
