@@ -27,7 +27,14 @@ afterEach(() => {
 const runScript = (script: string, args: ReadonlyArray<string>, env: Record<string, string> = {}) =>
   spawnSync(process.execPath, [join(benchDir, script), ...args], {
     encoding: "utf8",
-    env: { ...process.env, CI: "", GITHUB_STEP_SUMMARY: "", ...env },
+    // A fixed peak RSS: this required test checks bounds and exit codes, never `ps` timing.
+    env: {
+      ...process.env,
+      CI: "",
+      GITHUB_STEP_SUMMARY: "",
+      GRATOS_BENCH_FIXED_RSS_KB: "204800",
+      ...env,
+    },
     timeout: 50_000,
   });
 
@@ -108,6 +115,33 @@ describe("bench/run.ts", () => {
     ]);
     expect(crashed.status).not.toBe(0);
     expect(crashed.status).not.toBeNull();
+  });
+});
+
+describe("bench/run.ts against a baseline", () => {
+  it("gives percent deltas locally, and none in CI, which is judged on its own bounds", () => {
+    const project = smokeCopy("bench-baseline");
+    projects.push(project);
+    const baseline = project.path("baseline.json");
+    const runner = { platform: "other", cpu: "other", cores: 1, memoryGb: 1, node: "v0" };
+    writeFileSync(
+      baseline,
+      JSON.stringify({ runner, filesLoaded: 100, coldBuildMs: 100, peakRssMb: 100 }),
+    );
+    const args = ["--project", project.path("tsconfig.json"), "--runs", "1", "--warn-only"];
+    /** Runs the bench with `ci` as CI, and returns the path of its result. */
+    const run = (ci: string): string => {
+      const out = project.path(`result-${ci === "" ? "local" : "ci"}.json`);
+      const done = runScript("run.ts", [...args, "--baseline", baseline, "--out", out], { CI: ci });
+      expect(done.status, done.stderr).toBe(0);
+      return out;
+    };
+    const local = run("");
+    const ci = run("true");
+    expect(JSON.parse(readFileSync(local, "utf8"))).toMatchObject({
+      versusBaseline: { sameRunnerClass: false, coldBuildMs: expect.stringMatching(/%$/) },
+    });
+    expect(JSON.parse(readFileSync(ci, "utf8"))).toMatchObject({ versusBaseline: null });
   });
 });
 

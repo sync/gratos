@@ -30,6 +30,7 @@ import { parseArgs } from "node:util";
 import { boundsFor, exitCodeFor, missesOf, TARGETS, warningCommand } from "./bounds.ts";
 import { fileStats, MODEL_COUNT, readBaseline, syntheticFixtureFiles } from "./fixture.ts";
 import { requireValidPeak, samplePeakRss } from "./rss.ts";
+import type { PeakRss } from "./rss.ts";
 
 const SAMPLE_INTERVAL_MS = 5;
 
@@ -50,6 +51,23 @@ if (!Number.isSafeInteger(runs) || runs < 1) {
   throw new Error(`bench: --runs takes a positive integer, got ${JSON.stringify(flags.runs)}`);
 }
 const isCi = process.env["CI"] !== undefined && process.env["CI"] !== "";
+
+/**
+ * GRATOS_BENCH_FIXED_RSS_KB: a fixed peak instead of `ps` samples, for the required test of this
+ * script's bounds and exit codes (test/benchReport.test.ts), which must not depend on `ps`
+ * catching a short build. The bench job never sets it, so it samples for real.
+ */
+const fixedPeakRssKbOf = (value: string | undefined): number | undefined => {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  const kb = Number(value);
+  if (!Number.isInteger(kb) || kb <= 0) {
+    throw new Error(`bench: GRATOS_BENCH_FIXED_RSS_KB must be a positive integer, got ${value}`);
+  }
+  return kb;
+};
+const fixedPeakRssKb = fixedPeakRssKbOf(process.env["GRATOS_BENCH_FIXED_RSS_KB"]);
 // Checked before any build, so a bad flag fails at once.
 const bounds = boundsFor(isCi, flags.bound);
 
@@ -98,7 +116,10 @@ const coldBuild = async (): Promise<{
   if (child.pid === undefined) {
     throw new Error("bench: could not start gratos");
   }
-  const peak = await samplePeakRss(child.pid, exited, { intervalMs: SAMPLE_INTERVAL_MS });
+  const peak: PeakRss =
+    fixedPeakRssKb === undefined
+      ? await samplePeakRss(child.pid, exited, { intervalMs: SAMPLE_INTERVAL_MS })
+      : { peakRssKb: fixedPeakRssKb, validSamples: 1, invalidSamples: 0 };
   const { code, ms } = await exited;
   if (code !== 0) {
     throw new Error(`gratos failed on ${tsconfigPath}:\n${stderr}`);
@@ -156,8 +177,10 @@ const result = {
     coldBuildMs: measured.coldBuildMs <= bounds.coldBuildMs,
     peakRssMb: measured.peakRssMb <= bounds.peakRssMb,
   },
+  // Percent deltas against a baseline recorded on another runner class say nothing, and CI is
+  // judged on its own bounds (docs/plan.html F3): no deltas in CI.
   versusBaseline:
-    baseline === null
+    baseline === null || isCi
       ? null
       : {
           sameRunnerClass: JSON.stringify(baseline.runner) === JSON.stringify(runner),
