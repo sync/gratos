@@ -1,9 +1,12 @@
 // A production start (no watch, no GRATS_DEV) never loads TypeScript or the dev boot step
 // (docs/plan.html M6 "Done when"): every module the server process resolves is recorded, and
 // `typescript` is absent. The same recording of a dev boot finds both, so the recording works.
+// Without OTEL_EXPORTER_OTLP_ENDPOINT, it loads no OTLP exporter either (F6).
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -46,6 +49,8 @@ const modulesOf = async (
 
 const isTypescript = (url: string) => /\/node_modules\/typescript\/|\/typescript@/.test(url);
 const isDevEntry = (url: string) => url.endsWith("/gratos/src/dev.ts");
+/** A module of effect/observability, where the OTLP exporter lives (src/tracing.ts imports it). */
+const isExporter = (url: string) => /\/effect\/dist\/observability\//.test(url);
 
 describe("a production start", () => {
   it("never loads typescript", async () => {
@@ -56,6 +61,15 @@ describe("a production start", () => {
     expect(urls.some((url) => url.includes("/node_modules/graphql/"))).toBe(true);
     expect(urls.filter(isTypescript)).toEqual([]);
     expect(urls.filter(isDevEntry)).toEqual([]);
+    expect(urls.filter(isExporter)).toEqual([]);
+    // The app's tracing module was loaded: it is what decides not to import the exporter.
+    expect(urls.some((url) => url.endsWith("/src/tracing.ts"))).toBe(true);
+  });
+
+  it("matches the exporter's real module URL", () => {
+    // The pattern above is not vacuous: it matches where effect/observability resolves to.
+    const resolved = createRequire(import.meta.url).resolve("effect/observability");
+    expect(isExporter(pathToFileURL(resolved).href)).toBe(true);
   });
 
   it("differs from a dev boot, which loads both", async () => {

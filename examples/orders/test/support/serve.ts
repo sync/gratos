@@ -1,6 +1,7 @@
 // Serves the orders app in this process, on NodeHttpServer with a port the OS picks: the app's own
 // wiring (graphql.ts's appLayer: effectRouteLayer, effect(), runInRequest, makeGuard), built in a
-// Scope the caller closes, over a FakeApi backend the test can publish events on.
+// Scope the caller closes, over a FakeApi backend the test can publish events on. A test's tracer
+// goes where src/server.ts puts the OTLP one: appLayer's `tracing`.
 import { createServer as createHttpServer } from "node:http";
 
 import { NodeHttpServer } from "@effect/platform-node";
@@ -23,7 +24,12 @@ export interface Served {
   readonly close: () => Promise<void>;
 }
 
-export const serve = async (): Promise<Served> => {
+export interface ServeOptions {
+  /** The app's tracer, as src/server.ts provides tracingLayer (default: none). */
+  readonly tracing?: Layer.Layer<never> | undefined;
+}
+
+export const serve = async (options: ServeOptions = {}): Promise<Served> => {
   const reported: Array<GraphQLError> = [];
   const scope = Effect.runSync(Scope.make());
   // Built first, in the same scope: released after the app (whose drain runs first).
@@ -35,6 +41,7 @@ export const serve = async (): Promise<Served> => {
       reported.push(error);
     },
     backend: Layer.succeedContext(services),
+    tracing: options.tracing,
   }).pipe(
     Layer.provideMerge(
       NodeHttpServer.layer(() => createHttpServer(), {

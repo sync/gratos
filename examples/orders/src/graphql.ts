@@ -54,6 +54,11 @@ export interface AppOptions {
   readonly quiet?: boolean | undefined;
   /** The services the app runs on. Default: FakeApi.layer (a test builds its own, to reach the Bus). */
   readonly backend?: Layer.Layer<Services> | undefined;
+  /**
+   * The tracer the app's spans go to (`tracingLayer` in `src/tracing.ts`; a test passes an
+   * in-memory one). Default: none, so spans are made but never exported.
+   */
+  readonly tracing?: Layer.Layer<never> | undefined;
 }
 
 export const makeServer = (
@@ -91,8 +96,10 @@ export const makeServer = (
 
 /**
  * The app on an HttpServer: one route, /graphql (every method, so the core answers GET with its
- * 405), served with the app's services (`backend`). They are provided to the route layer, whose
- * finalizer drains the in-flight mutations on shutdown before the services are released.
+ * 405), served with the app's services (`backend`) and its tracer (`tracing`). Both are provided
+ * to the route layer, whose finalizer drains the in-flight mutations on shutdown before the
+ * services are released. The tracer is released last, so its last export (on shutdown) holds
+ * the spans of the drained requests.
  */
 export const appLayer = (schema: GraphQLSchema, options: AppOptions = {}) =>
   HttpRouter.serve(
@@ -102,4 +109,7 @@ export const appLayer = (schema: GraphQLSchema, options: AppOptions = {}) =>
       ),
     ),
     { disableLogger: options.quiet === true, disableListenLog: options.quiet === true },
-  ).pipe(Layer.provide(options.backend ?? FakeApi.layer));
+  ).pipe(
+    Layer.provide(options.backend ?? FakeApi.layer),
+    Layer.provide(options.tracing ?? Layer.empty),
+  );
