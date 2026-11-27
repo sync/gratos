@@ -115,8 +115,9 @@ export const failure = Match.type<AppError>().pipe(
 ```
 
 A failure's cause is handled one of three ways: a typed failure goes to `failure`; an interrupt
-caused by the client leaving becomes the core's `cancelled()` sentinel, which `reportErrors()`
-skips; anything else (a die, a rejected value) is a `ResolverDefect`, which `maskErrors()` hides.
+caused by the client leaving, or by the request no longer needing the work (see below), becomes
+the core's `cancelled()` sentinel, which `reportErrors()` skips; anything else (a die, a rejected
+value) is a `ResolverDefect`, which `maskErrors()` hides.
 A resolver that returns a tagged-error instance as data counts as an Effect (a `TaggedError` is
 yieldable) and fails with itself.
 
@@ -154,7 +155,14 @@ ignores it (Effect 4.1.5), so setting it does not stop a large GraphQL body. Rai
 `maxBodyBytes` on `createServer` instead; `Infinity` turns the limit off.
 
 When a client leaves, its query and subscription fibers are interrupted and nothing is reported.
-A mutation is never interrupted: a half-applied write is worse than a wasted one. Resolvers fork
+So are they when the request no longer needs their work: the core stopped the execution (a
+failed subscription source or streamed response, a result it never sends), or the response
+ended with the work still running. The `graphql <operation>` span always ends after the resolver
+spans it parents. After a sibling's non-null short-circuit on graphql-js, the operation span now
+waits for the cancelled sibling's finalizers (on warmed `jit()`, graphql-jit itself waits for the
+sibling to finish), and an Effect that arrives after the response ended (a resolver's Promise
+that resolves to one later) is no longer run, side effects included. A mutation is never
+interrupted: a half-applied write is worse than a wasted one. Resolvers fork
 without the request's `Scope`; one that needs a scope uses `Effect.scoped`. Build long-lived
 resources (pools, intervals) in Layers, never lazily inside a resolver.
 
