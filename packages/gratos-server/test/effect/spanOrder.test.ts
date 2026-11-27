@@ -1,7 +1,7 @@
 // The operation span ends after every span it parents (docs/plan.html F5, "Done when"), each case on
 // the executor it is about. Each test records start, finalizer and span-end events in one log and
 // orders them with gates (deferreds): no sleeps, no wall-clock comparisons.
-import { Cause, Effect, Exit, Stream, Tracer } from "effect";
+import { Cause, Effect, Exit, Fiber, Predicate, Stream, Tracer } from "effect";
 import type { Scope } from "effect";
 import { HttpServerError } from "effect/http";
 import type {
@@ -13,9 +13,16 @@ import type {
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { abortKindOf } from "../../src/core/abortReason.ts";
-import { createServer, incremental, jit, reportErrors, signalOf } from "../../src/index.ts";
+import {
+  createServer,
+  incremental,
+  isCancelled,
+  jit,
+  reportErrors,
+  signalOf,
+} from "../../src/index.ts";
 import type { Plugin, Server } from "../../src/index.ts";
-import { effect, effectSchema } from "../../src/effect/index.ts";
+import { effect, effectSchema, fromCause } from "../../src/effect/index.ts";
 import { RequestEnded } from "../../src/effect/errors.ts";
 import { flush, gate, gql, post, send } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
@@ -584,6 +591,29 @@ describe("F5: a subscription source fails while a resolver still runs", () => {
 });
 
 describe("F5: the core's own aborts carry a reason the Effect layer reads", () => {
+  it.each([
+    { annotation: "RequestEnded", interrupt: RequestEnded.annotation, cancelled: true },
+    {
+      annotation: "ClientAbort",
+      interrupt: HttpServerError.ClientAbort.annotation,
+      cancelled: true,
+    },
+    { annotation: "no", interrupt: undefined, cancelled: false },
+  ])(
+    "maps an interrupt with $annotation annotation through fromCause",
+    async ({ interrupt, cancelled }) => {
+      const fiber = Effect.runFork(Effect.never);
+      fiber.interruptUnsafe(undefined, interrupt);
+      const exit = await Effect.runPromise(Fiber.await(fiber));
+      const error = Exit.isFailure(exit)
+        ? fromCause(exit.cause, { failure, isFailure })
+        : undefined;
+      expect(isCancelled(error)).toBe(cancelled);
+      // Any other interrupt is a defect, as before.
+      expect(Predicate.isTagged(error, "ResolverDefect")).toBe(!cancelled);
+    },
+  );
+
   it("interrupts a held @defer sibling with the internal annotation when a result hook fails the stream", async () => {
     const log: Array<string> = [];
     const stops: Array<Stop> = [];
