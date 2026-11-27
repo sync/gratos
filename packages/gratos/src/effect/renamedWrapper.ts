@@ -104,15 +104,28 @@ const namespaceBodies = (
  * module.
  */
 const isShadowed = (node: Node, alias: string): boolean => {
+  // The enclosing namespace names, outermost first, up to the nearest `declare module "…"`
+  // augmentation (whose block is then the root the merged lookup starts from), else the file.
   const path: Array<string> = [];
+  let root: ReadonlyArray<Statement> = node.getSourceFile().statements;
   for (let current = node.parent; !isSourceFile(current); current = current.parent) {
-    if (isModuleDeclaration(current) && isIdentifier(current.name)) {
+    // Every enclosing block itself, a string-named module augmentation's included.
+    if (isModuleBlock(current) && declares(current.statements, alias)) {
+      return true;
+    }
+    if (isModuleDeclaration(current)) {
+      if (!isIdentifier(current.name)) {
+        if (current.body !== undefined && isModuleBlock(current.body)) {
+          root = current.body.statements;
+        }
+        break;
+      }
       path.unshift(current.name.text);
     }
   }
-  const { statements } = node.getSourceFile();
+  // The other blocks of each enclosing namespace, which TypeScript merges with this one.
   for (let depth = path.length; depth > 0; depth--) {
-    if (namespaceBodies(statements, path.slice(0, depth)).some((body) => declares(body, alias))) {
+    if (namespaceBodies(root, path.slice(0, depth)).some((body) => declares(body, alias))) {
       return true;
     }
   }
