@@ -67,17 +67,17 @@ plugin defines costs nothing. The synchronous ones run in the hot loop.
 The table gives the order for a query whose document is not cached yet (a cache miss): its parse
 and validate phases reach `onPhase` before `onContext`. A cached document reports no phase there.
 
-| Hook            | When                                                                                                                       | Sync |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------- | ---- |
-| `onServer`      | Once, at startup. May replace the schema (`control.replaceSchema`)                                                         | no   |
-| `onRequest`     | First, at `handle()` entry. Returning a Response answers the request                                                       | no   |
-| `onParams`      | After the body is read, before the "no query" check (so APQ hash-only requests get here). A throw is a 400                 | no   |
-| `onPhase`       | A finished phase: parse and validate on a cache miss; jit when it compiles, later (see below)                              | yes  |
-| `onContext`     | After the context factory, once the operation is known, before anything executes                                           | no   |
-| `onExecute`     | Every hook, in list order, before anything executes. Returns an executor to claim the operation, or throws to refuse it    | yes  |
-| `wrapExecution` | Around each synchronous entry into the execution (the executor call, each source pull, each event…). Calls `run` once      | yes  |
-| `onResult`      | Every payload: a result, each incremental payload, each subscription event. Returns a replacement, or nothing              | yes  |
-| `onResponse`    | Exactly once per request, on the Response before it goes to the transport (also a streamed one). Not a "stream ended" hook | no   |
+| Hook            | When                                                                                                                                                                                                | Sync |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| `onServer`      | Once, at startup. May replace the schema (`control.replaceSchema`)                                                                                                                                  | no   |
+| `onRequest`     | First, at `handle()` entry. Returning a Response answers the request                                                                                                                                | no   |
+| `onParams`      | After the body is read, before the "no query" check (so APQ hash-only requests get here). Returns replacement params, or nothing. A throw is a 400, or a 200 SSE error event for an SSE-only client | no   |
+| `onPhase`       | A finished phase: parse and validate on a cache miss; jit when it compiles, later (see below)                                                                                                       | yes  |
+| `onContext`     | After the context factory, once the operation is known, before anything executes                                                                                                                    | no   |
+| `onExecute`     | Every hook, in list order, before anything executes. Returns an executor to claim the operation, or throws to refuse it                                                                             | yes  |
+| `wrapExecution` | Around each synchronous entry into the execution (the executor call, each source pull, each event…). Calls `run` once                                                                               | yes  |
+| `onResult`      | Every payload: a result, each incremental payload, each subscription event. Returns a replacement, or nothing                                                                                       | yes  |
+| `onResponse`    | Exactly once per request, on the Response before it goes to the transport (also a streamed one). Not a "stream ended" hook                                                                          | no   |
 
 `jit()` reports its `jit` phase from inside its executor, after the request has entered
 `wrapExecution`. With `after` above 1, the request that compiles finds its document cached, so
@@ -125,13 +125,18 @@ export const readOnly = (): Plugin => ({
 
 ## The HTTP matrix
 
-GraphQL over HTTP. A transport error (405, 406, 415, 413, a 400 for the body) is JSON with its
-status for every client, an SSE-only one included.
+GraphQL over HTTP. The statuses below are what a JSON client gets. A client that accepts
+`text/event-stream` and no JSON type (an SSE-only client) gets every GraphQL request error (a
+parse, validation or variable error, an `onParams` throw, the drain, a refusal, a context or
+executor failure) as a 200 with one SSE `next` event holding the errors, then `complete`.
+Transport errors stay JSON with their status for every client, an SSE-only one included: a 406, a
+415, a 413, and a 400 for the body or for a missing query. A 405 and a 499 have a null body.
 
 | Request                                                                                              | Answer                                                                                   |
 | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | GET, HEAD or any other method than POST                                                              | 405, `Allow: POST`, a null body                                                          |
-| A body that is not JSON, not an object, has a member of the wrong type, or has no `query`            | 400                                                                                      |
+| A body that is not JSON, not an object, or has a member of the wrong type                            | 400                                                                                      |
+| No `query` once every `onParams` hook has run                                                        | 400                                                                                      |
 | A Content-Type other than `application/json`                                                         | 415                                                                                      |
 | An Accept that allows none of the four types below                                                   | 406                                                                                      |
 | A body over `maxBodyBytes`                                                                           | 413, before `onParams`: unread when a plain-decimal Content-Length says so, else counted |
@@ -140,22 +145,39 @@ status for every client, an SSE-only one included.
 | `application/json`, any well-formed request                                                          | 200                                                                                      |
 | `gqlError(message, status)` on a result whose `data` is absent or null                               | that status (200–599, not 204, 205 or 304); with data, the status is left alone          |
 
+The query check comes after `onParams`, and an `onParams` hook can return replacement params:
+`apq()` supplies the query of a hash-only request this way, and that request gets its data.
+
 Beyond the matrix:
 
-| Case                                                                                                                               | Answer                                                                             |
-| ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| An `onParams` hook throws                                                                                                          | 400, whatever status the error carries (its extensions are kept)                   |
-| A subscription without `Accept: text/event-stream`                                                                                 | 406                                                                                |
-| A mutation once `control.drain()` has begun                                                                                        | 503, `extensions.code: "SERVER_DRAINING"`                                          |
-| The client left before the answer                                                                                                  | 499 (`CLIENT_CLOSED_REQUEST`), an empty body nobody reads; `onResponse` still runs |
-| A throw from `onRequest`, one that is not a GraphQLError from the context factory, `onContext` or `onExecute`, or a failed startup | 500, a masked "Unexpected error." (a throwing `onResponse` is only logged)         |
-| `@defer` or `@stream` (with `incremental()`)                                                                                       | 200, `multipart/mixed; deferSpec=20220824`; on a mutation, a 400                   |
-| A subscription                                                                                                                     | 200, GraphQL over SSE (`event: next` …, then `event: complete`)                    |
-| A request error for a client that accepts `text/event-stream` and no JSON type                                                     | 200, one SSE `next` event with the errors, then `complete`                         |
+| Case                                                                                                                                 | Answer                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An `onParams` hook throws                                                                                                            | 400, whatever status the error carries (its extensions are kept); an SSE-only client gets it as a 200 SSE error event                                                                         |
+| A subscription whose Accept does not allow `text/event-stream`                                                                       | 406, before its source starts                                                                                                                                                                 |
+| A query whose `@defer` or `@stream` defers part of its result, when the Accept does not allow `multipart/mixed`                      | 406                                                                                                                                                                                           |
+| A mutation once `control.drain()` has begun                                                                                          | 503, `extensions.code: "SERVER_DRAINING"`; an SSE-only client gets it as a 200 SSE error event                                                                                                |
+| The client left before the answer                                                                                                    | 499 (`CLIENT_CLOSED_REQUEST`), a null body nobody reads; `onResponse` still runs. A mutation whose executor has started is not cancelled: it finishes, and its answer is built as usual       |
+| A throw from `onRequest`, a rejected async `onServer`, or a throw that is not a GraphQLError from the context factory or `onContext` | 500, a masked "Unexpected error." (a throwing `onResponse` is only logged)                                                                                                                    |
+| An `Error` thrown by `onExecute`                                                                                                     | 500, an "Unexpected error." that the result hooks see. `maskErrors()` drops its extensions, the status included, so the answer takes the default status: 400, or 200 under `application/json` |
+| `@defer` or `@stream` (with `incremental()`)                                                                                         | 200, `multipart/mixed; deferSpec=20220824`                                                                                                                                                    |
+| `@defer` or `@stream` on a mutation                                                                                                  | A validation error: 400, or 200 under `application/json`                                                                                                                                      |
+| A subscription                                                                                                                       | 200, GraphQL over SSE (`event: next` …, then `event: complete`)                                                                                                                               |
+
+A synchronous throw from `onServer` escapes `createServer()`, so no server is made. A rejected
+async `onServer` is logged, and every request then gets the 500. A throw from `onRequest` and a
+failed startup come before the Accept header is read, so their 500 is JSON for every client.
 
 The four types a client can accept are `application/graphql-response+json`, `application/json`,
 `multipart/mixed` and `text/event-stream`; each is exported as a constant
-(`GRAPHQL_RESPONSE_JSON`, `APPLICATION_JSON`, `MULTIPART_MIXED`, `TEXT_EVENT_STREAM`).
+(`GRAPHQL_RESPONSE_JSON`, `APPLICATION_JSON`, `MULTIPART_MIXED`, `TEXT_EVENT_STREAM`). What a
+client must accept depends on the operation:
+
+- **A single result** (a query or a mutation): a JSON type. A client that accepts no JSON type gets
+  the result as one SSE event when it accepts `text/event-stream`, else as one multipart part.
+- **A query whose `@defer` or `@stream` defers part of its result**: `multipart/mixed`, else 406.
+- **A subscription**: `text/event-stream`, else 406.
+- **No `Accept` header** (or an empty one) allows every type: a single result uses
+  `application/graphql-response+json`, and a subscription gets SSE.
 
 ## The shipped plugins, and their order
 
@@ -193,9 +215,10 @@ the unmasked errors. Plugins that only observe or refuse (`serverTiming()`, `max
 
 ## Shutdown
 
-`control.drain({ warnAfterMs })` stops accepting mutations (each new one gets the 503) and
-resolves once every in-flight mutation has settled. It has no deadline: `warnAfterMs` only logs
-the ones still running, every `warnAfterMs`. Queries and subscriptions are not drained. A drained
-server stays drained (`draining()` never goes back to false), so build a new server rather than
-reuse a drained one; the Effect layer's `effectRouteLayer` drains in its finalizer, so build the
-server inside the layer ([effect.md](./effect.md)).
+`control.drain({ warnAfterMs })` stops accepting mutations (each new one gets the 503, or a 200
+`SERVER_DRAINING` SSE error event for an SSE-only client) and resolves once every in-flight
+mutation has settled. It has no deadline: `warnAfterMs` only logs the ones still running, every
+`warnAfterMs`. Queries and subscriptions are not drained. A drained server stays drained
+(`draining()` never goes back to false), so build a new server rather than reuse a drained one;
+the Effect layer's `effectRouteLayer` drains in its finalizer, so build the server inside the
+layer ([effect.md](./effect.md)).

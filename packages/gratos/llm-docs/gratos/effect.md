@@ -133,8 +133,9 @@ yieldable) and fails with itself.
   drains the server on shutdown: it waits for every in-flight mutation to settle (logging the
   ones still running every `warnAfterMs`). Provide it with the same service and tracer layers as
   the app, so the drain runs before they are released. A drained server stays drained (it answers
-  every later mutation with a 503), so build a server per layer: `appLayer` below calls
-  `makeServer` inside `Layer.unwrap`, so each build of the layer gets a new one.
+  every later mutation with a 503, or an SSE-only client with a 200 `SERVER_DRAINING` error
+  event), so build a server per layer: `appLayer` below calls `makeServer` inside
+  `Layer.unwrap`, so each build of the layer gets a new one.
 
 ```ts file=examples/orders/src/graphql.ts
 export const appLayer = (schema: GraphQLSchema, options: AppOptions = {}) =>
@@ -252,8 +253,9 @@ report sees unmasked errors. Plugins that only observe or refuse (`effect()`, `s
   property, where graphql-js calls a function-valued property. Gratos' generated schemas give
   every method field its own resolver, so they are safe; a hand-written schema with
   function-valued fields keeps them on graphql-js with `jit({ isSafe: (field, type) => … })`.
-- **No `@defer` or `@stream` on mutations**: `incremental()` rejects them with a 400, so deferred
-  work never outlives the shutdown drain.
+- **No `@defer` or `@stream` on mutations**: `incremental()` rejects them as validation errors
+  (a 400, or a 200 under `application/json`), so deferred work never outlives the shutdown
+  drain.
 - **Incremental delivery speaks `deferSpec=20220824`.** Apollo Client (4.1 or later) needs
   `incrementalHandler: new Defer20220824Handler()`; run `@stream` queries with
   `fetchPolicy: "no-cache"` (Apollo 4.1.0's changelog, #13078: the default merge can truncate a
