@@ -248,6 +248,10 @@ const optional = <T extends JsonValue>(
 /** A Content-Length the core trusts for its fast path: plain decimal digits (RFC 9110 §8.6). */
 const DECIMAL_DIGITS = /^[0-9]+$/;
 
+/** A Uint8Array (a Buffer included), from any realm: what `request.text()` accepts as a chunk. */
+const isUint8Array = (value: unknown): value is Uint8Array =>
+  ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === "[object Uint8Array]";
+
 /** The body was larger than the limit. */
 const TOO_LARGE = Symbol("tooLarge");
 
@@ -275,6 +279,11 @@ const readBody = async (
   if (body === null) {
     return "";
   }
+  // A body a caller has started reading (and released) is not the request's body any more;
+  // `request.text()` would reject it.
+  if (request.bodyUsed) {
+    return UNREADABLE;
+  }
   const chunks: Array<Uint8Array> = [];
   let received = 0;
   try {
@@ -285,11 +294,17 @@ const readBody = async (
       if (read.done) {
         break;
       }
-      // A source passed to `new Request` may enqueue anything; `request.text()` would reject it.
+      // A source passed to `new Request` may enqueue anything; `request.text()` accepts only
+      // Uint8Array chunks (a Buffer is one), from any realm, and rejects a DataView or another
+      // typed array.
       const chunk: unknown = read.value;
-      if (!ArrayBuffer.isView(chunk)) {
+      if (!isUint8Array(chunk)) {
         reader.cancel().catch(() => {});
         return UNREADABLE;
+      }
+      // An empty chunk adds nothing: keeping it would hold memory the count never sees.
+      if (chunk.byteLength === 0) {
+        continue;
       }
       received += chunk.byteLength;
       if (received > maxBodyBytes) {

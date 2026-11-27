@@ -78,12 +78,18 @@ const DEFAULT_MAX_TOKENS = 10_000;
 /** 1 MiB. */
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
-/** `maxBodyBytes`, checked: a positive integer, or Infinity (no limit). */
+/**
+ * `maxBodyBytes`, checked: a positive safe integer, or Infinity (no limit). Only `undefined`
+ * means the default, so a JavaScript caller's `null` is refused, not silently replaced. A finite
+ * limit stays at or below `Number.MAX_SAFE_INTEGER`, so comparing it with a declared
+ * Content-Length as a Number is exact: a larger length can only round to a value that is still
+ * larger than the limit.
+ */
 const maxBodyBytesOf = (value: number | undefined): number => {
-  const limit = value ?? DEFAULT_MAX_BODY_BYTES;
-  if (limit !== Number.POSITIVE_INFINITY && !(Number.isInteger(limit) && limit > 0)) {
+  const limit = value === undefined ? DEFAULT_MAX_BODY_BYTES : value;
+  if (limit !== Number.POSITIVE_INFINITY && !(Number.isSafeInteger(limit) && limit > 0)) {
     throw new RangeError(
-      `gratos-server: maxBodyBytes must be a positive integer or Infinity, got ${String(limit)}.`,
+      `gratos-server: maxBodyBytes must be a positive safe integer or Infinity, got ${String(limit)}.`,
     );
   }
   return limit;

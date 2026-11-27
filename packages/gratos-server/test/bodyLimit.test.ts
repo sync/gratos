@@ -234,6 +234,59 @@ describe("a Content-Length that is not the truth", () => {
   });
 });
 
+describe("chunks request.text() would refuse", () => {
+  it("a body a caller has already started reading gets 400, even when the rest is valid JSON", async () => {
+    const { server, seen } = counted(20);
+    const json = encoder.encode(countBodyOf(60));
+    const request = streamed(source(splitAt(json, [30])).stream);
+    const reader = request.body?.getReader();
+    await reader?.read();
+    reader?.releaseLock();
+    const sent = await send(server, request);
+    expect(sent.status).toBe(400);
+    expect(sent.body).toEqual({ errors: [{ message: "The request body is not valid JSON." }] });
+    expect(seen.resolver).toBe(0);
+  });
+
+  it("a DataView chunk gets 400, as request.text() rejects it", async () => {
+    const { server, seen } = counted();
+    const json = encoder.encode(countBodyOf(60));
+    const stream = new ReadableStream({
+      start: (controller) => {
+        controller.enqueue(new DataView(json.buffer));
+        controller.close();
+      },
+    });
+    const sent = await send(
+      server,
+      new Request(URL_, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: stream,
+        duplex: "half",
+      }),
+    );
+    expect(sent.status).toBe(400);
+    expect(seen.resolver).toBe(0);
+  });
+
+  it("a Buffer chunk is read like any Uint8Array", async () => {
+    const { server } = counted();
+    const sent = await send(server, streamed(source([Buffer.from(countBodyOf(60))]).stream));
+    expect(sent.status).toBe(200);
+    expect(sent.body).toEqual({ data: { count: 1 } });
+  });
+
+  it("empty chunks are skipped, not kept: the body is served and nothing grows with them", async () => {
+    const { server } = counted(100);
+    const json = encoder.encode(countBodyOf(60));
+    const empties = Array.from({ length: 1000 }, () => new Uint8Array(0));
+    const sent = await send(server, streamed(source([...empties, json, ...empties]).stream));
+    expect(sent.status).toBe(200);
+    expect(sent.body).toEqual({ data: { count: 1 } });
+  });
+});
+
 describe("the count is in bytes, at the limit", () => {
   // A JSON body ends in ASCII (`}`), so "its last character" is the last one of its content: the
   // name ends in a 2-byte and a 4-byte character, and the chunks split both of them.
@@ -309,12 +362,29 @@ describe("the option", () => {
     expect(sent.body).toEqual({ data: { count: 1 } });
   });
 
-  it.each([0, -1, 1.5, Number.NaN, Number.NEGATIVE_INFINITY])(
+  it.each([0, -1, 1.5, Number.NaN, Number.NEGATIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, 2 ** 60])(
     "createServer throws for %s",
     (maxBodyBytes) => {
       expect(() => createServer({ schema: basicSchema(), maxBodyBytes })).toThrow(RangeError);
     },
   );
+
+  it("createServer throws for null: only undefined means the default", () => {
+    // @ts-expect-error a JavaScript caller can pass null; it must not silently get the default.
+    expect(() => createServer({ schema: basicSchema(), maxBodyBytes: null })).toThrow(RangeError);
+  });
+
+  it("accepts Number.MAX_SAFE_INTEGER, and a Content-Length past it is still refused unread", async () => {
+    const { server } = counted(Number.MAX_SAFE_INTEGER);
+    const body = source([encoder.encode(countBodyOf(60))]);
+    const sent = await send(
+      server,
+      // 2 ** 53 + 1: as a Number it rounds to 2 ** 53, still larger than the limit.
+      streamed(body.stream, { "content-length": "9007199254740993" }),
+    );
+    expect(sent.status).toBe(413);
+    expect(body.pulls()).toBe(0);
+  });
 
   it("accepts 1", async () => {
     const server = createServer({ schema: basicSchema(), maxBodyBytes: 1 });
