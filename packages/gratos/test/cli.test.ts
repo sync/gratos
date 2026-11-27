@@ -2,7 +2,9 @@
 // step) on a copy of the smoke fixture: it writes both files, writes nothing when they are up to
 // date, and `--check` writes nothing and exits 1 when a file is stale. The generated schema
 // typechecks with tsc and Node executes it, the committed smoke schema is exactly what the CLI
-// generates, and the CLI never loads the TypeScript 5.9.2 baseline.
+// generates, and the CLI never loads the TypeScript 5.9.2 baseline. Grats' flags and commands
+// that Gratos removed are refused, and the ones it keeps run, exactly as the differences page
+// (llm-docs/gratos/differences.md, docs/plan.html F4) lists them.
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   accessSync,
@@ -27,6 +29,18 @@ const recordModules = join(import.meta.dirname, "support", "recordModules.ts");
 
 const decodeUrls = Schema.decodeUnknownSync(Schema.Array(Schema.String));
 const PackageBin = Schema.Struct({ bin: Schema.Record(Schema.String, Schema.String) });
+
+const differences = readFileSync(join(packageDir, "llm-docs", "gratos", "differences.md"), "utf8");
+
+/** Grats' flags and commands Gratos removed, with the argv that tries each. */
+const REMOVED = {
+  "--watch": ["--watch"],
+  "--fix": ["--fix"],
+  locate: ["locate", "User.name"],
+} as const;
+
+/** The flags it keeps or adds. */
+const ACCEPTED = ["--tsconfig", "--version", "--check"] as const;
 
 const project = smokeCopy("cli");
 const tsconfig = project.path("tsconfig.json");
@@ -251,6 +265,51 @@ describe("gratos CLI", () => {
       status: 0,
       stdout: "gratos v0.0.0\n",
       stderr: "",
+    });
+  });
+});
+
+describe("Grats' CLI in Gratos (llm-docs/gratos/differences.md)", () => {
+  /** The rows of the page's CLI table: each flag or command, and whether Gratos removed it. */
+  const rows = (() => {
+    const start = differences.indexOf("\n## The `gratos` CLI\n");
+    const end = differences.indexOf("\n## ", start + 1);
+    return differences
+      .slice(start, end)
+      .split("\n")
+      .filter((line) => line.startsWith("| `"))
+      .map((line) => {
+        const [, name = "", status = ""] = line.split("|").map((cell) => cell.trim());
+        return { name: name.replaceAll("`", ""), removed: status.startsWith("Removed") };
+      });
+  })();
+
+  it("lists exactly the removed and the accepted ones", () => {
+    expect(rows.filter((row) => row.removed).map((row) => row.name)).toEqual(Object.keys(REMOVED));
+    expect(rows.filter((row) => !row.removed).map((row) => row.name)).toEqual([...ACCEPTED]);
+  });
+
+  it.each(Object.entries(REMOVED))("refuses %s: exits 1 and writes nothing", (name, args) => {
+    const files = [project.path("schema.graphql"), project.path("schema.ts")];
+    const before = files.map(mtimeOf);
+    const run = gratos([...args, "--tsconfig", tsconfig]);
+    expect(run.status).toBe(1);
+    expect(`${run.stdout}${run.stderr}`).toContain(
+      name.startsWith("--")
+        ? `Unrecognized flag: ${name} in command gratos`
+        : `Unexpected positional arguments: "${name}"`,
+    );
+    expect(files.map(mtimeOf)).toEqual(before);
+  });
+
+  it.each(ACCEPTED)("accepts %s: exits 0", (flag) => {
+    const run = gratos(flag === "--tsconfig" ? [flag, tsconfig] : [flag, "--tsconfig", tsconfig]);
+    expect({ status: run.status, stderr: run.stderr }).toEqual({
+      status: 0,
+      stderr:
+        flag === "--version"
+          ? ""
+          : "Gratos: `schema.graphql` is up to date.\nGratos: `schema.ts` is up to date.\n",
     });
   });
 });
