@@ -4,7 +4,10 @@ Gratos is Grats (v0.0.36) taught to read `Effect.Effect` and `Stream.Stream` ret
 a GraphQL server core (`@dblechoc/gratos-server`) and an Effect layer
 (`@dblechoc/gratos-server/effect`) that runs every resolver in the request's fiber context. The
 other files of these docs are upstream Grats' (vendored unchanged); this chapter is Gratos' own
-(`llm-docs/gratos/` is the one folder `vendor:verify` does not compare with upstream).
+(`llm-docs/gratos/` is the one folder `vendor:verify` does not compare with upstream). Its
+neighbours are [differences.md](./differences.md) (what Gratos removed or renamed from Grats) and
+[server.md](./server.md) (the server core: `createServer`, its hooks, the HTTP matrix, the
+plugins).
 
 The working reference is `examples/orders` (its README walks a new resolver through the five
 steps: write, generate, nothing, guard, test). Code blocks tagged `file=` below are compared with
@@ -129,7 +132,9 @@ yieldable) and fails with itself.
 - `effectRouteLayer(server, { path, warnAfterMs })` is the route as a Layer, with a finalizer that
   drains the server on shutdown: it waits for every in-flight mutation to settle (logging the
   ones still running every `warnAfterMs`). Provide it with the same service and tracer layers as
-  the app, so the drain runs before they are released.
+  the app, so the drain runs before they are released. A drained server stays drained (it answers
+  every later mutation with a 503), so build a server per layer: `appLayer` below calls
+  `makeServer` inside `Layer.unwrap`, so each build of the layer gets a new one.
 
 ```ts file=examples/orders/src/graphql.ts
 export const appLayer = (schema: GraphQLSchema, options: AppOptions = {}) =>
