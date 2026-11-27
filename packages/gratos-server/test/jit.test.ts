@@ -1,8 +1,19 @@
 // jit({ after: 3, isSafe? }) (docs/plan.html M4a): the executor order, the declines (@oneOf
 // variables, `gratos: { jit: false }` fields through fragments and abstract types, subscriptions)
-// and the plan's regression tests, plus jit vs default on a shared suite.
-import { getOperationAST, GraphQLError, parse } from "graphql";
+// and the plan's regression tests, plus jit vs default on a shared suite, and the upstream facts
+// behind jit's and the core's workarounds.
+import {
+  execute,
+  getOperationAST,
+  GraphQLError,
+  GraphQLInt,
+  GraphQLObjectType,
+  GraphQLSchema,
+  parse,
+  subscribe,
+} from "graphql";
 import type { GraphQLResolveInfo } from "graphql";
+import { compileQuery, isCompiledQuery } from "graphql-jit";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -17,6 +28,7 @@ import {
   sha256Hex,
 } from "../src/index.ts";
 import type { Executor, JsonObject, Plugin, Server } from "../src/index.ts";
+import { withIncrementalDirectives } from "../src/plugins/incremental.ts";
 import { gql, post, send } from "./support/http.ts";
 import { watchedJit } from "./support/jit.ts";
 import type { Sent } from "./support/http.ts";
@@ -690,5 +702,116 @@ describe("the premise", () => {
     });
     await gql(server, "{ hello }");
     expect(seen).toBe("undefined");
+  });
+});
+
+// Upstream facts (docs/plan.html F3): the raw library behaviour behind each workaround, beside the
+// premise above and the late subscription source (test/subscriptions.test.ts). Each test fails
+// when its library changes the behaviour, and its message names the workaround to review then.
+// Run them after every upgrade (AGENTS.md, "Upgrading a pinned dependency").
+const review = (workaround: string) =>
+  `An upstream fact changed: review the workaround in ${workaround}`;
+
+/** A Subscription.tick whose source records the arguments it gets and how often it is iterated. */
+const tickSchema = (seen: { args: Array<unknown>; iterators: number }) => {
+  const source: AsyncIterable<number> = {
+    [Symbol.asyncIterator]: (): AsyncIterator<number> => {
+      seen.iterators += 1;
+      return {
+        next: async () => ({ done: false, value: 1 }),
+        return: async () => ({ done: true, value: undefined }),
+      };
+    },
+  };
+  return new GraphQLSchema({
+    query: new GraphQLObjectType({ name: "Query", fields: { a: { type: GraphQLInt } } }),
+    subscription: new GraphQLObjectType({
+      name: "Subscription",
+      fields: {
+        tick: {
+          type: GraphQLInt,
+          args: { by: { type: GraphQLInt } },
+          subscribe: (_root: unknown, args: unknown) => {
+            seen.args.push(args);
+            return source;
+          },
+          resolve: (event: unknown) => event,
+        },
+      },
+    }),
+  });
+};
+
+describe("upstream facts", () => {
+  it("graphql's execute() throws on a schema that declares @defer (workaround: the default executor's legacyExecuteIncrementally)", () => {
+    const schema = withIncrementalDirectives(basicSchema({ Query: { count: () => 1 } }));
+    expect(
+      () => execute({ schema, document: parse("{ count }") }),
+      review("src/core/server.ts, defaultExecutor"),
+    ).toThrow(/unexpectedly contains experimental directives \(@defer or @stream\)/);
+  });
+
+  it("graphql's subscribe() asks a plain AsyncIterable for two iterators (workaround: the core's own subscription pipeline)", async () => {
+    const seen = { args: Array<unknown>(), iterators: 0 };
+    const result = await subscribe({
+      schema: tickSchema(seen),
+      document: parse("subscription { tick }"),
+    });
+    if (!(Symbol.asyncIterator in result)) {
+      throw new Error(`subscribe() gave no stream: ${JSON.stringify(result)}`);
+    }
+    expect(await result.next()).toEqual({ done: false, value: { data: { tick: 1 } } });
+    await result.return();
+    expect(seen.iterators, review("src/core/subscribe.ts, responseStream")).toBe(2);
+  });
+
+  it.each([
+    ["no field", {}],
+    ["a null field", { a: null }],
+    ["two fields", { a: 1, b: "x" }],
+  ])(
+    "graphql-jit accepts a @oneOf input with %s (workaround: jit() declines @oneOf variables)",
+    async (_name, p) => {
+      const schema = makeSchema(
+        "input Pick @oneOf { a: Int, b: String } type Query { pick(p: Pick!): String }",
+        { Query: { pick: (_s, args: { p: unknown }) => JSON.stringify(args.p) } },
+      );
+      const document = parse("query ($p: Pick!) { pick(p: $p) }");
+      // graphql-js rejects the input, so it is invalid.
+      const plain = await execute({ schema, document, variableValues: { p } });
+      expect(plain.errors?.[0]?.message).toMatch(/OneOf Input Object/);
+      const compiled = compileQuery(schema, document);
+      if (!isCompiledQuery(compiled)) {
+        throw new Error(`graphql-jit did not compile: ${JSON.stringify(compiled)}`);
+      }
+      const jitted = await compiled.query(undefined, undefined, { p });
+      expect(
+        { errors: jitted.errors, data: jitted.data },
+        review("src/plugins/jit.ts, usesOneOfVariable"),
+      ).toEqual({ errors: undefined, data: { pick: JSON.stringify(p) } });
+    },
+  );
+
+  it("graphql-jit passes the variables, not the field's arguments, to a subscription source (workaround: jit() declines subscriptions)", async () => {
+    const seen = { args: Array<unknown>(), iterators: 0 };
+    const schema = tickSchema(seen);
+    for (const [query, variables] of [
+      ["subscription { tick(by: 2) }", {}],
+      ["subscription ($n: Int) { tick(by: $n) }", { n: 5 }],
+    ] as const) {
+      const compiled = compileQuery(schema, parse(query));
+      if (!isCompiledQuery(compiled) || compiled.subscribe === undefined) {
+        throw new Error(`graphql-jit did not compile a subscription: ${JSON.stringify(compiled)}`);
+      }
+      const stream = await compiled.subscribe(undefined, undefined, variables);
+      if (Symbol.asyncIterator in stream) {
+        await stream.return?.();
+      }
+    }
+    // graphql-js would pass { by: 2 } and { by: 5 }.
+    expect(seen.args, review("src/plugins/jit.ts, the subscription decline")).toEqual([
+      {},
+      { n: 5 },
+    ]);
   });
 });

@@ -1,9 +1,7 @@
 // `pnpm --filter @dblechoc/gratos bench`: cold build of a synthetic 300-model project with the
 // `gratos` CLI, compared with the committed baseline (bench/baseline.json at the repo root).
 //
-// It writes the fixture to bench/.fixture/ (gitignored): 300 @gqlType classes with Promise
-// fields and @gqlQueryField functions, each importing effect, @effect/platform-node and graphql,
-// so fast loading really blanks third-party files. It then runs the CLI in fresh Node processes
+// It writes the fixture (bench/fixture.ts) to bench/.fixture/ (gitignored). It then runs the CLI in fresh Node processes
 // (each spawns its own tsgo, so every run is a cold build) and records, per docs/plan.html M3:
 //
 // - files loaded: the program's source files, with third-party files read as empty;
@@ -17,24 +15,23 @@
 // `--project <tsconfig>` measures an existing project instead of the synthetic fixture (M7:
 // `pnpm --filter orders-example bench:compiler` for examples/orders), against the same spec
 // targets, with its own baseline file (`--baseline <path>`, relative to the working directory).
+//
+// A number above its bound (bench/bounds.ts: the targets, +20% when CI is set) exits 1. With
+// `--warn-only` (the informational bench job in .github/workflows/ci.yml) it prints a
+// `::warning::` instead and exits 0; a crash still fails. `--out <path>` also writes the result to
+// a file (for bench/report.ts), `--bound <measure>=<n>` replaces one bound (how a run with a
+// lowered bound is shown), and `--runs <n>` sets the number of measured runs (default 5).
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { Schema } from "effect";
-
-import { getParsedCommandLineOfConfigFile } from "../src/ts/program.ts";
-import { closeDefaultSessions } from "../src/ts/session.ts";
-
+import { boundsFor, exitCodeFor, missesOf, TARGETS, warningCommand } from "./bounds.ts";
+import { fileStats, MODEL_COUNT, readBaseline, syntheticFixtureFiles } from "./fixture.ts";
 import { requireValidPeak, samplePeakRss } from "./rss.ts";
+import type { PeakRss } from "./rss.ts";
 
-const MODEL_COUNT = 300;
-const RUNS = 5;
-/** Spec targets (local). CI allows +20%, because shared runners are noisy. */
-const TARGETS = { filesLoaded: 530, coldBuildMs: 900, peakRssMb: 380 } as const;
-const CI_TOLERANCE = 1.2;
 const SAMPLE_INTERVAL_MS = 5;
 
 const { values: flags } = parseArgs({
@@ -42,8 +39,37 @@ const { values: flags } = parseArgs({
     record: { type: "boolean", default: false },
     project: { type: "string" },
     baseline: { type: "string" },
+    "warn-only": { type: "boolean", default: false },
+    out: { type: "string" },
+    bound: { type: "string", multiple: true, default: [] },
+    runs: { type: "string", default: "5" },
   },
 });
+
+const runs = Number(flags.runs);
+if (!Number.isSafeInteger(runs) || runs < 1) {
+  throw new Error(`bench: --runs takes a positive integer, got ${JSON.stringify(flags.runs)}`);
+}
+const isCi = process.env["CI"] !== undefined && process.env["CI"] !== "";
+
+/**
+ * GRATOS_BENCH_FIXED_RSS_KB: a fixed peak instead of `ps` samples, for the required test of this
+ * script's bounds and exit codes (test/benchReport.test.ts), which must not depend on `ps`
+ * catching a short build. The bench job never sets it, so it samples for real.
+ */
+const fixedPeakRssKbOf = (value: string | undefined): number | undefined => {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  const kb = Number(value);
+  if (!Number.isInteger(kb) || kb <= 0) {
+    throw new Error(`bench: GRATOS_BENCH_FIXED_RSS_KB must be a positive integer, got ${value}`);
+  }
+  return kb;
+};
+const fixedPeakRssKb = fixedPeakRssKbOf(process.env["GRATOS_BENCH_FIXED_RSS_KB"]);
+// Checked before any build, so a bad flag fails at once.
+const bounds = boundsFor(isCi, flags.bound);
 
 const packageDir = join(import.meta.dirname, "..");
 const baselinePath =
@@ -51,87 +77,16 @@ const baselinePath =
     ? join(packageDir, "..", "..", "bench", "baseline.json")
     : resolve(flags.baseline);
 const fixtureDir = join(import.meta.dirname, ".fixture");
-const modelsDir = join(fixtureDir, "models");
 /** The tsconfig measured: the project's, or the synthetic fixture's. */
 const tsconfigPath =
   flags.project === undefined ? join(fixtureDir, "tsconfig.json") : resolve(flags.project);
 
-const model = (index: number): string => {
-  const next = index + 1 < MODEL_COUNT ? `Model${index + 1}` : null;
-  return `import type { NodeRuntime } from "@effect/platform-node";
-import { Effect } from "effect";
-import type { GraphQLResolveInfo } from "graphql";
-import type { Int } from "@dblechoc/gratos";
-${next === null ? "" : `import { ${next} } from "./${next}.ts";\n`}
-/** Model number ${index}. */
-/** @gqlType */
-export class Model${index} {
-  /** @gqlField */
-  id: string;
-  /** @gqlField */
-  rank: Int;
-  /** @gqlField */
-  active: boolean;
-
-  constructor(id: string, rank: Int) {
-    this.id = id;
-    this.rank = rank;
-    this.active = rank % 2 === 0;
-  }
-
-  /** @gqlField */
-  async label(): Promise<string> {
-    return \`model-\${this.id}\`;
-  }
-${
-  next === null
-    ? ""
-    : `
-  /** @gqlField */
-  async next(): Promise<${next}> {
-    return new ${next}(\`\${this.id}+\`, this.rank + 1);
-  }
-`
-}}
-
-/** @gqlQueryField */
-export async function model${index}(): Promise<Model${index}> {
-  return new Model${index}("${index}", ${index});
-}
-
-export const load${index} = Effect.succeed(new Model${index}("${index}", ${index}));
-export type Runtime${index} = typeof NodeRuntime;
-export type Info${index} = GraphQLResolveInfo;
-`;
-};
-
 const writeFixture = (): void => {
   rmSync(fixtureDir, { recursive: true, force: true });
-  mkdirSync(modelsDir, { recursive: true });
-  writeFileSync(
-    join(fixtureDir, "tsconfig.json"),
-    `${JSON.stringify(
-      {
-        compilerOptions: {
-          target: "es2022",
-          lib: ["es2022"],
-          module: "nodenext",
-          moduleResolution: "nodenext",
-          types: ["node"],
-          strict: true,
-          noEmit: true,
-          skipLibCheck: true,
-          allowImportingTsExtensions: true,
-        },
-        include: ["models/**/*.ts"],
-        grats: { importModuleSpecifierEnding: ".ts", schemaHeader: null, tsSchemaHeader: null },
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  for (let index = 0; index < MODEL_COUNT; index++) {
-    writeFileSync(join(modelsDir, `Model${index}.ts`), model(index));
+  for (const file of syntheticFixtureFiles()) {
+    const path = join(fixtureDir, file.path);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, file.content);
   }
 };
 
@@ -161,7 +116,10 @@ const coldBuild = async (): Promise<{
   if (child.pid === undefined) {
     throw new Error("bench: could not start gratos");
   }
-  const peak = await samplePeakRss(child.pid, exited, { intervalMs: SAMPLE_INTERVAL_MS });
+  const peak: PeakRss =
+    fixedPeakRssKb === undefined
+      ? await samplePeakRss(child.pid, exited, { intervalMs: SAMPLE_INTERVAL_MS })
+      : { peakRssKb: fixedPeakRssKb, validSamples: 1, invalidSamples: 0 };
   const { code, ms } = await exited;
   if (code !== 0) {
     throw new Error(`gratos failed on ${tsconfigPath}:\n${stderr}`);
@@ -174,39 +132,8 @@ const coldBuild = async (): Promise<{
   };
 };
 
-const fileStats = () => {
-  const parsed = getParsedCommandLineOfConfigFile(tsconfigPath);
-  const { session, project } = parsed.program;
-  const programFiles = project.program.getSourceFileNames();
-  const stats = {
-    /** The spec's "files loaded": every source file in the program. */
-    filesLoaded: programFiles.length,
-    libFiles: programFiles.filter(
-      (fileName) => project.program.getSourceFileMetadata(fileName)?.isDefaultLibrary,
-    ).length,
-    filesRead: session.filesRead.size,
-    blankedFiles: programFiles.filter((fileName) => session.blanked.has(fileName)).length,
-    fullyLoadedFiles: programFiles.filter((fileName) => !session.blanked.has(fileName)).length,
-  };
-  closeDefaultSessions();
-  return stats;
-};
-
 const median = (values: ReadonlyArray<number>): number =>
   values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
-
-const Baseline = Schema.Struct({
-  runner: Schema.Struct({
-    platform: Schema.String,
-    cpu: Schema.String,
-    cores: Schema.Number,
-    memoryGb: Schema.Number,
-    node: Schema.String,
-  }),
-  filesLoaded: Schema.Number,
-  coldBuildMs: Schema.Number,
-  peakRssMb: Schema.Number,
-});
 
 const runner = {
   platform: `${process.platform}-${process.arch}`,
@@ -222,38 +149,38 @@ if (flags.project === undefined) {
 // One warm-up run (OS file cache, Node compile cache), not counted.
 await coldBuild();
 const builds: Array<Awaited<ReturnType<typeof coldBuild>>> = [];
-for (let run = 0; run < RUNS; run++) {
+for (let run = 0; run < runs; run++) {
   builds.push(await coldBuild());
 }
-const files = fileStats();
+const files = fileStats(tsconfigPath);
 const measured = {
   filesLoaded: files.filesLoaded,
   coldBuildMs: Math.round(median(builds.map((build) => build.ms))),
   peakRssMb: Math.round(median(builds.map((build) => build.peakRssKb)) / 1024),
 };
 
-const isCi = process.env["CI"] !== undefined && process.env["CI"] !== "";
-const bounds = Object.fromEntries(
-  Object.entries(TARGETS).map(([key, target]) => [key, isCi ? target * CI_TOLERANCE : target]),
-);
-const baseline = existsSync(baselinePath)
-  ? Schema.decodeUnknownSync(Baseline)(JSON.parse(readFileSync(baselinePath, "utf8")))
-  : null;
+const baseline = existsSync(baselinePath) ? readBaseline(baselinePath) : null;
 const versus = (key: keyof typeof measured) =>
   baseline === null ? null : `${Math.round((measured[key] / baseline[key] - 1) * 100)}%`;
 
+const misses = missesOf(measured, bounds);
 const result = {
-  project: flags.project === undefined ? `synthetic (${MODEL_COUNT} models)` : tsconfigPath,
+  project:
+    flags.project === undefined
+      ? `synthetic (${MODEL_COUNT} models)`
+      : relative(process.cwd(), tsconfigPath),
   measured,
   targets: TARGETS,
   bounds,
   withinBounds: {
-    filesLoaded: measured.filesLoaded <= (bounds["filesLoaded"] ?? 0),
-    coldBuildMs: measured.coldBuildMs <= (bounds["coldBuildMs"] ?? 0),
-    peakRssMb: measured.peakRssMb <= (bounds["peakRssMb"] ?? 0),
+    filesLoaded: measured.filesLoaded <= bounds.filesLoaded,
+    coldBuildMs: measured.coldBuildMs <= bounds.coldBuildMs,
+    peakRssMb: measured.peakRssMb <= bounds.peakRssMb,
   },
+  // Percent deltas against a baseline recorded on another runner class say nothing, and CI is
+  // judged on its own bounds (docs/plan.html F3): no deltas in CI.
   versusBaseline:
-    baseline === null
+    baseline === null || isCi
       ? null
       : {
           sameRunnerClass: JSON.stringify(baseline.runner) === JSON.stringify(runner),
@@ -270,16 +197,25 @@ const result = {
   files,
   runner,
 };
-process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+const report = `${JSON.stringify(result, null, 2)}\n`;
+process.stdout.write(report);
+if (flags.out !== undefined) {
+  writeFileSync(resolve(flags.out), report);
+}
 
 if (flags.record) {
   writeFileSync(baselinePath, `${JSON.stringify({ runner, ...measured }, null, 2)}\n`);
   process.stderr.write(`bench: recorded ${baselinePath}\n`);
 }
-const misses = Object.entries(result.withinBounds).filter(([, within]) => !within);
 if (misses.length > 0) {
   process.stderr.write(
-    `bench: outside the spec bounds: ${misses.map(([key]) => key).join(", ")}\n`,
+    `bench: outside the spec bounds: ${misses.map((miss) => miss.measure).join(", ")}\n`,
   );
-  process.exitCode = 1;
+  if (flags["warn-only"]) {
+    // Workflow commands are read from stdout.
+    for (const miss of misses) {
+      process.stdout.write(`${warningCommand(result.project, miss)}\n`);
+    }
+  }
 }
+process.exitCode = exitCodeFor(misses, flags["warn-only"]);

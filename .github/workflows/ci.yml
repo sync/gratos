@@ -44,6 +44,41 @@ jobs:
           path: .turbo/cache
           key: turbo-${{ runner.os }}-${{ github.head_ref || github.ref_name }}-${{ github.sha }}
 
+  # Informational, for good (docs/plan.html F3): the compiler's cold build and peak RSS, and the
+  # dev loop's save-to-first-good-response, go in the job summary, with a warning when one is
+  # above the plan's CI bound. A miss never fails this job (a crash does), and `ci` does not wait
+  # for it. It runs dev.test.ts itself, outside turbo: a cached `pnpm check` runs nothing.
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Compiler bench on the synthetic fixture
+        run: node packages/gratos/bench/run.ts --warn-only --out "$RUNNER_TEMP/bench-synthetic.json"
+      - name: Compiler bench on examples/orders
+        run: >-
+          node packages/gratos/bench/run.ts --warn-only
+          --project examples/orders/src/tsconfig.json --baseline bench/orders.json
+          --out "$RUNNER_TEMP/bench-orders.json"
+      - name: Dev-loop latency (examples/orders/test/dev.test.ts)
+        working-directory: examples/orders
+        run: pnpm exec vitest run test/dev.test.ts
+        env:
+          GRATOS_DEV_TIMINGS_FILE: ${{ runner.temp }}/dev-timings.json
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        run: >-
+          node packages/gratos/bench/report.ts
+          --build "$RUNNER_TEMP/bench-synthetic.json"
+          --build "$RUNNER_TEMP/bench-orders.json"
+          --dev "$RUNNER_TEMP/dev-timings.json"
+
+  # The required check. It needs `check` only: `bench` is informational and never gates a merge.
   ci:
     if: always()
     needs: [check]

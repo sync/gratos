@@ -1,0 +1,62 @@
+name: canary
+
+# Informational (docs/plan.html F3): does the repo still pass `pnpm check` on the newest release of
+# a pinned dependency? Each entry moves one catalog: entry of pnpm-workspace.yaml inside the job
+# (nothing is committed), installs, shows the resolved versions, and runs the full check. A red
+# entry is a valid result: the upgrade PR is where it gets fixed (AGENTS.md, "Upgrading a pinned
+# dependency"). It files no issue: a failed scheduled run already notifies.
+on:
+  schedule:
+    # Weekly, Monday 06:17 UTC.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  # A pull request that changes the canary itself runs it once.
+  pull_request:
+    paths:
+      - .github/workflows/canary.yml
+      - scripts/canary.ts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: typescript@beta
+            tag: beta
+            packages: typescript
+          - name: effect@latest
+            tag: latest
+            packages: effect @effect/platform-node @effect/vitest
+          - name: graphql@latest
+            tag: latest
+            packages: graphql
+          - name: graphql-jit@latest
+            tag: latest
+            packages: graphql-jit
+    env:
+      CANARY_TAG: ${{ matrix.tag }}
+      CANARY_PACKAGES: ${{ matrix.packages }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: Move the catalog entry
+        run: node scripts/canary.ts pin "$CANARY_TAG" $CANARY_PACKAGES
+      - name: Install with the moved entry
+        run: pnpm install --no-frozen-lockfile
+      - name: Show the resolved versions
+        run: node scripts/canary.ts verify $CANARY_PACKAGES
+      # --continue: one broken task must not hide the others' results.
+      - run: pnpm check --continue
