@@ -30,7 +30,7 @@ import { tracked } from "../../src/effect/schema.ts";
 import type { RequestScope } from "../../src/effect/state.ts";
 import { flush, gate, gql, post, send } from "../support/http.ts";
 import { makeSchema } from "../support/schema.ts";
-import { readSse } from "../support/stream.ts";
+import { readApolloMultipart, readSse, readUntil } from "../support/stream.ts";
 import { RecordedSpan } from "./support.ts";
 
 type Resolver = GraphQLFieldResolver<never, unknown>;
@@ -878,7 +878,6 @@ describe("F5: the core's own aborts carry a reason the Effect layer reads", () =
   it.each([
     { name: "default", plugins: (): ReadonlyArray<Plugin> => [], warmUp: 0 },
     { name: "jit", plugins: (): ReadonlyArray<Plugin> => [jit({ after: 2 })], warmUp: 1 },
-    { name: "incremental", plugins: incrementalPlugins, warmUp: 0 },
   ])("keeps ClientAbort for a client that leaves ($name executor)", async ({ plugins, warmUp }) => {
     const log: Array<string> = [];
     const stops: Array<Stop> = [];
@@ -904,6 +903,47 @@ describe("F5: the core's own aborts carry a reason the Effect layer reads", () =
     await sibling.releasing.promise;
     sibling.hold.resolve();
     expect((await pending).status).toBe(499);
+    await until(() => stops.length === 1);
+    expect(stops).toEqual(["client"]);
+  });
+
+  it("keeps ClientAbort for a client that leaves after the initial payload (incremental executor)", async () => {
+    const log: Array<string> = [];
+    const stops: Array<Stop> = [];
+    const sibling = held(log, "later");
+    const built = build(log, incrementalPlugins(), {
+      Item: {
+        later: () =>
+          recording(log, "later", stops, sibling.resource.pipe(Effect.andThen(Effect.never))),
+      },
+    });
+    const controller = new AbortController();
+    const response = await built.server.handle(
+      post(
+        { query: "query Left { item { value ... @defer { later } } }" },
+        { accept: "multipart/mixed", signal: controller.signal },
+      ),
+    );
+    // An incremental response: the default executor would have answered with one JSON body.
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/^multipart\/mixed/);
+    if (response.body === null) {
+      throw new Error("no body");
+    }
+    const { text, reader } = await readUntil(
+      response.body,
+      (read) => readApolloMultipart(read).parts.length > 0,
+    );
+    expect(readApolloMultipart(text).parts).toMatchObject([
+      { data: { item: { value: "i" } }, hasNext: true },
+    ]);
+    // The deferred work runs on the next pull; the client leaves once its resolver has started.
+    const rest = reader.read();
+    await sibling.started.promise;
+    controller.abort();
+    await sibling.releasing.promise;
+    sibling.hold.resolve();
+    expect((await rest).done).toBe(true);
     await until(() => stops.length === 1);
     expect(stops).toEqual(["client"]);
   });
