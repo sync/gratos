@@ -425,6 +425,7 @@ ol.q li{margin:0 0 10px}
     <ul>
       <li>POST only. GET and HEAD return 405 with <code>Allow: POST</code> and a null body.</li>
       <li>Non-JSON or no <code>query</code>: 400. Unsupported content type: 415. Unsupported Accept: 406.</li>
+      <li>A body over <code>maxBodyBytes</code> (default 1 MiB): 413, as JSON for every client, before <code>onParams</code>. A Content-Length of plain decimal digits over the limit is refused unread; otherwise the bytes are counted as they arrive. <em>(Added by follow-up F1.)</em></li>
       <li><code>application/graphql-response+json</code> is the default. Parse, validation and variable errors give 400. Any non-null data gives 200.</li>
       <li><code>application/json</code> gives 200 for any well-formed request.</li>
       <li><code>gqlError(msg, status)</code> puts the status in <code>extensions.http.status</code>. It changes the HTTP status only when <code>data</code> is null.</li>

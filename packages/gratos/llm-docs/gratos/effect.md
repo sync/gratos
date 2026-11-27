@@ -139,6 +139,12 @@ export const appLayer = (schema: GraphQLSchema, options: AppOptions = {}) =>
     ),
 ```
 
+The request body limit is the core's `maxBodyBytes` (default 1 MiB; a larger body gets a 413).
+For `effectRoute` it is the only limit: Effect's `HttpIncomingMessage.MaxBodySize` bounds only
+buffered reads (`req.text`, `req.json`, …), and the stream `HttpServerRequest.toWeb` hands the core
+ignores it (Effect 4.1.5), so setting it does not stop a large GraphQL body. Raise or lower
+`maxBodyBytes` on `createServer` instead; `Infinity` turns the limit off.
+
 When a client leaves, its query and subscription fibers are interrupted and nothing is reported.
 A mutation is never interrupted: a half-applied write is worse than a wasted one. Resolvers fork
 without the request's `Scope`; one that needs a scope uses `Effect.scoped`. Build long-lived
