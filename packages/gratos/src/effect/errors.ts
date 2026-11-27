@@ -33,6 +33,9 @@ export const effectOnSubscription = (): string =>
 export const bareEffectType = (): string =>
   'Expected `Effect.Effect`, not a bare `Effect`. Gratos only recognizes the qualified name, so `Effect<A>` imported from `effect` is not unwrapped. Import the module with `import { Effect } from "effect"` and write `Effect.Effect<A>`.';
 
+export const renamedWrapperImport = (alias: string, wrapper: EffectWrapper): string =>
+  `Expected \`${wrapperName(wrapper)}\`, not \`${alias}.${wrapper}\`. Gratos only recognizes the qualified name with the namespace imported under its own name, so a renamed import is not unwrapped. Import the namespace without renaming it, with \`import { ${wrapper} } from "effect"\`, and write \`${wrapperName(wrapper)}<A>\`.`;
+
 export const effectWithResolverMap = (): string =>
   "Expected no `Effect.Effect` field when `EXPERIMENTAL__emitResolverMap` is enabled. The resolver map has no generated `resolve` or `gratos` extensions for the Gratos Effect layer to run the Effect with. Turn off `EXPERIMENTAL__emitResolverMap`, or return the value or a `Promise` of it.";
 

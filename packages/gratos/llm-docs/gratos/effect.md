@@ -35,7 +35,9 @@ Rules the compiler enforces:
 - Only the qualified names count: `Effect.Effect` and `Stream.Stream` (from
   `import { Effect, Stream } from "effect"`). A bare `Effect<A>` imported from `effect` gets an
   error that suggests `Effect.Effect<A>`. A type of your own named `Effect` stays a normal type.
-  `import { Effect as Fx }` with `Fx.Effect` is not detected (a documented limitation).
+  A renamed import, `import { Effect as Fx }` (or `import * as Fx from "effect/Effect"`) with
+  `Fx.Effect`, is not detected either: it gets an error that suggests importing `Effect` under
+  its own name and writing `Effect.Effect<A>` (the same for `Stream`).
 - The Effect is the outermost wrapper of the return type. `Effect.Effect<Promise<A>>`,
   `Promise<Effect.Effect<A>>`, `Array<Effect.Effect<A>>`, `Effect.Effect<A>[]` and an Effect
   around a Stream are errors. This is the compiler's rule, so that the field's type and its

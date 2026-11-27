@@ -5,9 +5,9 @@
 // and `Stream.Stream` count. A user type named `Effect` stays a normal type, and a bare
 // `Effect<…>` imported from `effect` gets a hint instead (see bareEffect.ts).
 //
-// Documented limitation: a renamed namespace import, such as `import { Effect as Fx } from
-// "effect"` with `Fx.Effect<A>`, is not detected. It is reported as upstream reports any other
-// qualified name.
+// A renamed namespace import, such as `import { Effect as Fx } from "effect"` with
+// `Fx.Effect<A>`, is not detected either: it gets a hint toward `Effect.Effect` (see
+// renamedWrapper.ts).
 import { Predicate } from "effect";
 
 import {

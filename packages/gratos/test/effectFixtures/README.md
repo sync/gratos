@@ -5,8 +5,9 @@ run in `test/upstreamFixtures.test.ts` with the same transformer as `test/fixtur
 TypeScripts (TypeScript 7, then TypeScript 5.9.2 in the parity run), with the same snapshots.
 
 - `wrappers/`: `Effect.Effect` and `Stream.Stream` detection, a user type named `Effect`, the
-  bare-`Effect` hint (only for an import from `effect` or `effect/*`), and the documented
-  limitation that a renamed namespace (`Fx.Effect`) is not detected.
+  bare-`Effect` hint (only for an import from `effect` or `effect/*`), and the renamed-import
+  hint for `Fx.Effect` and `S.Stream` (only for the `Effect` or `Stream` namespace of `effect`:
+  `effect/Schema`, a module of your own and a namespace of your own keep upstream's error).
 - `nesting/`: an Effect must be the resolver's outermost return wrapper; every rejected spelling,
   and Effect as a derived-context return.
 - `input/`: Effect and Stream in argument and input-field positions.

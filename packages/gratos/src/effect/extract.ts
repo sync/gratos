@@ -25,6 +25,7 @@ import {
   promiseInsideEffect,
   streamInsideEffect,
 } from "./errors.ts";
+import { renamedWrapperHint } from "./renamedWrapper.ts";
 import {
   effectWrapperOf,
   effectWrapperOfName,
@@ -68,6 +69,8 @@ const successBranches = (success: TypeNode): ReadonlyArray<TypeNode> => {
  * - `Stream.Stream<A, E, R>` becomes an async iterable of `A`, as `AsyncIterable<A>` does, marked
  *   as an Effect stream so it is rejected outside `Subscription`.
  * - Neither is a valid input type.
+ * - `Alias.Effect` or `Alias.Stream`, where the file imports that namespace of `effect` under
+ *   another name, is reported with a hint toward the qualified name (see renamedWrapper.ts).
  */
 export const effectTypeReference = (
   extractor: EffectExtractor,
@@ -76,7 +79,8 @@ export const effectTypeReference = (
 ): GraphQLTypeNode | null | undefined => {
   const wrapper = effectWrapperOfName(node.typeName);
   if (wrapper === null) {
-    return undefined;
+    const hint = renamedWrapperHint(node.typeName);
+    return hint === null ? undefined : extractor.report(node, hint);
   }
   if (ctx.kind === "INPUT") {
     return extractor.report(node, effectInInputPosition(wrapper));

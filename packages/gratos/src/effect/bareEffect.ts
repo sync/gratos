@@ -11,6 +11,7 @@ import {
   isImportSpecifier,
   isStringLiteral,
   SymbolFlags,
+  SyntaxKind,
 } from "#typescript";
 import type { EntityName, Node, Symbol as TsSymbol, TypeChecker } from "#typescript";
 
@@ -50,7 +51,8 @@ const importSpecifierBinding = (reference: Node, name: string): Node | undefined
       continue;
     }
     const bindings = statement.importClause?.namedBindings;
-    if (bindings === undefined || !("elements" in bindings)) {
+    // By kind: on TypeScript 7 a NamespaceImport also has an `elements` property (undefined).
+    if (bindings === undefined || bindings.kind === SyntaxKind.NamespaceImport) {
       continue;
     }
     const specifier = bindings.elements.find((element) => element.name.text === name);
