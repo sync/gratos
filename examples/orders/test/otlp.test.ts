@@ -57,19 +57,25 @@ const serveTraced = async (env: Record<string, string>) => {
     ),
   );
   const served = await serve({ tracing });
-  const response = await fetch(served.url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/graphql-response+json",
-      authorization: AUTHORIZATION,
-    },
-    body: JSON.stringify({ query: 'query Traced { order(id: "o-1") { id } }' }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  expect(await response.json()).toEqual({ data: { order: { id: "o-1" } } });
-  // Nothing is exported while the server runs: periodic exports are off.
-  expect(client.exports).toEqual([]);
+  try {
+    const response = await fetch(served.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/graphql-response+json",
+        authorization: AUTHORIZATION,
+      },
+      body: JSON.stringify({ query: 'query Traced { order(id: "o-1") { id } }' }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    expect(await response.json()).toEqual({ data: { order: { id: "o-1" } } });
+    // Nothing is exported while the server runs: periodic exports are off.
+    expect(client.exports).toEqual([]);
+  } catch (error) {
+    // A failed request or assertion still releases the server and its listener.
+    await served.close();
+    throw error;
+  }
   await served.close();
   journal.push("closed");
   return { exports: client.exports, journal, warnings };

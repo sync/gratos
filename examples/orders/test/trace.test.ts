@@ -221,11 +221,14 @@ describe("the orders app's trace, over HTTP", () => {
     await query.text();
     expect(only(tracer, "graphql Open")?.ended).toBe(false);
 
-    await served.close();
-    await events.cancel();
-
-    expect(tracer.open().map((span) => span.name)).toEqual([]);
-    expect(tracer.spans.every((span) => span.endCalls === 1)).toBe(true);
-    expect(only(tracer, "graphql Open")?.outcome).toBe("cancel");
+    try {
+      await served.close();
+      // Checked at once: the client's own cleanup below must not get the chance to end a span.
+      expect(tracer.open().map((span) => span.name)).toEqual([]);
+      expect(tracer.spans.every((span) => span.endCalls === 1)).toBe(true);
+      expect(only(tracer, "graphql Open")?.outcome).toBe("cancel");
+    } finally {
+      await events.cancel();
+    }
   });
 });
