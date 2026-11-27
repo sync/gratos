@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createServer } from "../src/index.ts";
+import { createServer, jit } from "../src/index.ts";
 import type { ContextServerOptions, Plugin } from "../src/index.ts";
 import { post, send } from "./support/http.ts";
 import { basicSchema } from "./support/schema.ts";
@@ -102,5 +102,67 @@ describe("server.md", () => {
     const sent = await send(server, post({ query: "{ count }" }));
     expect(sent.status).toBe(200);
     expect(calls).toEqual([...HOOKS]);
+  });
+
+  it("gives the order of the request jit() compiles, whose jit phase comes later", async () => {
+    // The page's sentence: "…so that request reaches the hooks in this order: `onRequest`, …".
+    // Paragraphs, with each one's line breaks read as spaces.
+    const marker = "so that request reaches the hooks in this order:";
+    const paragraph = page
+      .split("\n\n")
+      .map((text) => text.replaceAll(/\s+/g, " "))
+      .find((text) => text.includes(marker));
+    expect(paragraph, marker).toBeDefined();
+    const sentence = (paragraph ?? "").slice((paragraph ?? "").indexOf(marker) + marker.length);
+    const documented = [...sentence.matchAll(/`(\w+)`/g)].map((match) => match[1]);
+
+    const calls: Array<string> = [];
+    const plugin: Plugin = {
+      onRequest: () => {
+        calls.push("onRequest");
+      },
+      onParams: () => {
+        calls.push("onParams");
+      },
+      onPhase: (phase) => {
+        calls.push(`onPhase:${phase.name}`);
+        return undefined;
+      },
+      onContext: () => {
+        calls.push("onContext");
+      },
+      onExecute: () => {
+        calls.push("onExecute");
+        return undefined;
+      },
+      wrapExecution: (_request, run) => {
+        calls.push("wrapExecution");
+        return run();
+      },
+      onResult: () => {
+        calls.push("onResult");
+        return undefined;
+      },
+      onResponse: () => {
+        calls.push("onResponse");
+      },
+    };
+    // jit() compiles on the second use, which hits the document cache (no parse or validate).
+    const server = createServer({ schema: basicSchema(), plugins: [plugin, jit({ after: 2 })] });
+    expect((await send(server, post({ query: "{ count }" }))).status).toBe(200);
+    calls.length = 0;
+    const sent = await send(server, post({ query: "{ count }" }));
+    expect(sent.body).toEqual({ data: { count: 1 } });
+    expect(calls).toEqual([
+      "onRequest",
+      "onParams",
+      "onContext",
+      "onExecute",
+      "wrapExecution",
+      "onPhase:jit",
+      "onResult",
+      "onResponse",
+    ]);
+    expect(documented).toEqual(calls.map((call) => call.replace(/:.*/, "")));
   });
 });

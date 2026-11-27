@@ -1,8 +1,9 @@
 # The Gratos server core
 
-`@dblechoc/gratos-server` is a small GraphQL-over-HTTP server: `createServer(options)` returns a
-`handle(request: Request): Promise<Response>` function, so it runs behind any fetch-style
-adapter. The core never imports `effect`. The Effect layer is the separate
+`@dblechoc/gratos-server` is a small GraphQL-over-HTTP server. `createServer(options)` returns a
+server object, and `createServer(options).handle(request)` is the request entry point: it takes a
+`Request` and returns a `Promise<Response>`, so the server runs behind any fetch-style adapter.
+The core never imports `effect`. The Effect layer is the separate
 `@dblechoc/gratos-server/effect` entry, documented in [effect.md](./effect.md); how Gratos differs
 from Grats is in [differences.md](./differences.md).
 
@@ -63,17 +64,25 @@ and "Contracts to know" in [effect.md](./effect.md)).
 A plugin is an object of optional hooks. Hook lists are built once, at startup, so a hook no
 plugin defines costs nothing. The synchronous ones run in the hot loop.
 
+The table gives the order for a query whose document is not cached yet (a cache miss): its parse
+and validate phases reach `onPhase` before `onContext`. A cached document reports no phase there.
+
 | Hook            | When                                                                                                                       | Sync |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------- | ---- |
 | `onServer`      | Once, at startup. May replace the schema (`control.replaceSchema`)                                                         | no   |
 | `onRequest`     | First, at `handle()` entry. Returning a Response answers the request                                                       | no   |
 | `onParams`      | After the body is read, before the "no query" check (so APQ hash-only requests get here). A throw is a 400                 | no   |
-| `onPhase`       | A finished phase: parse and validate on a cache miss, jit when it compiles                                                 | yes  |
+| `onPhase`       | A finished phase: parse and validate on a cache miss; jit when it compiles, later (see below)                              | yes  |
 | `onContext`     | After the context factory, once the operation is known, before anything executes                                           | no   |
 | `onExecute`     | Every hook, in list order, before anything executes. Returns an executor to claim the operation, or throws to refuse it    | yes  |
 | `wrapExecution` | Around each synchronous entry into the execution (the executor call, each source pull, each event…). Calls `run` once      | yes  |
 | `onResult`      | Every payload: a result, each incremental payload, each subscription event. Returns a replacement, or nothing              | yes  |
 | `onResponse`    | Exactly once per request, on the Response before it goes to the transport (also a streamed one). Not a "stream ended" hook | no   |
+
+`jit()` reports its `jit` phase from inside its executor, after the request has entered
+`wrapExecution`. With `after` above 1, the request that compiles finds its document cached, so
+that request reaches the hooks in this order: `onRequest`, `onParams`, `onContext`, `onExecute`,
+`wrapExecution`, `onPhase`, `onResult`, `onResponse`.
 
 Two more members are read once, at startup: `validationRules` (run with graphql's specified rules
 on every document the cache does not hold yet) and `hideSuggestions` (`maskErrors()` sets it).
