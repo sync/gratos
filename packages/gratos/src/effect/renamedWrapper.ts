@@ -6,8 +6,17 @@
 // It reads only the file's own import declarations, never the imported module, so it works with
 // third-party files read as empty (fast loading). Called from effectTypeReference, before
 // upstream reports the qualified name.
-import { isIdentifier, isImportDeclaration, isStringLiteral, SyntaxKind } from "#typescript";
-import type { EntityName, ImportDeclaration } from "#typescript";
+import {
+  isIdentifier,
+  isImportDeclaration,
+  isImportEqualsDeclaration,
+  isModuleBlock,
+  isModuleDeclaration,
+  isSourceFile,
+  isStringLiteral,
+  SyntaxKind,
+} from "#typescript";
+import type { EntityName, ImportDeclaration, Node } from "#typescript";
 
 import { renamedWrapperImport } from "./errors.ts";
 import type { EffectWrapper } from "./wrappers.ts";
@@ -42,6 +51,29 @@ const bindsWrapper = (
 };
 
 /**
+ * Whether a namespace enclosing `node` declares `alias` itself (`namespace Fx {}` or
+ * `import Fx = …`), so `Fx` there is that local namespace and not the file's import. Only a
+ * namespace body can shadow a file-level namespace name in a type position: a top-level
+ * declaration of the same name would conflict with the import.
+ */
+const isShadowed = (node: Node, alias: string): boolean => {
+  for (let current = node.parent; !isSourceFile(current); current = current.parent) {
+    if (
+      isModuleBlock(current) &&
+      current.statements.some(
+        (statement) =>
+          (isModuleDeclaration(statement) || isImportEqualsDeclaration(statement)) &&
+          isIdentifier(statement.name) &&
+          statement.name.text === alias,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
  * The hint for a type name written as `Alias.Effect` (or `Alias.Stream`), where the file's own
  * imports bind `Alias` to that namespace of `effect` under another name, or `null` for any other
  * name.
@@ -52,7 +84,7 @@ export const renamedWrapperHint = (typeName: EntityName): string | null => {
   }
   const alias = typeName.left.text;
   const wrapper = typeName.right.text;
-  if (!isWrapper(wrapper) || alias === wrapper) {
+  if (!isWrapper(wrapper) || alias === wrapper || isShadowed(typeName, alias)) {
     return null;
   }
   const bound = typeName

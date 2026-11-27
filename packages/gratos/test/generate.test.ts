@@ -11,7 +11,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 
 import { NodeFileSystem } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
@@ -23,6 +23,7 @@ import {
   DiagnosticsError,
   generate,
   OutputError,
+  splitPath,
   StaleFilesError,
 } from "../src/generate.ts";
 import {
@@ -140,6 +141,34 @@ const probe = (session: Session): void => {
   session.virtualFiles.set(configPath, JSON.stringify({ compilerOptions: {}, files: [] }));
   openProject(session, configPath);
 };
+
+describe("splitPath: a root is never read as segments", () => {
+  it("posix: the root, then the segments", () => {
+    expect(splitPath("/project/./real//schema.ts", posix)).toEqual({
+      root: "/",
+      segments: ["project", "real", "schema.ts"],
+    });
+    expect(splitPath("../real/schema.ts", posix)).toEqual({
+      root: "",
+      segments: ["..", "real", "schema.ts"],
+    });
+  });
+
+  it("Windows: a drive root and a UNC share root stay whole, either separator", () => {
+    expect(splitPath(String.raw`C:\project\real/schema.ts`, win32)).toEqual({
+      root: `C:${win32.sep}`,
+      segments: ["project", "real", "schema.ts"],
+    });
+    expect(splitPath(String.raw`\\server\share\project\schema.ts`, win32)).toEqual({
+      root: `${String.raw`\\server\share`}${win32.sep}`,
+      segments: ["project", "schema.ts"],
+    });
+    expect(splitPath(String.raw`..\real\schema.ts`, win32)).toEqual({
+      root: "",
+      segments: ["..", "real", "schema.ts"],
+    });
+  });
+});
 
 describe("generate", () => {
   it.effect("writes both files when they are missing", () => {

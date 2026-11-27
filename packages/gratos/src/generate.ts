@@ -209,9 +209,29 @@ const pathKey = (physical: string): string => `path:${physical.normalize("NFC").
 /** The symlink hops one walk may take, as Linux bounds the links of one path lookup. */
 const maxHops = 40;
 
-/** A path's segments, in order. Only Windows also separates them with a backslash. */
-const segmentsOf = (path: string): Array<string> =>
-  path.split(sep === "/" ? "/" : /[\\/]/).filter((segment) => segment !== "" && segment !== ".");
+/**
+ * A path's root (empty for a relative path) and its segments after the root, in order. The root
+ * is parsed first, so a Windows drive (`C:\`) or UNC share (`\\server\share\`) is never read
+ * as segments. Only Windows also separates segments with a backslash. Exported for its test,
+ * which runs it with `path.win32` too.
+ */
+export const splitPath = (
+  path: string,
+  platform: {
+    readonly parse: (path: string) => { readonly root: string };
+    readonly sep: string;
+  } = {
+    parse,
+    sep,
+  },
+) => {
+  const { root } = platform.parse(path);
+  const segments = path
+    .slice(root.length)
+    .split(platform.sep === "/" ? "/" : /[\\/]/)
+    .filter((segment) => segment !== "" && segment !== ".");
+  return { root, segments };
+};
 
 /**
  * Where `path` really is: the path applied one segment at a time to a physical path, starting at
@@ -228,9 +248,10 @@ const segmentsOf = (path: string): Array<string> =>
  * check and the write is not covered.
  */
 const physicalPathOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, path: string) {
-  let current = parse(path).root;
+  const start = splitPath(path);
+  let current = start.root;
   // The segments still to apply, last first.
-  const pending = segmentsOf(path).reverse();
+  const pending = start.segments.reverse();
   let hops = 0;
   let exists = true;
   for (let segment = pending.pop(); segment !== undefined; segment = pending.pop()) {
@@ -246,10 +267,11 @@ const physicalPathOf = Effect.fnUntraced(function* (fs: FileSystem.FileSystem, p
         hops += 1;
         const target = yield* Effect.option(fs.readLink(next));
         if (Option.isSome(target)) {
+          const targetPath = splitPath(target.value);
           if (isAbsolute(target.value)) {
-            current = parse(target.value).root;
+            current = targetPath.root;
           }
-          pending.push(...segmentsOf(target.value).reverse());
+          pending.push(...targetPath.segments.reverse());
           continue;
         }
       }
