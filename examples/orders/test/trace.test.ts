@@ -198,6 +198,12 @@ describe("the orders app's trace, over HTTP", () => {
       expect(span.endTime ?? 0n, span.name).toBeLessThanOrEqual(operation?.endTime ?? -1n);
     }
     expect(new Set([operation, ...below].map((span) => span?.traceId)).size).toBe(1);
+    // The mutation that fed it is a request of its own, with a trace of its own.
+    const mutation = tracer.spans.filter(
+      (span) => span.name.startsWith("graphql ") && span !== operation,
+    );
+    expect(mutation).toHaveLength(1);
+    expect(mutation[0]?.traceId).not.toBe(operation?.traceId);
   });
 
   it("leaves no span open once the server has closed, an open subscription included", async () => {
