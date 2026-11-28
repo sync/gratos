@@ -5,15 +5,16 @@
 //                           early when it publishes nothing;
 //   scripts/install-test.ts reads the plan `changeset pack --out-dir <dir>` writes beside the
 //                           tarballs, and tests the tarballs it names;
-//   scripts/verify-pack.ts  checks that same pack output in the release workflow's publish job,
-//                           just before `changeset publish --from-pack-dir <dir>` publishes it.
+//   scripts/verify-pack.ts  checks that same pack output in the release workflow's test and
+//                           publish jobs, before the install test tests it, and before
+//                           `changeset publish --from-pack-dir <dir>` publishes it.
 //
 // A plan is `{ version: 1, plan: [[release, …], …] }`. Changesets publishes every release whose
 // kind is not "tag-only", so a kind this file does not know is an error here, never a release
 // to skip.
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { isAbsolute, join, posix } from "node:path";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, join, posix, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 
 export const COMPILER = "@dblechoc/gratos";
@@ -210,16 +211,19 @@ export interface PackedRelease {
 
 /**
  * The releases of the pack output in `dir` (its publish-plan.json and the tarballs below it), or
- * undefined when `dir` holds no plan. Throws unless every planned tarball is in `dir`, has the
- * plan's integrity, and holds the package and version of its own plan entry, and unless `dir`
- * holds no other tarball: then the tarballs read are exactly the ones `changeset publish
- * --from-pack-dir <dir>` publishes.
+ * undefined when `dir` holds no plan. Throws unless every planned tarball is a `.tgz` that is a
+ * regular file inside `dir` (never a symlink, nor below one: its real path is inside `dir`'s),
+ * has the plan's integrity, and holds the package and version of its own plan entry, and unless
+ * `dir` holds nothing else: no other file of any name (an unplanned .tgz, .tar.gz or .tar is an
+ * archive Changesets could be pointed at), and no symlink. Then the tarballs read are exactly the
+ * ones `changeset publish --from-pack-dir <dir>` publishes.
  */
 export const readPackDir = (dir: string): ReadonlyArray<PackedRelease> | undefined => {
   const file = join(dir, PUBLISH_PLAN);
   if (!existsSync(file)) {
     return undefined;
   }
+  const realDir = realpathSync(dir);
   const packed = readPlan(file, { packed: true }).map((release): PackedRelease => {
     const { name, version } = release;
     const path = release.tarball?.path ?? "";
@@ -227,7 +231,21 @@ export const readPackDir = (dir: string): ReadonlyArray<PackedRelease> | undefin
     if (isAbsolute(path) || normalized.startsWith("../") || normalized !== path) {
       throw new Error(`${file} names ${path} for ${name}, which is not a path below ${dir}`);
     }
+    if (!path.endsWith(".tgz")) {
+      throw new Error(`${file} names ${path} for ${name}, which is not a .tgz`);
+    }
     const tarball = join(dir, path);
+    const stat = lstatSync(tarball, { throwIfNoEntry: false });
+    if (stat === undefined || !stat.isFile()) {
+      throw new Error(
+        `${path}, the tarball ${file} names for ${name}, is ${stat === undefined ? "missing" : stat.isSymbolicLink() ? "a symlink" : "not a regular file"}`,
+      );
+    }
+    if (!realpathSync(tarball).startsWith(`${realDir}${sep}`)) {
+      throw new Error(
+        `${path}, the tarball ${file} names for ${name}, is ${realpathSync(tarball)}, outside ${realDir}`,
+      );
+    }
     const actual = integrityOf(tarball);
     if (actual !== release.tarball?.integrity) {
       throw new Error(
@@ -245,17 +263,23 @@ export const readPackDir = (dir: string): ReadonlyArray<PackedRelease> | undefin
     }
     return { name, version, path, file: tarball, manifest, files };
   });
-  const tarballs = (subdir: string): ReadonlyArray<string> =>
+  // Every entry below `dir` but its directories (a symlink to one is not one: readdir reports the
+  // link itself), the plan and the planned tarballs.
+  const others = (subdir: string): ReadonlyArray<string> =>
     readdirSync(join(dir, subdir), { withFileTypes: true }).flatMap((entry) => {
       const path = subdir === "" ? entry.name : `${subdir}/${entry.name}`;
       if (entry.isDirectory()) {
-        return tarballs(path);
+        return others(path);
       }
-      return path.endsWith(".tgz") ? [path] : [];
+      return path === PUBLISH_PLAN || packed.some((release) => release.path === path)
+        ? []
+        : [entry.isSymbolicLink() ? `${path} (a symlink)` : path];
     });
-  const stray = tarballs("").filter((path) => !packed.some((release) => release.path === path));
+  const stray = others("");
   if (stray.length > 0) {
-    throw new Error(`${dir} holds tarballs its plan does not publish: ${stray.join(", ")}`);
+    throw new Error(
+      `${dir} holds what its plan does not publish (a pack output holds its plan and the planned tarballs only): ${stray.join(", ")}`,
+    );
   }
   return packed;
 };
