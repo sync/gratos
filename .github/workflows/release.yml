@@ -205,13 +205,39 @@ jobs:
         env:
           PLAN_SHA256: ${{ needs.release.outputs.plan-sha256 }}
       - name: Publish the tested tarballs
+        id: publish
         uses: changesets/action/publish@v2
         with:
           # `changeset publish --from-pack-dir .pack`: it publishes the tarballs the plan names,
           # and writes the CHANGESETS_OUTPUT file from which the action pushes the tags (on this
           # commit, the one the tarballs were packed from) and creates the GitHub releases.
           script: pnpm run release:publish
+          # The releases are created below, by a step that first checks each tag. The action
+          # would create a release even after a failed tag push, without a target commit, and
+          # GitHub would then tag whatever main is by then.
+          create-github-releases: false
+          push-git-tags: true
         env:
           # pnpm 12 reads its settings from PNPM_CONFIG_*, and ignores NPM_CONFIG_PROVENANCE, so
           # provenance is asked for under pnpm's own name.
           PNPM_CONFIG_PROVENANCE: "true"
+      - name: Create the GitHub releases, from tags on this commit only
+        if: steps.publish.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISHED: ${{ steps.publish.outputs.published-packages }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node -e 'for (const { name, version } of JSON.parse(process.env.PUBLISHED)) console.log(`${name} ${version}`)' |
+            while read -r name version; do
+              tag="$name@$version"
+              # The commit the remote tag names (a lightweight tag, or an annotated one peeled).
+              remote=$(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}" | awk '{ print $1 }' | tail -n 1)
+              if [ "$remote" != "$SHA" ]; then
+                echo "::error::$tag is at '${remote:-missing}', not $SHA: no release is created for it"
+                exit 1
+              fi
+              notes=$(awk -v v="$version" '/^## /{ if (found) exit; found = ($2 == v); next } found' "packages/${name#@dblechoc/}/CHANGELOG.md")
+              gh release create "$tag" --verify-tag --title "$tag" --notes "$notes"
+            done

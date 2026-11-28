@@ -13,7 +13,7 @@
 // kind is not "tag-only", so a kind this file does not know is an error here, never a release
 // to skip.
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, posix, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 
@@ -220,8 +220,14 @@ export interface PackedRelease {
  */
 export const readPackDir = (dir: string): ReadonlyArray<PackedRelease> | undefined => {
   const file = join(dir, PUBLISH_PLAN);
-  if (!existsSync(file)) {
+  const planStat = lstatSync(file, { throwIfNoEntry: false });
+  if (planStat === undefined) {
     return undefined;
+  }
+  // The plan itself is a regular file too: a symlink to a file with the recorded hash elsewhere
+  // would otherwise pass the hash check.
+  if (!planStat.isFile()) {
+    throw new Error(`${file} is not a regular file (a symlink, or a directory)`);
   }
   const realDir = realpathSync(dir);
   const packed = readPlan(file, { packed: true }).map((release): PackedRelease => {
