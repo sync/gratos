@@ -12,9 +12,9 @@
     "fmt:check": "oxfmt --check .",
     "typecheck:root": "tsc -p tsconfig.json",
     "changeset": "changeset",
-    "release": "pnpm run release:gate && pnpm run release:pack && pnpm run release:test && changeset publish --from-pack-dir .pack",
+    "release": "node scripts/release.ts",
     "release:gate": "pnpm check && pnpm --filter @dblechoc/gratos vendor:verify",
-    "release:pack": "node -e \"fs.rmSync('.pack', { recursive: true, force: true })\" && changeset pack --out-dir .pack",
+    "release:publish": "changeset publish --from-pack-dir .pack",
     "release:test": "node scripts/install-test.ts .pack --peers min && node scripts/install-test.ts .pack --peers newest && node scripts/install-test.ts .pack --peers core"
   },
   "devDependencies": {
