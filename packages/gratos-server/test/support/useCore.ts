@@ -13,8 +13,8 @@ import {
   readOnly,
   reportErrors,
   serverTiming,
-} from "@dblechoc/gratos-server";
-import { jit } from "@dblechoc/gratos-server/jit";
+} from "gratos-server";
+import { jit } from "gratos-server/jit";
 
 const schema = buildSchema("type Query { count: Int }");
 const server = createServer({

@@ -1,4 +1,4 @@
-import type { GqlScalar } from "@dblechoc/gratos";
+import type { GqlScalar } from "gratos";
 import type { DateTime as DateTimeInternal } from "./models/DateTime.ts";
 import { GraphQLSchema, GraphQLObjectType, GraphQLList, GraphQLNonNull, GraphQLID, GraphQLScalarType, GraphQLString, GraphQLInt } from "graphql";
 import { orders as queryOrdersResolver } from "./models/Order.ts";

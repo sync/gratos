@@ -1,5 +1,5 @@
 // Temporary projects for tests, written under test/.scratch/ (gitignored) so that their imports
-// of `effect`, `graphql` and `@dblechoc/gratos` resolve through this package's node_modules.
+// of `effect`, `graphql` and `gratos` resolve through this package's node_modules.
 import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 

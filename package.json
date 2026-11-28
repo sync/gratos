@@ -1,5 +1,5 @@
 {
-  "name": "gratos",
+  "name": "gratos-workspace",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,7 @@
     "changeset": "changeset",
     "release": "node scripts/release.ts",
     "release:pack": "node scripts/release.ts --pack-only",
-    "release:gate": "pnpm check && pnpm --filter @dblechoc/gratos vendor:verify",
+    "release:gate": "pnpm check && pnpm --filter gratos vendor:verify",
     "release:publish": "changeset publish --from-pack-dir .pack",
     "release:test": "node scripts/install-test.ts .pack --peers min && node scripts/install-test.ts .pack --peers newest && node scripts/install-test.ts .pack --peers core"
   },

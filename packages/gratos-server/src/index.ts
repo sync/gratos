@@ -1,6 +1,6 @@
-// @dblechoc/gratos-server: the GraphQL server core and its plugins (docs/plan.html M4a, M4b). The core
-// never imports `effect`; the Effect layer is the separate `@dblechoc/gratos-server/effect` entry
-// (M5, src/effect/index.ts). The jit() plugin is the `@dblechoc/gratos-server/jit` entry (src/jit.ts),
+// gratos-server: the GraphQL server core and its plugins (docs/plan.html M4a, M4b). The core
+// never imports `effect`; the Effect layer is the separate `gratos-server/effect` entry
+// (M5, src/effect/index.ts). The jit() plugin is the `gratos-server/jit` entry (src/jit.ts),
 // so this entry never loads graphql-jit, an optional peer.
 export { CLIENT_CLOSED_REQUEST, createServer } from "./core/server.ts";
 export { mutationOf, signalOf, startOf } from "./core/requestState.ts";

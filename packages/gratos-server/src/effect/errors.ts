@@ -89,7 +89,7 @@ const defaultDefect = (defect: ResolverDefect): void => {
  * ended with the work still running. Internal: not exported from the package's entries.
  */
 export class RequestEnded extends Context.Service<RequestEnded, true>()(
-  "@dblechoc/gratos-server/effect/RequestEnded",
+  "gratos-server/effect/RequestEnded",
 ) {
   static readonly annotation: Context.Context<never> = this.context(true).pipe(
     Context.add(Cause.StackTrace, {

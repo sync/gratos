@@ -4,7 +4,7 @@
 // `fs.readFile` callback serves virtual tsconfigs and implements fast loading (spec §5): code
 // files whose realpath is under `node_modules` are served as `export {};`, except TypeScript's
 // own bundled lib files and this package's own public declarations (an installed
-// @dblechoc/gratos sits under `node_modules`, and its models import `ID`, `Int`, `Float` and
+// gratos sits under `node_modules`, and its models import `ID`, `Int`, `Float` and
 // `GqlInfo` from them). `package.json` and other non-code files are always read in full, and so
 // are workspace packages, whose realpath is outside `node_modules`.
 import type { ChildProcess } from "node:child_process";
@@ -36,7 +36,7 @@ export const bundledLibDirectory: string = (() => {
 })();
 
 /**
- * The public declaration files of an installed @dblechoc/gratos, which fast loading serves in
+ * The public declaration files of an installed gratos, which fast loading serves in
  * full: the `.` and `./dev` entries' types, and the Types module that `.` re-exports. The release
  * build (tsconfig.build-dts.json) emits exactly these, beside the JavaScript, so they are found
  * from where this module really is: `dist/ts/session.js` in the package, `src/ts/session.ts` in

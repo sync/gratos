@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 const exportsOf = async (load: () => Promise<object>): Promise<Array<string>> =>
   Object.keys(await load()).toSorted();
 
-describe("@dblechoc/gratos-server's public entries", () => {
+describe("gratos-server's public entries", () => {
   it("export only the listed values from the core entry, no abort reason", async () => {
     expect(await exportsOf(() => import("../src/index.ts"))).toEqual([
       "APPLICATION_JSON",

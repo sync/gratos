@@ -19,7 +19,7 @@ import { GuardTimeout } from "./errors.ts";
  * resolver's own operation. Default "query" for an Effect run outside the wrapper (unit tests).
  */
 export const OperationType = Context.Reference<"query" | "mutation" | "subscription">(
-  "@dblechoc/gratos-server/effect/OperationType",
+  "gratos-server/effect/OperationType",
   { defaultValue: () => "query" },
 );
 

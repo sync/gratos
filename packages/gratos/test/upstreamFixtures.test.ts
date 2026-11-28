@@ -62,7 +62,7 @@ const FIXTURE_COMPILER_OPTIONS = {
   strict: true,
 };
 
-/** Upstream's snapshots name the library `grats`; Gratos defaults `libraryImport` to `@dblechoc/gratos`. */
+/** Upstream's snapshots name the library `grats`; Gratos defaults `libraryImport` to `gratos`. */
 const UPSTREAM_LIBRARY_IMPORT = "grats";
 
 const ok = (value: Markdown): TransformerResult => ({ kind: "OK", value });
