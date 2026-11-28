@@ -10,9 +10,17 @@
     "lint": "oxlint .",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
-    "typecheck:root": "tsc -p tsconfig.json"
+    "typecheck:root": "tsc -p tsconfig.json",
+    "changeset": "changeset",
+    "release": "node scripts/release.ts",
+    "release:pack": "node scripts/release.ts --pack-only",
+    "release:gate": "pnpm check && pnpm --filter @dblechoc/gratos vendor:verify",
+    "release:publish": "changeset publish --from-pack-dir .pack",
+    "release:test": "node scripts/install-test.ts .pack --peers min && node scripts/install-test.ts .pack --peers newest && node scripts/install-test.ts .pack --peers core"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "catalog:",
+    "@changesets/cli": "catalog:",
     "@cloudflare/oxlint-config": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",

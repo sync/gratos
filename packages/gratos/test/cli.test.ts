@@ -30,6 +30,14 @@ const recordModules = join(import.meta.dirname, "support", "recordModules.ts");
 const decodeUrls = Schema.decodeUnknownSync(Schema.Array(Schema.String));
 const PackageBin = Schema.Struct({ bin: Schema.Record(Schema.String, Schema.String) });
 
+/**
+ * The package's own version, which the CLI prints. Read, not written out: Changesets bumps it in
+ * the Version Packages PR, and that PR's `ci` and the release gate run these tests.
+ */
+const { version: packageVersion } = Schema.decodeUnknownSync(
+  Schema.Struct({ version: Schema.String }),
+)(JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")));
+
 const differences = readFileSync(join(packageDir, "llm-docs", "gratos", "differences.md"), "utf8");
 
 /** Grats' flags and commands Gratos removed, with the argv that tries each. */
@@ -255,7 +263,7 @@ describe("gratos CLI", () => {
     expect(readFileSync(cli, "utf8").startsWith("#!/usr/bin/env node\n")).toBe(true);
     expect(() => accessSync(cli, constants.X_OK)).not.toThrow();
     const version = execFileSync(cli, ["--version"], { encoding: "utf8" });
-    expect(version).toBe("gratos v0.0.0\n");
+    expect(version).toBe(`gratos v${packageVersion}\n`);
   });
 
   // Upstream Grats documents `-V, --version`; effect/cli's built-in alias is `-v`.
@@ -263,7 +271,7 @@ describe("gratos CLI", () => {
     const run = gratos([flag]);
     expect({ status: run.status, stdout: run.stdout, stderr: run.stderr }).toEqual({
       status: 0,
-      stdout: "gratos v0.0.0\n",
+      stdout: `gratos v${packageVersion}\n`,
       stderr: "",
     });
   });
