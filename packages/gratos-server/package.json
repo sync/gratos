@@ -1,6 +1,6 @@
 {
   "name": "gratos-server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A small, plugin-based GraphQL-over-HTTP server core for Web Request and Response, with an Effect layer.",
   "license": "MIT",
   "repository": {
