@@ -9,5 +9,5 @@ Vendored from tag v0.0.36, commit 5ab66166446b4f80263cda1a13de7d3a69a1c2f8:
   upstream llm-docs/                      -> llm-docs/
   upstream LICENSE                        -> LICENSE
 
-`pnpm --filter @dblechoc/gratos vendor:verify` proves these files are byte-identical
+`pnpm --filter gratos vendor:verify` proves these files are byte-identical
 to upstream. Later milestones change them only in separate, listed commits.

@@ -1,15 +1,15 @@
-# @dblechoc/gratos-server
+# gratos-server
 
 A small GraphQL-over-HTTP server core: `createServer(options).handle(request)` takes a Web
 `Request` and returns a `Promise<Response>`, so it runs behind any fetch-style adapter. It has a plugin
 system and ships the plugins the example uses (`apq()`, `incremental()`, `jit()`,
 `reportErrors()`, `maskErrors()`, `serverTiming()`, `maxDepth()`, `readOnly()`). The core never
-imports `effect`; the Effect layer is the `@dblechoc/gratos-server/effect` entry. `jit()` is the
-`@dblechoc/gratos-server/jit` entry, so the core never loads `graphql-jit` unless the app imports
+imports `effect`; the Effect layer is the `gratos-server/effect` entry. `jit()` is the
+`gratos-server/jit` entry, so the core never loads `graphql-jit` unless the app imports
 it.
 
 ```sh
-npm install @dblechoc/gratos-server graphql
+npm install gratos-server graphql
 npm install effect        # for the Effect layer (/effect)
 npm install graphql-jit   # for jit() (/jit)
 ```
@@ -37,15 +37,10 @@ import {
   maskErrors,
   reportErrors,
   serverTiming,
-} from "@dblechoc/gratos-server";
-import type { Server } from "@dblechoc/gratos-server";
-import {
-  effect,
-  effectRouteLayer,
-  effectSchema,
-  runInRequest,
-} from "@dblechoc/gratos-server/effect";
-import { jit } from "@dblechoc/gratos-server/jit";
+} from "gratos-server";
+import type { Server } from "gratos-server";
+import { effect, effectRouteLayer, effectSchema, runInRequest } from "gratos-server/effect";
+import { jit } from "gratos-server/jit";
 ```
 
 The contract itself is [`src/core/types.ts`](https://github.com/sync/gratos/blob/main/packages/gratos-server/src/core/types.ts):

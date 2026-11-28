@@ -7,11 +7,11 @@ source of truth for scope, milestones and acceptance criteria.
 
 ## Packages
 
-- `@dblechoc/gratos` (`packages/gratos`): the Effect-aware compiler, vendored from Grats. Its CLI binary is `gratos` (never `grats`). The dev boot step is the lazy `@dblechoc/gratos/dev` entry (types from `src/devApi.ts`, so consumers never typecheck the engine).
-- `@dblechoc/gratos-server` (`packages/gratos-server`): the GraphQL server core and plugins, with the Effect layer at `@dblechoc/gratos-server/effect`.
+- `gratos` (`packages/gratos`): the Effect-aware compiler, vendored from Grats. Its CLI binary is `gratos` (never `grats`). The dev boot step is the lazy `gratos/dev` entry (types from `src/devApi.ts`, so consumers never typecheck the engine).
+- `gratos-server` (`packages/gratos-server`): the GraphQL server core and plugins, with the Effect layer at `gratos-server/effect`.
 - `examples/orders`: the example app. `pnpm dev` there is the live-rebuild loop (`node --watch-path`); its Grats config is `src/tsconfig.json`.
 
-`@dblechoc/gratos` and `@dblechoc/gratos-server` are publishable (public npm, docs/plan.html F7);
+`gratos` and `gratos-server` are publishable (public npm, docs/plan.html F7);
 `examples/orders` and the root stay `private: true`. The two packages' peers are literal caret ranges, never
 `catalog:` (pnpm would pack the catalog's exact version), with the same packages as `catalog:`
 devDependencies.
@@ -40,19 +40,19 @@ devDependencies.
   through `vitest.parity.config.ts` (parity bar (b)). Both must stay green with the same snapshots.
 - Never use `--preserve-symlinks`, injected dependencies or `pnpm deploy`: they break type stripping of workspace packages.
 - Only erasable TypeScript syntax (`erasableSyntaxOnly`): no enums, namespaces or parameter properties.
-- The installed grats skill refers to `node_modules/grats/llm-docs/…`. In this repo those docs are vendored at `packages/gratos/llm-docs/`. Gratos' own chapter (Effect resolvers, the server's Effect layer and its contracts) is `packages/gratos/llm-docs/gratos/effect.md`: read it before writing an Effect resolver. Beside it, `differences.md` says what Gratos removed or renamed from Grats (the `gratos` binary, the `@dblechoc/gratos` import, no `--watch`, `--fix` or `locate`): read it before following a vendored page. `server.md` documents the server core (`createServer` and its options, the hooks in call order, the HTTP matrix, the plugins and their order). `llm-docs/gratos/` is not vendored, and `vendor:verify` skips it (and fails if upstream ever has files there).
+- The installed grats skill refers to `node_modules/grats/llm-docs/…`. In this repo those docs are vendored at `packages/gratos/llm-docs/`. Gratos' own chapter (Effect resolvers, the server's Effect layer and its contracts) is `packages/gratos/llm-docs/gratos/effect.md`: read it before writing an Effect resolver. Beside it, `differences.md` says what Gratos removed or renamed from Grats (the `gratos` binary, the `gratos` import, no `--watch`, `--fix` or `locate`): read it before following a vendored page. `server.md` documents the server core (`createServer` and its options, the hooks in call order, the HTTP matrix, the plugins and their order). `llm-docs/gratos/` is not vendored, and `vendor:verify` skips it (and fails if upstream ever has files there).
 - Code blocks in the docs tagged `file=<path>` must match that file (`examples/orders/test/docs.test.ts`): change both together.
-- Vendored upstream files (`packages/gratos/src/upstream/`, `llm-docs/` except `llm-docs/gratos/`, `test/fixtures/`, `test/integrationFixtures/`, `test/configParserFixtures/`, `LICENSE`) change only in separate, listed commits. `pnpm --filter @dblechoc/gratos vendor:verify` reports any difference from upstream v0.0.36.
+- Vendored upstream files (`packages/gratos/src/upstream/`, `llm-docs/` except `llm-docs/gratos/`, `test/fixtures/`, `test/integrationFixtures/`, `test/configParserFixtures/`, `LICENSE`) change only in separate, listed commits. `pnpm --filter gratos vendor:verify` reports any difference from upstream v0.0.36.
 
 ## Upgrading a pinned dependency
 
 Every version is pinned exactly in `pnpm-workspace.yaml`'s `catalog:`. The weekly canary (`.github/workflows/canary.yml`) shows which newer release breaks `pnpm check`. An upgrade is its own PR:
 
 1. Bump the `catalog:` entry, with the `@effect/*` packages at the same version as `effect`, then run `pnpm install` (a release younger than `minimumReleaseAge` needs `minimumReleaseAgeExclude` lines).
-2. Run both parity runs with `pnpm --filter @dblechoc/gratos test` (TypeScript 7, then 5.9.2, same snapshots), then `npx turbo run check --force`.
-3. Run `GITHUB_TOKEN=$(gh auth token) pnpm --filter @dblechoc/gratos vendor:verify`.
-4. Run the bench: `pnpm --filter @dblechoc/gratos bench` and `pnpm --filter orders-example bench:compiler`. If the file count changes, `test/filesLoaded.test.ts` fails: record it with `bench --record`.
-5. Run the upstream-fact tests: `pnpm --filter @dblechoc/gratos-server exec vitest run test/jit.test.ts -t "the premise|upstream facts"` and the late-source test in `test/subscriptions.test.ts` ("while the source is set up"). A changed fact means a workaround to review: the failure names it.
+2. Run both parity runs with `pnpm --filter gratos test` (TypeScript 7, then 5.9.2, same snapshots), then `npx turbo run check --force`.
+3. Run `GITHUB_TOKEN=$(gh auth token) pnpm --filter gratos vendor:verify`.
+4. Run the bench: `pnpm --filter gratos bench` and `pnpm --filter orders-example bench:compiler`. If the file count changes, `test/filesLoaded.test.ts` fails: record it with `bench --record`.
+5. Run the upstream-fact tests: `pnpm --filter gratos-server exec vitest run test/jit.test.ts -t "the premise|upstream facts"` and the late-source test in `test/subscriptions.test.ts` ("while the source is set up"). A changed fact means a workaround to review: the failure names it.
 
 ## Releasing
 
@@ -67,7 +67,7 @@ Changesets versions and publishes the two packages (`.changeset/config.json`). T
   ```sh
   version=0.2.0
   for package in gratos gratos-server; do
-    tag="@dblechoc/$package@$version"
+    tag="$package@$version"
     # The section under "## $version", up to the next version's heading.
     notes=$(awk -v v="$version" '/^## /{ if (found) exit; found = ($2 == v); next } found' "packages/$package/CHANGELOG.md")
     gh release create "$tag" --verify-tag --title "$tag" --notes "$notes"
@@ -84,8 +84,8 @@ Changesets versions and publishes the two packages (`.changeset/config.json`). T
 
 1. Merge F7b. The workflow opens the 0.1.0 Version Packages PR. Approve its workflow runs, and wait for `ci` to pass.
 2. Merge the Version Packages PR, with `GRATOS_PUBLISH` still unset. The workflow's run on the merge commit stops at "Check that publishing is on", and publishes nothing.
-3. On that merge commit (the `chore(release): version packages` commit on `main`), with a clean tree and logged in to npm: `git fetch origin && git checkout --detach <merge-sha>`, `pnpm install --frozen-lockfile`, then `GITHUB_TOKEN=$(gh auth token) pnpm run release` (the plan, the gate, the pack and the install test). Then publish the tested tarballs, with npm 2FA: `pnpm run release:publish` (pnpm asks for the one-time password, or pass it: `pnpm run release:publish --otp <code>`). It publishes `.pack`'s two tarballs, and tags the checked-out commit `@dblechoc/gratos@0.1.0` and `@dblechoc/gratos-server@0.1.0` (`git tag --points-at HEAD` lists both). If only one package was published, run both commands again: the new plan holds only the other one.
-4. Push the tags: `git push origin "@dblechoc/gratos@0.1.0" "@dblechoc/gratos-server@0.1.0"`. Then create their GitHub releases, which nothing else creates (the workflow makes releases only for what it publishes): the loop in "A missing GitHub release" above, with `version=0.1.0`.
+3. On that merge commit (the `chore(release): version packages` commit on `main`), with a clean tree and logged in to npm: `git fetch origin && git checkout --detach <merge-sha>`, `pnpm install --frozen-lockfile`, then `GITHUB_TOKEN=$(gh auth token) pnpm run release` (the plan, the gate, the pack and the install test). Then publish the tested tarballs, with npm 2FA: `pnpm run release:publish` (pnpm asks for the one-time password, or pass it: `pnpm run release:publish --otp <code>`). It publishes `.pack`'s two tarballs, and tags the checked-out commit `gratos@0.1.0` and `gratos-server@0.1.0` (`git tag --points-at HEAD` lists both). If only one package was published, run both commands again: the new plan holds only the other one.
+4. Push the tags: `git push origin "gratos@0.1.0" "gratos-server@0.1.0"`. Then create their GitHub releases, which nothing else creates (the workflow makes releases only for what it publishes): the loop in "A missing GitHub release" above, with `version=0.1.0`.
 5. Then, right before the next release (its Version Packages PR is ready to merge), set up publishing from the workflow. On npmjs.com, add a trusted publisher to both packages (Settings → Trusted publishing): GitHub Actions, organization or user `sync`, repository `gratos`, workflow `release.yml`, no environment. Under **Allowed actions**, also allow direct publishing with `npm publish`: a configuration created now allows only staged publishing (`npm stage publish`) by default, and this workflow publishes directly. A new configuration expires if no publish uses it within 2 days, so add it right before that release, not long before. Then set the repo variable, exactly `true`: `gh variable set GRATOS_PUBLISH --body true`. Later releases publish from the workflow, over OIDC, with provenance.
 
 ## Delivery

@@ -1,4 +1,4 @@
-# @dblechoc/gratos
+# gratos
 
 The compiler: [Grats](https://github.com/captbaritone/grats) (vendored from v0.0.36), taught to
 read `Effect.Effect` and `Stream.Stream` return types, on the TypeScript 7 API. Its CLI is
@@ -6,7 +6,7 @@ read `Effect.Effect` and `Stream.Stream` return types, on the TypeScript 7 API. 
 ships the JavaScript and declarations its release build emits (`prepack`).
 
 ```sh
-npm install @dblechoc/gratos effect @effect/platform-node graphql
+npm install gratos effect @effect/platform-node graphql
 ```
 
 `effect`, `@effect/platform-node` and `graphql` are peers, so the app's own copies are the ones
@@ -21,13 +21,13 @@ purpose. The package is ESM only and needs Node 26.13 or later.
 - [Effect resolvers](https://github.com/sync/gratos/blob/main/packages/gratos/llm-docs/gratos/effect.md): the return types the compiler accepts, and the
   server's Effect layer.
 - [The server core](https://github.com/sync/gratos/blob/main/packages/gratos/llm-docs/gratos/server.md): `createServer`, its hooks, the HTTP matrix and
-  the plugins (`@dblechoc/gratos-server`).
+  the plugins (`gratos-server`).
 - The rest of [`llm-docs/`](https://github.com/sync/gratos/tree/main/packages/gratos/llm-docs) is upstream Grats' documentation, unchanged.
 
 Models import Grats' types from this package:
 
 ```ts file=examples/orders/src/models/Order.ts
-import type { Float, ID, Int } from "@dblechoc/gratos";
+import type { Float, ID, Int } from "gratos";
 ```
 
 A package regenerates its schema with `gratos`, and CI checks it is up to date with
@@ -38,9 +38,9 @@ A package regenerates its schema with `gratos`, and CI checks it is up to date w
     "codegen:check": "gratos --check --tsconfig src/tsconfig.json",
 ```
 
-The dev loop's boot step is the lazy `@dblechoc/gratos/dev` entry: it regenerates the schema and
+The dev loop's boot step is the lazy `gratos/dev` entry: it regenerates the schema and
 loads the app, and a production start never loads the compiler ("The dev loop" in
 [effect.md](https://github.com/sync/gratos/blob/main/packages/gratos/llm-docs/gratos/effect.md)).
 
 The vendored files and how they differ from upstream are listed in `vendor-changes.json`;
-`pnpm --filter @dblechoc/gratos vendor:verify` compares them with upstream v0.0.36.
+`pnpm --filter gratos vendor:verify` compares them with upstream v0.0.36.

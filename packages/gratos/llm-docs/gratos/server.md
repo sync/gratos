@@ -1,10 +1,10 @@
 # The Gratos server core
 
-`@dblechoc/gratos-server` is a small GraphQL-over-HTTP server. `createServer(options)` returns a
+`gratos-server` is a small GraphQL-over-HTTP server. `createServer(options)` returns a
 server object, and `createServer(options).handle(request)` is the request entry point: it takes a
 `Request` and returns a `Promise<Response>`, so the server runs behind any fetch-style adapter.
 The core never imports `effect`. The Effect layer is the separate
-`@dblechoc/gratos-server/effect` entry, documented in [effect.md](./effect.md); how Gratos differs
+`gratos-server/effect` entry, documented in [effect.md](./effect.md); how Gratos differs
 from Grats is in [differences.md](./differences.md).
 
 The source of truth is `packages/gratos-server/src/core/types.ts`, whose comments spell out each
@@ -183,8 +183,8 @@ client must accept depends on the operation:
 
 ## The shipped plugins, and their order
 
-Every plugin comes from `@dblechoc/gratos-server`, except `jit()`, which is the
-`@dblechoc/gratos-server/jit` entry: the main entry never loads `graphql-jit`, an optional peer
+Every plugin comes from `gratos-server`, except `jit()`, which is the
+`gratos-server/jit` entry: the main entry never loads `graphql-jit`, an optional peer
 that only an app using `jit()` installs.
 
 | Plugin                    | What it does                                                                                                                            |
