@@ -1,7 +1,8 @@
 name: release
 
-# The Changesets flow (docs/plan.html F7, AGENTS.md "Releasing"), in two jobs, so that only the
-# job that publishes can mint an npm token.
+# The Changesets flow (docs/plan.html F7, AGENTS.md "Releasing"), in three jobs, so that only the
+# job that publishes can mint an npm token, and so that it publishes the immutable artifact the
+# tests passed, packed before any test ran.
 #
 #   release  (contents: write, pull-requests: write; no id-token)
 #     changesets/action/select-mode decides what this push to main is for:
@@ -9,19 +10,31 @@ name: release
 #                Packages PR;
 #       publish  no changeset is pending, and the registry lacks a version (select-mode runs
 #                `changeset publish-plan` to find out): only when the repo variable
-#                GRATOS_PUBLISH is exactly "true", `pnpm run release` (scripts/release.ts)
-#                plans again, runs the gate, packs that plan with `changeset pack`, and runs the
-#                install test (min, newest, core) on those tarballs. The tested pack dir is
-#                uploaded as an artifact, and its plan's sha256 is a job output;
+#                GRATOS_PUBLISH is exactly "true", `pnpm run release:pack` (scripts/release.ts
+#                --pack-only) plans again and packs that plan with `changeset pack`. Right
+#                after, the job records the plan's sha256 as a job output, and uploads the pack
+#                dir as an artifact, whose id is a job output too. It runs no gate and no test:
+#                nothing runs between the pack and the upload;
 #       none     nothing to do, and nothing runs: no gate on a push with nothing to publish.
-#   publish  (id-token: write, contents: write; only when release uploaded a pack)
-#     downloads that artifact by its id, checks it against the job output and its own plan
-#     (scripts/verify-pack.ts: the plan's sha256, then every tarball's integrity, package and
-#     version), and publishes exactly those tarballs with `changeset publish --from-pack-dir`,
-#     over npm trusted publishing (OIDC) with provenance, through changesets/action/publish,
-#     which then pushes the tags and creates the GitHub releases through the API. It runs no
-#     gate, no install test, and no dependency's code beyond a frozen install with
-#     --ignore-scripts and the Changesets CLI that publishes. No npm token exists anywhere.
+#   test     (contents: read; only when release uploaded a pack)
+#     runs the gate (`pnpm check` and `vendor:verify`), then downloads the artifact by its id,
+#     checks it against the recorded plan sha256 (scripts/verify-pack.ts), and runs the install
+#     test (min, newest, core) on it. Nothing it runs can change what publish gets: an
+#     upload-artifact v4 artifact is immutable once uploaded ("They cannot be altered by
+#     subsequent jobs unless the Artifacts are deleted and recreated (where they will have a new
+#     ID)", actions/upload-artifact v4 README, "v4 - What's new"), and download-artifact v4, given
+#     `artifact-ids`, downloads that id only, and fails when it no longer exists (its
+#     src/download-artifact.ts: "None of the provided artifact IDs were found"). So a step that
+#     deletes the artifact and uploads another under the same name makes publish fail, not
+#     publish something else.
+#   publish  (id-token: write, contents: write; only when release uploaded a pack and test passed)
+#     downloads the same artifact by its id, checks it again (verify-pack: the plan's sha256 from
+#     the release job, then every tarball's integrity, package and version), and publishes exactly
+#     those tarballs with `changeset publish --from-pack-dir`, over npm trusted publishing (OIDC)
+#     with provenance, through changesets/action/publish, which then pushes the tags and creates
+#     the GitHub releases through the API. It runs no gate, no install test, and no dependency's
+#     code beyond a frozen install with --ignore-scripts and the Changesets CLI that publishes. No
+#     npm token exists anywhere.
 #
 # Repo setup this needs (AGENTS.md "Releasing"): Settings > Actions > General > Workflow
 # permissions > "Allow GitHub Actions to create and approve pull requests", or the version step
@@ -37,8 +50,8 @@ on:
   push:
     branches: [main]
 
-# One release run at a time, never cancelled: a run cancelled between its two jobs would leave
-# a tested pack unpublished, and one cancelled while publishing, a partial release.
+# One release run at a time, never cancelled: a run cancelled between its jobs would leave a pack
+# untested or unpublished, and one cancelled while publishing, a partial release.
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 # Each job states its own.
@@ -58,12 +71,13 @@ jobs:
         with:
           fetch-depth: 0
           # The version sub-action commits and pushes through the GitHub API, so the token is
-          # not left in .git/config for the gate and the install test to read.
+          # not left in .git/config for the pack's prepack scripts to read.
           persist-credentials: false
       - uses: pnpm/action-setup@v4
-      # No `cache: pnpm`, and no turbo cache, in either job, on purpose: the Actions cache is
-      # writable from lower-privileged runs, and these jobs build and publish with provenance.
-      # They install from the registry, checked against the lockfile, and run from scratch.
+      # No `cache: pnpm`, and no turbo cache, in any job, on purpose: the Actions cache is
+      # writable from lower-privileged runs, and these jobs build, test and publish with
+      # provenance. They install from the registry, checked against the lockfile, and run from
+      # scratch.
       #
       # Unlike shadcn-ui/cn's release workflow, there is no npm 11 pin and no `registry-url`:
       # pnpm 12 runs `info`, `pack` and `publish` itself, and does the OIDC token exchange with
@@ -99,21 +113,21 @@ jobs:
             echo "GRATOS_PUBLISH is not \"true\": the registry lacks a version, and nothing is published."
             echo "on=no" >> "$GITHUB_OUTPUT"
           fi
-      - name: Gate, pack and test the release
+      # The plan and the pack only: the gate and the install test run in the test job, on the
+      # artifact this job uploads, never before the upload.
+      - name: Plan and pack the release
         if: steps.publishing.outputs.on == 'yes'
-        run: pnpm run release
-        env:
-          # For `vendor:verify` in the gate; scripts/release.ts hands it to the gate only.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # scripts/release.ts leaves no .pack when the plan, made again, publishes nothing.
-      - name: Record the tested plan
+        run: pnpm run release:pack
+      # scripts/release.ts leaves no .pack when the plan, made again, publishes nothing. The
+      # sha256 is taken right after the pack, before anything else runs.
+      - name: Record the packed plan
         id: packed
         if: steps.publishing.outputs.on == 'yes'
         run: |
           if [ -f .pack/publish-plan.json ]; then
             echo "plan-sha256=$(sha256sum .pack/publish-plan.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           fi
-      - name: Upload the tested pack
+      - name: Upload the pack
         id: upload
         if: steps.packed.outputs.plan-sha256 != ''
         uses: actions/upload-artifact@v4
@@ -125,8 +139,45 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  publish:
+  test:
     needs: release
+    if: needs.release.outputs.pack-artifact-id != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - run: pnpm install --frozen-lockfile
+      # Before the download, so the gate (oxfmt and oxlint on `.`) never reads .pack.
+      - name: Gate
+        run: pnpm run release:gate
+        env:
+          # For `vendor:verify` only; no other step gets it.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Whatever this job does to its own copy, the publish job downloads the artifact again,
+      # by id: an upload-artifact v4 artifact is immutable (see the top of this file).
+      - name: Download the pack
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.release.outputs.pack-artifact-id }}
+          path: .pack
+          # Into .pack itself, not .pack/release-pack/.
+          merge-multiple: true
+      - name: Check the pack against the plan the release job packed
+        run: node scripts/verify-pack.ts .pack --plan-sha256 "$PLAN_SHA256"
+        env:
+          PLAN_SHA256: ${{ needs.release.outputs.plan-sha256 }}
+      - name: Install test (min, newest, core)
+        run: pnpm run release:test
+
+  publish:
+    needs: [release, test]
     if: needs.release.outputs.pack-artifact-id != ''
     runs-on: ubuntu-latest
     permissions:
@@ -149,7 +200,7 @@ jobs:
           path: .pack
           # Into .pack itself, not .pack/release-pack/.
           merge-multiple: true
-      - name: Check the pack against the plan the release job tested
+      - name: Check the pack against the plan the release job packed
         run: node scripts/verify-pack.ts .pack --plan-sha256 "$PLAN_SHA256"
         env:
           PLAN_SHA256: ${{ needs.release.outputs.plan-sha256 }}

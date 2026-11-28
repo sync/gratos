@@ -1,13 +1,15 @@
-// The check the release workflow's publish job runs (AGENTS.md "Releasing"), on the pack output
-// the release job tested and uploaded, right before `changeset publish --from-pack-dir <dir>`:
+// The check the release workflow's `test` and `publish` jobs run (AGENTS.md "Releasing"), each on
+// its own download of the pack output the `release` job uploaded, before the install test and
+// before `changeset publish --from-pack-dir <dir>`:
 //
 //   node scripts/verify-pack.ts <dir> --plan-sha256 <hex>
 //
-// It passes only when <dir>/publish-plan.json has the sha256 the release job recorded as a job
-// output, publishes something, and every tarball it names is below <dir>, has the plan's
-// integrity, and holds the package and version of its own plan entry, with no other tarball in
-// <dir> (scripts/publish-plan.ts). So the publish job publishes the bytes the install test
-// tested, or nothing. It runs no dependency's code: Node's built-ins only.
+// It passes only when <dir>/publish-plan.json has the sha256 the release job recorded right after
+// packing, publishes something, and every tarball it names is a regular .tgz file inside <dir>
+// (no symlink), has the plan's integrity, and holds the package and version of its own plan
+// entry, with nothing else in <dir> (scripts/publish-plan.ts). So the test job tests, and the
+// publish job publishes, the bytes the release job packed, or nothing. It runs no dependency's
+// code: Node's built-ins only.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -40,7 +42,9 @@ const actual = (() => {
   }
 })();
 if (actual !== expected) {
-  fail(`${plan} has sha256 ${actual}, not the ${String(expected)} the release job recorded`);
+  fail(
+    `${plan} has sha256 ${actual}, not the ${String(expected)} the release job recorded when it packed`,
+  );
 }
 
 const releases = (() => {
@@ -58,4 +62,4 @@ for (const release of releases) {
     `verify-pack: ok ${release.path} is ${release.name}@${release.version} (${release.file})\n`,
   );
 }
-process.stdout.write(`verify-pack: ${dir} is the pack output the release job tested\n`);
+process.stdout.write(`verify-pack: ${dir} is the pack output the release job packed\n`);

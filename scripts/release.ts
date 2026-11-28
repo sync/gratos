@@ -1,5 +1,5 @@
-// `pnpm run release` (AGENTS.md "Releasing"): everything before the publish, in one command,
-// for the release workflow's release job and for a release by hand.
+// `pnpm run release` (AGENTS.md "Releasing"): everything before the publish, in one command, for
+// a release by hand (the bootstrap):
 //
 //   1. the publish plan: `changeset publish-plan --output <file>`, which asks the registry which
 //      versions it lacks. When it publishes nothing, the script stops there, before the gate:
@@ -9,12 +9,17 @@
 //      with .pack/publish-plan.json naming each one and its integrity;
 //   4. the install test on .pack, for min, newest and core (`release:test`).
 //
+// `pnpm run release:pack` (`--pack-only`) is steps 1 and 3 only, for the release workflow's
+// `release` job: that job uploads .pack, and records its plan's sha256, before any test runs, and
+// the `test` job then runs the gate and the install test on the uploaded pack.
+//
 // It never publishes: `changeset publish --from-pack-dir .pack` (`release:publish`) does, from
 // the release workflow's publish job or by hand. Node's built-ins only.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 
 import { readPlan } from "./publish-plan.ts";
 
@@ -44,6 +49,9 @@ const pnpm = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv = withoutToken
   return result.status ?? 1;
 };
 
+const { values } = parseArgs({ options: { "pack-only": { type: "boolean", default: false } } });
+const packOnly = values["pack-only"];
+
 /** The release up to the publish; returns the exit status. */
 const release = (planFile: string): number => {
   const planned = pnpm(["exec", "changeset", "publish-plan", "--output", planFile]);
@@ -66,17 +74,21 @@ const release = (planFile: string): number => {
   log(
     `the publish plan publishes ${releases.map((entry) => `${entry.name}@${entry.version}`).join(", ")}`,
   );
-  for (const [args, env] of [
-    [["run", "release:gate"], process.env],
-    [["exec", "changeset", "pack", "--from-publish-plan", planFile, "--out-dir", packDir]],
-    [["run", "release:test"]],
-  ] as const) {
+  const pack = ["exec", "changeset", "pack", "--from-publish-plan", planFile, "--out-dir", packDir];
+  const steps: ReadonlyArray<readonly [ReadonlyArray<string>, NodeJS.ProcessEnv?]> = packOnly
+    ? [[pack]]
+    : [[["run", "release:gate"], process.env], [pack], [["run", "release:test"]]];
+  for (const [args, env] of steps) {
     const status = pnpm(args, env);
     if (status !== 0) {
       return status;
     }
   }
-  log(`${packDir} is packed and tested; \`pnpm run release:publish\` publishes it`);
+  log(
+    packOnly
+      ? `${packDir} is packed, untested: the release workflow's \`test\` job gates and tests it`
+      : `${packDir} is packed and tested; \`pnpm run release:publish\` publishes it`,
+  );
   return 0;
 };
 
