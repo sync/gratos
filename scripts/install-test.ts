@@ -24,7 +24,7 @@
 // --peers picks what the project installs beside the packages:
 //   min     both packages, and each peer at the catalog's pin, the minimum its range allows
 //   newest  both packages, and each peer at the newest version its range allows
-//   core    @dblechoc/gratos-server and graphql only: no effect, no graphql-jit, no typescript
+//   core    gratos-server and graphql only: no effect, no graphql-jit, no typescript
 //
 // It first inspects the tarballs (their manifests, their contents, the vendored llm-docs), then
 // runs the CLI, tsc, the server and its entries, and the dev boot step in the project, recording
@@ -137,8 +137,8 @@ const CARET_RANGE = /^\^(\d+\.\d+\.\d+)$/;
 
 /** Each package's peers, and whether each one is optional. */
 const EXPECTED_PEERS = new Map([
-  ["@dblechoc/gratos", { effect: false, "@effect/platform-node": false, graphql: false }],
-  ["@dblechoc/gratos-server", { graphql: false, effect: true, "graphql-jit": true }],
+  ["gratos", { effect: false, "@effect/platform-node": false, graphql: false }],
+  ["gratos-server", { graphql: false, effect: true, "graphql-jit": true }],
 ]);
 
 /** The catalog's exact pin of `name`, from pnpm-workspace.yaml. */
@@ -347,7 +347,7 @@ const TSCONFIG = {
   },
 };
 
-const MODELS = `import type { Float, GqlInfo, ID, Int } from "@dblechoc/gratos";
+const MODELS = `import type { Float, GqlInfo, ID, Int } from "gratos";
 import { Effect } from "effect";
 
 /** @gqlType */
@@ -385,9 +385,9 @@ export function greeting(): Effect.Effect<string> {
 /** The app's server: the generated schema, wrapped for its Effect resolver. */
 const APP = `import { GraphQLError } from "graphql";
 import type { GraphQLSchema } from "graphql";
-import { createServer } from "@dblechoc/gratos-server";
-import type { Server } from "@dblechoc/gratos-server";
-import { effect, effectSchema } from "@dblechoc/gratos-server/effect";
+import { createServer } from "gratos-server";
+import type { Server } from "gratos-server";
+import { effect, effectSchema } from "gratos-server/effect";
 
 export const QUERY = "{ item { id count price } operation greeting }";
 
@@ -414,7 +414,7 @@ export const ask = async (server: Server, query: string): Promise<string> => {
 
 /** A production start: the generated schema module and the app, never the compiler. */
 /** Imports a value from the compiler's root entry, so its runtime export is exercised too. */
-const COMPILER_RUNTIME = `import { packageName } from "@dblechoc/gratos";
+const COMPILER_RUNTIME = `import { packageName } from "gratos";
 
 process.stdout.write(packageName);
 `;
@@ -425,12 +425,12 @@ import { getSchema } from "./generated/schema.ts";
 process.stdout.write(await ask(makeServer(getSchema()), QUERY));
 `;
 
-const IMPORT_SERVER = `import { createServer } from "@dblechoc/gratos-server";
+const IMPORT_SERVER = `import { createServer } from "gratos-server";
 
 process.stdout.write(typeof createServer);
 `;
 
-const DEV = `import { loadSchema } from "@dblechoc/gratos/dev";
+const DEV = `import { loadSchema } from "gratos/dev";
 import { Result } from "effect";
 
 import { ask, makeServer, QUERY } from "./app.ts";
@@ -448,8 +448,8 @@ process.stdout.write(await ask(makeServer(loaded.success.getSchema()), QUERY));
 `;
 
 /** jit() from its own entry, past its threshold: the jit phase shows that graphql-jit ran. */
-const JIT = `import { createServer } from "@dblechoc/gratos-server";
-import { jit } from "@dblechoc/gratos-server/jit";
+const JIT = `import { createServer } from "gratos-server";
+import { jit } from "gratos-server/jit";
 
 import { ask } from "./app.ts";
 import { getSchema } from "./generated/schema.ts";
@@ -485,7 +485,7 @@ import {
   readOnly,
   reportErrors,
   serverTiming,
-} from "@dblechoc/gratos-server";
+} from "gratos-server";
 
 const server = createServer({
   schema: buildSchema("type Query { count: Int }"),
