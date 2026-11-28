@@ -1,39 +1,69 @@
 name: release
 
-# The Changesets flow (docs/plan.html F7, AGENTS.md "Releasing"). A push to main with pending
-# changesets opens or updates the Version Packages PR. Once that PR is merged, and only when the
-# repo variable GRATOS_PUBLISH is "true", `pnpm run release` runs the gate, packs both packages
-# with `changeset pack`, runs the install test on those exact tarballs, and publishes them with
-# `changeset publish --from-pack-dir`, over npm trusted publishing (OIDC, id-token: write) with
-# provenance. No npm token exists anywhere.
+# The Changesets flow (docs/plan.html F7, AGENTS.md "Releasing"), in two jobs, so that only the
+# job that publishes can mint an npm token.
+#
+#   release  (contents: write, pull-requests: write; no id-token)
+#     changesets/action/select-mode decides what this push to main is for:
+#       version  changesets are pending: changesets/action/version opens or updates the Version
+#                Packages PR;
+#       publish  no changeset is pending, and the registry lacks a version (select-mode runs
+#                `changeset publish-plan` to find out): only when the repo variable
+#                GRATOS_PUBLISH is exactly "true", `pnpm run release` (scripts/release.ts)
+#                plans again, runs the gate, packs that plan with `changeset pack`, and runs the
+#                install test (min, newest, core) on those tarballs. The tested pack dir is
+#                uploaded as an artifact, and its plan's sha256 is a job output;
+#       none     nothing to do, and nothing runs: no gate on a push with nothing to publish.
+#   publish  (id-token: write, contents: write; only when release uploaded a pack)
+#     downloads that artifact by its id, checks it against the job output and its own plan
+#     (scripts/verify-pack.ts: the plan's sha256, then every tarball's integrity, package and
+#     version), and publishes exactly those tarballs with `changeset publish --from-pack-dir`,
+#     over npm trusted publishing (OIDC) with provenance, through changesets/action/publish,
+#     which then pushes the tags and creates the GitHub releases through the API. It runs no
+#     gate, no install test, and no dependency's code beyond a frozen install with
+#     --ignore-scripts and the Changesets CLI that publishes. No npm token exists anywhere.
+#
+# Repo setup this needs (AGENTS.md "Releasing"): Settings > Actions > General > Workflow
+# permissions > "Allow GitHub Actions to create and approve pull requests", or the version step
+# cannot open its PR; and, for publishing, an npm trusted publisher for release.yml on both
+# packages that allows direct publishing (`npm publish`), not only staged publishing.
 #
 # The action opens and updates the Version Packages PR with GITHUB_TOKEN, so GitHub creates that
 # PR's `ci` runs (pull_request) in an approval-required state instead of starting them: a
 # maintainer starts them with "Approve workflows to run" in the PR's merge box, and they report
 # the required `ci` check. A `workflow_dispatch` run would not: GitHub never counts a check from
-# one toward a PR's required checks. AGENTS.md "Releasing" has the steps.
+# one toward a PR's required checks.
 on:
   push:
     branches: [main]
 
+# One release run at a time, never cancelled: a run cancelled between its two jobs would leave
+# a tested pack unpublished, and one cancelled while publishing, a partial release.
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
-permissions:
-  contents: write # the Version Packages branch, release tags, GitHub releases
-  pull-requests: write # the Version Packages PR
-  id-token: write # npm trusted publishing and provenance
+# Each job states its own.
+permissions: {}
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # the Version Packages branch
+      pull-requests: write # the Version Packages PR
+    outputs:
+      pack-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      plan-sha256: ${{ steps.packed.outputs.plan-sha256 }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # The version sub-action commits and pushes through the GitHub API, so the token is
+          # not left in .git/config for the gate and the install test to read.
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
-      # No `cache: pnpm`, and no turbo cache, on purpose: the Actions cache is writable from
-      # lower-privileged runs, and this job publishes with provenance. It installs from the
-      # registry, checked against the lockfile, and runs the gate from scratch.
+      # No `cache: pnpm`, and no turbo cache, in either job, on purpose: the Actions cache is
+      # writable from lower-privileged runs, and these jobs build and publish with provenance.
+      # They install from the registry, checked against the lockfile, and run from scratch.
       #
       # Unlike shadcn-ui/cn's release workflow, there is no npm 11 pin and no `registry-url`:
       # pnpm 12 runs `info`, `pack` and `publish` itself, and does the OIDC token exchange with
@@ -42,21 +72,95 @@ jobs:
         with:
           node-version-file: .node-version
       - run: pnpm install --frozen-lockfile
-      - name: Open the Version Packages PR, or publish
-        uses: changesets/action@v2
+      - name: Select the mode
+        id: mode
+        uses: changesets/action/select-mode@v2
+      - name: Open or update the Version Packages PR
+        if: steps.mode.outputs.mode == 'version'
+        uses: changesets/action/version@v2
         with:
-          # Publishing is off until the maintainer sets the repo variable GRATOS_PUBLISH to
-          # "true" (after the first release, published by hand: AGENTS.md "Releasing"). While it
-          # is unset, publish-script is empty, so the action only opens or updates the Version
-          # Packages PR and never publishes.
-          publish-script: ${{ vars.GRATOS_PUBLISH == 'true' && 'pnpm run release' || '' }}
-          # v2's names for v1's `commit` and `title`; the default, "Version Packages", does not
-          # match the repo's conventional-commit history.
+          # The default, "Version Packages", does not match the repo's conventional-commit
+          # history.
           commit-message: "chore(release): version packages"
           pr-title: "chore(release): version packages"
+      # Publishing is off until the maintainer sets the repo variable GRATOS_PUBLISH to "true",
+      # after the first release, published by hand (AGENTS.md "Releasing"). The comparison is
+      # made in the shell, because an expression's `==`, and contains(), ignore case: there,
+      # "TRUE" would turn publishing on too.
+      - name: Check that publishing is on
+        id: publishing
+        if: steps.mode.outputs.mode == 'publish'
         env:
-          # For the action, and for `vendor:verify` in the release gate.
+          GRATOS_PUBLISH: ${{ vars.GRATOS_PUBLISH }}
+        run: |
+          if [ "$GRATOS_PUBLISH" = "true" ]; then
+            echo "on=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "GRATOS_PUBLISH is not \"true\": the registry lacks a version, and nothing is published."
+            echo "on=no" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Gate, pack and test the release
+        if: steps.publishing.outputs.on == 'yes'
+        run: pnpm run release
+        env:
+          # For `vendor:verify` in the gate; scripts/release.ts hands it to the gate only.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # scripts/release.ts leaves no .pack when the plan, made again, publishes nothing.
+      - name: Record the tested plan
+        id: packed
+        if: steps.publishing.outputs.on == 'yes'
+        run: |
+          if [ -f .pack/publish-plan.json ]; then
+            echo "plan-sha256=$(sha256sum .pack/publish-plan.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload the tested pack
+        id: upload
+        if: steps.packed.outputs.plan-sha256 != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-pack
+          path: .pack
+          # .pack is a dot directory, which upload-artifact skips by default.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: release
+    if: needs.release.outputs.pack-artifact-id != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the release tags and GitHub releases, through the API
+      id-token: write # npm trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      # The Changesets CLI that publishes, and nothing else runs: no lifecycle script.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Download the tested pack
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.release.outputs.pack-artifact-id }}
+          path: .pack
+          # Into .pack itself, not .pack/release-pack/.
+          merge-multiple: true
+      - name: Check the pack against the plan the release job tested
+        run: node scripts/verify-pack.ts .pack --plan-sha256 "$PLAN_SHA256"
+        env:
+          PLAN_SHA256: ${{ needs.release.outputs.plan-sha256 }}
+      - name: Publish the tested tarballs
+        uses: changesets/action/publish@v2
+        with:
+          # `changeset publish --from-pack-dir .pack`: it publishes the tarballs the plan names,
+          # and writes the CHANGESETS_OUTPUT file from which the action pushes the tags (on this
+          # commit, the one the tarballs were packed from) and creates the GitHub releases.
+          script: pnpm run release:publish
+        env:
           # pnpm 12 reads its settings from PNPM_CONFIG_*, and ignores NPM_CONFIG_PROVENANCE, so
           # provenance is asked for under pnpm's own name.
           PNPM_CONFIG_PROVENANCE: "true"
