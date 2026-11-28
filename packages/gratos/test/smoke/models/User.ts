@@ -1,4 +1,4 @@
-import type { ID } from "@dblechoc/gratos";
+import type { ID } from "gratos";
 
 import type { DateTime } from "./DateTime.ts";
 

@@ -12,17 +12,17 @@ and the shipped plugins). Code blocks tagged `file=` are compared with that file
 
 ## Renamed
 
-- **The package is `@dblechoc/gratos`**, not `grats`. Depend on it under that name (in this
-  workspace, `"@dblechoc/gratos": "workspace:*"`); models import Grats' types (`Int`, `Float`,
+- **The package is `gratos`**, not `grats`. Depend on it under that name (in this
+  workspace, `"gratos": "workspace:*"`); models import Grats' types (`Int`, `Float`,
   `ID`, `GqlInfo`, `GqlScalar`) from it:
 
   ```ts file=examples/orders/src/models/Order.ts
-  import type { Float, ID, Int } from "@dblechoc/gratos";
+  import type { Float, ID, Int } from "gratos";
   ```
 
 - **The binary is `gratos`**, not `grats`: `npx grats`, `npm run grats` and
   `node_modules/grats/dist/src/cli.js` become `gratos` (in a package script, say) and
-  `node_modules/@dblechoc/gratos/dist/cli.js`. In this workspace Node runs it from source, with no
+  `node_modules/gratos/dist/cli.js`. In this workspace Node runs it from source, with no
   build step; the published package's `bin` is the release build's (`publishConfig`):
 
   ```json file=packages/gratos/package.json
@@ -39,7 +39,7 @@ and the shipped plugins). Code blocks tagged `file=` are compared with that file
 
 - **`libraryImport` is a new config option**, under the same `grats` key of `tsconfig.json`. It is
   the module the generated `schema.ts` imports `GqlScalar` from, and the one error messages tell
-  you to import `Int`, `Float` and `GqlInfo` from. Its default is `@dblechoc/gratos` (Grats always
+  you to import `Int`, `Float` and `GqlInfo` from. Its default is `gratos` (Grats always
   says `grats`):
 
   ```json file=packages/gratos/src/upstream/configSpecRaw.json
@@ -47,7 +47,7 @@ and the shipped plugins). Code blocks tagged `file=` are compared with that file
         "description": "The module specifier of the library that exports Grats' types (`Int`, `Float`, `ID`, `GqlInfo`, `GqlScalar`). The generated TypeScript schema imports `GqlScalar` from it, and error messages tell you to import `Int`, `Float` and `GqlInfo` from it.",
         "type": { "kind": "string" },
         "nullable": false,
-        "default": "@dblechoc/gratos"
+        "default": "gratos"
       }
   ```
 
@@ -88,7 +88,7 @@ The scripts a package runs:
 None of these ports to the TypeScript 7 API, so all of them were cut (M1b in `docs/plan.html`):
 
 - **Watch mode** (`--watch`). The dev loop restarts the app with `node --watch-path` instead, and
-  the lazy `@dblechoc/gratos/dev` step regenerates the schema when it boots (see "The dev loop"
+  the lazy `gratos/dev` step regenerates the schema when it boots (see "The dev loop"
   in [effect.md](./effect.md)):
 
   ```json file=examples/orders/package.json
@@ -114,8 +114,8 @@ None of these ports to the TypeScript 7 API, so all of them were cut (M1b in `do
   default resolver for some), with its arguments passed positionally.
 - **Outputs never overwrite each other.** `gratos` fails, writing nothing, when two of its outputs
   (the schema, `schema.ts`, the enums module) are one file, also through a symbolic or hard link.
-- **A server and an Effect layer**: `@dblechoc/gratos-server` ([server.md](./server.md)) and
-  `@dblechoc/gratos-server/effect` ([effect.md](./effect.md)). Grats leaves the server to you; the
+- **A server and an Effect layer**: `gratos-server` ([server.md](./server.md)) and
+  `gratos-server/effect` ([effect.md](./effect.md)). Grats leaves the server to you; the
   vendored pages that use `graphql-yoga` still work with the generated schema, but Effect
   resolvers need `effectSchema`.
 
@@ -124,17 +124,17 @@ None of these ports to the TypeScript 7 API, so all of them were cut (M1b in `do
 | Page                                                 | What to read instead                                                                        |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `getting-started/cli.md`                             | "The `gratos` CLI" above: no `--watch`, `--fix` or `locate`; the binary is `gratos`         |
-| `getting-started/quick-start.md`                     | Install `@dblechoc/gratos`, not `grats`, and run `gratos`, not `npx grats`                  |
+| `getting-started/quick-start.md`                     | Install `gratos`, not `grats`, and run `gratos`, not `npx grats`                  |
 | `getting-started/configuration.md`                   | The headers name `gratos`; the `libraryImport` option is missing from its list              |
 | `guides/workflows.md`                                | The script runs `gratos`; there is no `--watch` to pass it (use `node --watch-path`)        |
 | `guides/incremental-migration/gradual-annotation.md` | `gratos`, not `npx grats`                                                                   |
 | `guides/incremental-migration/schema-merging.md`     | The script runs `gratos`, not `grats`                                                       |
-| `guides/performance-profiling.md`                    | Profile `node_modules/@dblechoc/gratos/dist/cli.js`                                         |
-| `resolvers.md`                                       | `GqlInfo` comes from `@dblechoc/gratos`                                                     |
-| `docblock-tags/info.md`                              | Import `GqlInfo` from `@dblechoc/gratos`, not `"grats"`                                     |
-| `docblock-tags/scalars.md`                           | Import `Float`, `Int` and `ID` from `@dblechoc/gratos`, not `"grats"`                       |
-| `docblock-tags/interfaces.md`                        | Import `ID` from `@dblechoc/gratos`, not `"grats"`                                          |
-| `docblock-tags/directive-definitions.md`             | Import `Int` from `@dblechoc/gratos`, not `"grats"`                                         |
-| `guides/connection-spec.md`                          | Import `Int` from `@dblechoc/gratos`, not `"grats"`                                         |
-| `guides/subscriptions.md`                            | Import `Int` from `@dblechoc/gratos`, not `"grats"`; a source may also be a `Stream.Stream` |
+| `guides/performance-profiling.md`                    | Profile `node_modules/gratos/dist/cli.js`                                         |
+| `resolvers.md`                                       | `GqlInfo` comes from `gratos`                                                     |
+| `docblock-tags/info.md`                              | Import `GqlInfo` from `gratos`, not `"grats"`                                     |
+| `docblock-tags/scalars.md`                           | Import `Float`, `Int` and `ID` from `gratos`, not `"grats"`                       |
+| `docblock-tags/interfaces.md`                        | Import `ID` from `gratos`, not `"grats"`                                          |
+| `docblock-tags/directive-definitions.md`             | Import `Int` from `gratos`, not `"grats"`                                         |
+| `guides/connection-spec.md`                          | Import `Int` from `gratos`, not `"grats"`                                         |
+| `guides/subscriptions.md`                            | Import `Int` from `gratos`, not `"grats"`; a source may also be a `Stream.Stream` |
 | `changelog.md`                                       | Upstream's history: its `--fix`, watch-mode and TypeScript-plugin entries do not apply      |

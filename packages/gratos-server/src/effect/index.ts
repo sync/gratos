@@ -1,5 +1,5 @@
-// @dblechoc/gratos-server/effect: the Effect layer (docs/plan.html M5). It is the only entry that
-// imports `effect`; the core (`@dblechoc/gratos-server`) never does. It also needs
+// gratos-server/effect: the Effect layer (docs/plan.html M5). It is the only entry that
+// imports `effect`; the core (`gratos-server`) never does. It also needs
 // `AsyncLocalStorage` (`node:async_hooks`: Node, Bun, Deno, Workers with nodejs_compat), which
 // carries each request's scope into its resolvers through the core's `wrapExecution` hook.
 // Build long-lived resources (pools, intervals) in Layers, never lazily inside a resolver: a

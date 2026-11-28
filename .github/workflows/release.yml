@@ -241,7 +241,7 @@ jobs:
                 echo "::error::$tag is at '${remote:-missing}', not $SHA: no release is created for it"
                 exit 1
               fi
-              notes=$(awk -v v="$version" '/^## /{ if (found) exit; found = ($2 == v); next } found' "packages/${name#@dblechoc/}/CHANGELOG.md")
+              notes=$(awk -v v="$version" '/^## /{ if (found) exit; found = ($2 == v); next } found' "packages/$name/CHANGELOG.md")
               # A prerelease version (0.2.0-beta.0) is a GitHub prerelease, as Changesets marks it.
               prerelease=""
               case "$version" in *-*) prerelease="--prerelease" ;; esac

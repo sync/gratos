@@ -1,4 +1,4 @@
-import type { ID } from "@dblechoc/gratos";
+import type { ID } from "gratos";
 import { Effect } from "effect";
 
 import { Api } from "../services/Api.ts";

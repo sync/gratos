@@ -1,8 +1,8 @@
 // The core and its plugins never import `effect`, directly or transitively (docs/plan.html M4a):
 // the package entry, run under plain Node with every plugin installed, resolves no module from
-// the effect package. Only the separate `@dblechoc/gratos-server/effect` entry (M5) imports it.
+// the effect package. Only the separate `gratos-server/effect` entry (M5) imports it.
 // And the core entry alone never loads graphql-jit, an optional peer: jit() is the separate
-// `@dblechoc/gratos-server/jit` entry (F7).
+// `gratos-server/jit` entry (F7).
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +30,7 @@ afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-describe("@dblechoc/gratos-server core", () => {
+describe("gratos-server core", () => {
   it("never imports effect", () => {
     const { run, urls } = traced("useCore.ts");
     expect(run.stderr).toBe("");

@@ -1,7 +1,7 @@
 // The request context every resolver receives, and how it is built from the session: the guard
 // checks the session's scopes, and refuses with the app's own Forbidden.
-import { makeGuard } from "@dblechoc/gratos-server/effect";
-import type { Guard } from "@dblechoc/gratos-server/effect";
+import { makeGuard } from "gratos-server/effect";
+import type { Guard } from "gratos-server/effect";
 
 import type { Api } from "../services/Api.ts";
 import type { Bus } from "../services/Bus.ts";

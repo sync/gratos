@@ -1,4 +1,4 @@
-import type { Int } from "@dblechoc/gratos";
+import type { Int } from "gratos";
 
 import { User } from "./User.ts";
 

@@ -18,15 +18,10 @@ import {
   maskErrors,
   reportErrors,
   serverTiming,
-} from "@dblechoc/gratos-server";
-import type { Server } from "@dblechoc/gratos-server";
-import {
-  effect,
-  effectRouteLayer,
-  effectSchema,
-  runInRequest,
-} from "@dblechoc/gratos-server/effect";
-import { jit } from "@dblechoc/gratos-server/jit";
+} from "gratos-server";
+import type { Server } from "gratos-server";
+import { effect, effectRouteLayer, effectSchema, runInRequest } from "gratos-server/effect";
+import { jit } from "gratos-server/jit";
 import { Effect, Layer, Match } from "effect";
 import type { Context } from "effect";
 import { HttpRouter } from "effect/http";

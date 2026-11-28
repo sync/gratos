@@ -1,4 +1,4 @@
-// `pnpm --filter @dblechoc/gratos bench`: cold build of a synthetic 300-model project with the
+// `pnpm --filter gratos bench`: cold build of a synthetic 300-model project with the
 // `gratos` CLI, compared with the committed baseline (bench/baseline.json at the repo root).
 //
 // It writes the fixture (bench/fixture.ts) to bench/.fixture/ (gitignored). It then runs the CLI in fresh Node processes

@@ -57,7 +57,7 @@ describe("fast loading (readFile policy)", () => {
   });
 
   it("serves this package's own public declarations in full, also under node_modules", () => {
-    // An installed @dblechoc/gratos is under node_modules: its declarations stand in here for the
+    // An installed gratos is under node_modules: its declarations stand in here for the
     // ones it would serve, so this fails if the policy blanks them.
     const installed = join(graphqlDir, "index.d.mts");
     expect(readFileOverride(policy(true), installed, new Set([installed]))).toBeUndefined();
@@ -129,7 +129,7 @@ describe("a program from a real tsconfig", () => {
 });
 
 describe("the engine on a real tsconfig", () => {
-  it("resolves the built-in scalars from Types.ts through @dblechoc/gratos", () => {
+  it("resolves the built-in scalars from Types.ts through gratos", () => {
     const config = getParsedTsConfig(smokeConfig);
     if (config.kind === "ERROR") {
       throw new Error(

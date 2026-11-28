@@ -1,4 +1,4 @@
-// The public API of @dblechoc/gratos/dev (docs/plan.html M6), without the compiler.
+// The public API of gratos/dev (docs/plan.html M6), without the compiler.
 //
 // package.json points the `./dev` entry's `types` condition here, and its runtime at src/dev.ts.
 // A consumer's typecheck (examples/orders) then never reaches the vendored engine, which only

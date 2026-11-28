@@ -90,12 +90,12 @@ describe("gratos CLI", () => {
       `Gratos: Wrote \`${project.path("schema.graphql")}\`.\nGratos: Wrote \`${project.path("schema.ts")}\`.\n`,
     );
     const sdl = readFileSync(project.path("schema.graphql"), "utf8");
-    // ID and Int are the built-in scalars from Types.ts, imported through @dblechoc/gratos.
+    // ID and Int are the built-in scalars from Types.ts, imported through gratos.
     expect(sdl).toContain("  id: ID\n");
     expect(sdl).toContain("  quantity: Int\n");
     expect(sdl).toContain("scalar DateTime");
     const schema = readFileSync(project.path("schema.ts"), "utf8");
-    expect(schema).toContain('import type { GqlScalar } from "@dblechoc/gratos";');
+    expect(schema).toContain('import type { GqlScalar } from "gratos";');
     expect(schema).toContain('from "./models/Order.ts";');
   });
 

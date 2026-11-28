@@ -1,5 +1,5 @@
 {
-  "name": "@dblechoc/gratos-server",
+  "name": "gratos-server",
   "version": "0.0.0",
   "description": "A small, plugin-based GraphQL-over-HTTP server core for Web Request and Response, with an Effect layer.",
   "license": "MIT",
@@ -44,13 +44,13 @@
     "prepack": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json"
   },
   "devDependencies": {
-    "@dblechoc/gratos": "workspace:*",
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "effect": "catalog:",
     "graphql": "catalog:",
     "graphql-jit": "catalog:",
+    "gratos": "workspace:*",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

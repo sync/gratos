@@ -1,4 +1,4 @@
-// @dblechoc/gratos/dev: the dev boot step (docs/plan.html M6).
+// gratos/dev: the dev boot step (docs/plan.html M6).
 //
 // `pnpm dev` runs the app under `GRATS_DEV=1 node --watch-path=src/models --watch-path=src/services
 // src/server.ts`, and the server imports this entry lazily, only when GRATS_DEV=1, so a

@@ -48,7 +48,7 @@ import { Parser } from "graphql/language/parser.js";
 import { type ExportDefinition } from "./GraphQLAstExtensions.ts";
 import { effectTypeReference, rejectEffectDerivedContext } from "../effect/extract.ts";
 
-export const LIBRARY_IMPORT_NAME = "@dblechoc/gratos";
+export const LIBRARY_IMPORT_NAME = "gratos";
 export const LIBRARY_NAME = "Grats";
 
 export const TYPE_TAG = "gqlType";

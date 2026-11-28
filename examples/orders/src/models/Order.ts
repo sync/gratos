@@ -1,4 +1,4 @@
-import type { Float, ID, Int } from "@dblechoc/gratos";
+import type { Float, ID, Int } from "gratos";
 import { Effect, Stream } from "effect";
 
 import { Api } from "../services/Api.ts";

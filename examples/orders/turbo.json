@@ -3,7 +3,7 @@
   "extends": ["//"],
   "tasks": {
     "test": {
-      "dependsOn": ["$TURBO_EXTENDS$", "@dblechoc/gratos#test", "@dblechoc/gratos-server#test"],
+      "dependsOn": ["$TURBO_EXTENDS$", "gratos#test", "gratos-server#test"],
       "env": ["CI", "GRATOS_DEV_LATENCY_BUDGET_MS", "GRATOS_DEV_CORRECTNESS_BOUND_MS"]
     }
   }

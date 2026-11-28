@@ -2,7 +2,7 @@
 //
 // `pnpm dev` runs this file under `GRATS_DEV=1 node --watch-path=src/models
 // --watch-path=src/services`: GRATS_DEV is explicit because Node removes --watch and --watch-path
-// from the child's process.execArgv. In dev, the boot step from @dblechoc/gratos/dev, imported
+// from the child's process.execArgv. In dev, the boot step from gratos/dev, imported
 // only then, regenerates src/generated/ from the models, then loads the app: the generated schema
 // module and the wiring in graphql.ts (which imports the services). When either does not build or
 // load, every request, on any path, answers 500 GRATS_ERROR with the diagnostics until the next
@@ -13,7 +13,7 @@
 // (src/tracing.ts). Without it, the exporter is never loaded.
 import { createServer as createHttpServer } from "node:http";
 
-import type { GratsDevError } from "@dblechoc/gratos/dev";
+import type { GratsDevError } from "gratos/dev";
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Config, Effect, Layer, Result } from "effect";
 import type { FileSystem } from "effect";
@@ -43,7 +43,7 @@ type AppLayer = Awaited<ReturnType<typeof loadApp>>;
 
 /** The app, or (in dev) why the models or the app do not build or load. */
 const app: Effect.Effect<Result.Result<AppLayer, GratsDevError>, never, FileSystem.FileSystem> = dev
-  ? Effect.promise(() => import("@dblechoc/gratos/dev")).pipe(
+  ? Effect.promise(() => import("gratos/dev")).pipe(
       Effect.flatMap((gratos) =>
         gratos.devSchema({ tsconfig: new URL("tsconfig.json", import.meta.url), load: loadApp }),
       ),

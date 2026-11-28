@@ -17,8 +17,8 @@ import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, posix, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 
-export const COMPILER = "@dblechoc/gratos";
-export const SERVER = "@dblechoc/gratos-server";
+export const COMPILER = "gratos";
+export const SERVER = "gratos-server";
 
 /** The packages a plan may publish: the two in the `fixed` group of .changeset/config.json. */
 export const PACKAGES: ReadonlyArray<string> = [COMPILER, SERVER];

@@ -26,7 +26,7 @@
   "importModuleSpecifierEnding": "",
   "EXPERIMENTAL__emitMetadata": true,
   "EXPERIMENTAL__emitResolverMap": false,
-  "libraryImport": "@dblechoc/gratos"
+  "libraryImport": "gratos"
 }
 ```
 

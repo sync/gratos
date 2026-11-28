@@ -287,12 +287,6 @@ importers:
 
   examples/orders:
     dependencies:
-      '@dblechoc/gratos':
-        specifier: workspace:*
-        version: link:../../packages/gratos
-      '@dblechoc/gratos-server':
-        specifier: workspace:*
-        version: link:../../packages/gratos-server
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.1.5(effect@4.1.5)(redis@6.3.1)
@@ -305,6 +299,12 @@ importers:
       graphql-jit:
         specifier: 'catalog:'
         version: 0.10.1(graphql@17.1.0)
+      gratos:
+        specifier: workspace:*
+        version: link:../../packages/gratos
+      gratos-server:
+        specifier: workspace:*
+        version: link:../../packages/gratos-server
     devDependencies:
       '@apollo/client':
         specifier: 'catalog:'
@@ -367,9 +367,6 @@ importers:
 
   packages/gratos-server:
     devDependencies:
-      '@dblechoc/gratos':
-        specifier: workspace:*
-        version: link:../gratos
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.1.5(effect@4.1.5)(redis@6.3.1)
@@ -388,6 +385,9 @@ importers:
       graphql-jit:
         specifier: 'catalog:'
         version: 0.10.1(graphql@17.1.0)
+      gratos:
+        specifier: workspace:*
+        version: link:../gratos
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

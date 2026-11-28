@@ -14,12 +14,12 @@
     "bench:subscriptions": "node bench/subscriptions.ts"
   },
   "dependencies": {
-    "@dblechoc/gratos": "workspace:*",
-    "@dblechoc/gratos-server": "workspace:*",
     "@effect/platform-node": "catalog:",
     "effect": "catalog:",
     "graphql": "catalog:",
-    "graphql-jit": "catalog:"
+    "graphql-jit": "catalog:",
+    "gratos": "workspace:*",
+    "gratos-server": "workspace:*"
   },
   "devDependencies": {
     "@apollo/client": "catalog:",

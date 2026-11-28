@@ -22,7 +22,7 @@ const model = (index: number): string => {
   return `import type { NodeRuntime } from "@effect/platform-node";
 import { Effect } from "effect";
 import type { GraphQLResolveInfo } from "graphql";
-import type { Int } from "@dblechoc/gratos";
+import type { Int } from "gratos";
 ${next === null ? "" : `import { ${next} } from "./${next}.ts";\n`}
 /** Model number ${index}. */
 /** @gqlType */

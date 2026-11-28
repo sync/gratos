@@ -35,7 +35,7 @@ describe("files loaded on the synthetic 300-model fixture", () => {
   });
 
   it("matches the baseline recorded in bench/baseline.json", () => {
-    // A dependency upgrade can change it: re-record with `pnpm --filter @dblechoc/gratos bench
+    // A dependency upgrade can change it: re-record with `pnpm --filter gratos bench
     // --record` (which also records the timings of the machine it runs on).
     expect(filesLoaded).toBe(readBaseline(SYNTHETIC_BASELINE).filesLoaded);
   });

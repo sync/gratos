@@ -1,8 +1,8 @@
 # Effect resolvers with Gratos
 
 Gratos is Grats (v0.0.36) taught to read `Effect.Effect` and `Stream.Stream` return types, plus
-a GraphQL server core (`@dblechoc/gratos-server`) and an Effect layer
-(`@dblechoc/gratos-server/effect`) that runs every resolver in the request's fiber context. The
+a GraphQL server core (`gratos-server`) and an Effect layer
+(`gratos-server/effect`) that runs every resolver in the request's fiber context. The
 other files of these docs are upstream Grats' (vendored unchanged); this chapter is Gratos' own
 (`llm-docs/gratos/` is the one folder `vendor:verify` does not compare with upstream). Its
 neighbours are [differences.md](./differences.md) (what Gratos removed or renamed from Grats) and
@@ -75,7 +75,7 @@ Generated markers, in the field's `extensions.gratos`:
 - `jit: false` on a field whose resolver declares a `GqlInfo` parameter: `jit()` keeps every
   operation that selects it on graphql-js (graphql-jit's `info` has no `getAbortSignal()`).
 
-The generated `schema.ts` imports Grats' types from `@dblechoc/gratos` (the `libraryImport`
+The generated `schema.ts` imports Grats' types from `gratos` (the `libraryImport`
 option). The CLI is `gratos` (`gratos --check` writes nothing and fails when the committed files
 are stale).
 
@@ -299,7 +299,7 @@ itself: its `Exit` carries a stack annotation, so it is not equal to a fresh `Ex
 ## The dev loop
 
 `pnpm dev` runs `GRATS_DEV=1 node --watch-path=src/models --watch-path=src/services
---watch-preserve-output src/server.ts`. On boot, the lazy `@dblechoc/gratos/dev` step regenerates
+--watch-preserve-output src/server.ts`. On boot, the lazy `gratos/dev` step regenerates
 the schema (writing only changed files) and loads the app; when the models do not build, the
 server still starts and every request answers 500 `GRATS_ERROR` with the diagnostics until the
 next good save. A save restarts the process (budget: 2 s from save to first good response),
