@@ -3,7 +3,7 @@
   "changes": {
     "src/upstream/cli.ts": {
       "removed": true,
-      "reason": "M1b mechanical (see the other entries) + M1b cut: --watch, --fix and the locate command are removed (commander stays until M2 swaps in node:util parseArgs) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; the commander CLI parser is replaced by node:util parseArgs (same --tsconfig, --version/-V and --help/-h options, no new dependency), and readPackageVersion() accepts the package name `@dblechoc/gratos` + M3: removed; the `gratos` CLI is src/cli.ts on effect/cli and the Effect shell src/generate.ts (spec: parseArgs → effect/cli)"
+      "reason": "M1b mechanical (see the other entries) + M1b cut: --watch, --fix and the locate command are removed (commander stays until M2 swaps in node:util parseArgs) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; the commander CLI parser is replaced by node:util parseArgs (same --tsconfig, --version/-V and --help/-h options, no new dependency), and readPackageVersion() accepts the package name `gratos` + M3: removed; the `gratos` CLI is src/cli.ts on effect/cli and the Effect shell src/generate.ts (spec: parseArgs → effect/cli) + F7c: the package name in this (historical) reason is the renamed `gratos`"
     },
     "src/upstream/CodeActions.ts": {
       "removed": true,
@@ -42,16 +42,16 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned)"
     },
     "src/upstream/configSpecRaw.json": {
-      "sha": "33e3c8e9fa345bd17f1e9e7650d22193c3899ad9",
-      "reason": "M2: libraryImport: the new config option `libraryImport` (default `@dblechoc/gratos`); upstream fixtures run with `grats`"
+      "sha": "cb1f5d4d5c19c8df5e3d3b40e27e7e336ed87234",
+      "reason": "M2: libraryImport: the new config option `libraryImport` (default `gratos`); upstream fixtures run with `grats` + F7c: the default is `gratos`, the compiler's package name since the packages were renamed before the first publish (it was the scoped name)"
     },
     "src/upstream/Errors.ts": {
       "sha": "fc0cc1e763f6833c0ed569da337d7c431e883148",
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: libraryImport: the three messages that name the library (ambiguousNumberType, ambiguousNumberLiteralType, userDefinedInfoTag) take the configured `libraryImport` instead of `grats` + M3: subscriptionFieldNotAsyncIterable also names Effect's `Stream.Stream` (spec §4)"
     },
     "src/upstream/Extractor.ts": {
-      "sha": "e20eb7a77b09430524f411fc310cc794d74d3b44",
-      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics, along with the closest-tag suggestion that only the removed fix used + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; JSDoc `comment` reads go through compat jsDocComment() (TypeScript 7 always returns a node array; one read is hoisted into a local for narrowing); the recorded JSDoc position uses compat jsDocCommentStart() (TypeScript 7's JSDoc pos includes leading trivia); property/signature questionToken reads use compat questionTokenOf() (TypeScript 7 calls it postfixToken); identifier `.escapedText` (absent on TypeScript 7 nodes) is read as `.text`, which is equal for the compared names (`const`, `undefined`, Grats tag names); libraryImport: LIBRARY_IMPORT_NAME is now only the default (`@dblechoc/gratos`); the extractor config carries `libraryImport` and passes it to those messages + M3: two Effect hook points into src/effect/extract.ts: typeReference calls effectTypeReference before expectNameIdentifier (`Effect.Effect`/`Stream.Stream` unwrapping, input-position and nesting errors), and recordDerivedContext calls rejectEffectDerivedContext (no Effect/Stream derived-context return)"
+      "sha": "6d394b1108aee53b06d9c251f921c0712f531d80",
+      "reason": "M1b mechanical (see the other entries) + M1b cut: quick-fix payloads (CodeActions) are removed from diagnostics, along with the closest-tag suggestion that only the removed fix used + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline; JSDoc `comment` reads go through compat jsDocComment() (TypeScript 7 always returns a node array; one read is hoisted into a local for narrowing); the recorded JSDoc position uses compat jsDocCommentStart() (TypeScript 7's JSDoc pos includes leading trivia); property/signature questionToken reads use compat questionTokenOf() (TypeScript 7 calls it postfixToken); identifier `.escapedText` (absent on TypeScript 7 nodes) is read as `.text`, which is equal for the compared names (`const`, `undefined`, Grats tag names); libraryImport: LIBRARY_IMPORT_NAME is now only the default (`gratos`); the extractor config carries `libraryImport` and passes it to those messages + M3: two Effect hook points into src/effect/extract.ts: typeReference calls effectTypeReference before expectNameIdentifier (`Effect.Effect`/`Stream.Stream` unwrapping, input-position and nesting errors), and recordDerivedContext calls rejectEffectDerivedContext (no Effect/Stream derived-context return) + F7c: the default is `gratos`, the compiler's package name since the packages were renamed before the first publish (it was the scoped name)"
     },
     "src/upstream/fixFixable.ts": {
       "removed": true,
@@ -103,7 +103,7 @@
     },
     "src/upstream/TGratsConfig.ts": {
       "sha": "f1b2f1f94c112e0176d0ef596fc3c08eac8f421c",
-      "reason": "M2: libraryImport: the new config option `libraryImport` (default `@dblechoc/gratos`), kept in sync with configSpecRaw.json"
+      "reason": "M2: libraryImport: the new config option `libraryImport` (default `gratos`), kept in sync with configSpecRaw.json + F7c: the default is `gratos`, the compiler's package name since the packages were renamed before the first publish (it was the scoped name)"
     },
     "src/upstream/transforms/addImplicitRootTypes.ts": {
       "sha": "032cd69e0b4fb47bf6fcaa64a1c5444c1e4fdaba",
@@ -210,16 +210,16 @@
       "reason": "M1b mechanical: relative imports use .ts specifiers; typescript is imported as typescript-baseline (5.9.2); type-only imports are marked; parameter properties became plain fields; the semver graphql-version gate for @oneOf is removed (graphql is pinned) + M2: TypeScript is imported as `#typescript` (the src/ts facade: TypeScript 7 at runtime, TypeScript 5.9.2 declarations for typechecking) instead of typescript-baseline"
     },
     "test/configParserFixtures/empty.json.expected.md": {
-      "sha": "aa544a8f10b664b6dc43a5e68c09208fe388f227",
-      "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"@dblechoc/gratos\"`"
+      "sha": "0b94ec8e0d1d5ee295a953754190924e63f1d1d2",
+      "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"gratos\"` + F7c: the default is `gratos`, the compiler's package name since the packages were renamed before the first publish (it was the scoped name)"
     },
     "test/configParserFixtures/experimentalField.json.expected.md": {
-      "sha": "13bf98dffda6b2b34b08b027b835cd1f3ff4e531",
-      "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"@dblechoc/gratos\"`"
+      "sha": "6bb749a2a152ee89e4b4bc1bec7ab81a37ab36f8",
+      "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"gratos\"` + F7c: the default is `gratos`, the compiler's package name since the packages were renamed before the first publish (it was the scoped name)"
     },
     "test/configParserFixtures/multiLineHeader.json.expected.md": {
-      "sha": "9704438b3d41965a2d36e32ffb7c3ea6a97798ad",
-      "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"@dblechoc/gratos\"`"
+      "sha": "92ac37df0dc74b87f8362a3a7d480e494263ec4d",
+      "reason": "M2: libraryImport: the Parsed Config section gains the new option's default, `\"libraryImport\": \"gratos\"` + F7c: the default is `gratos`, the compiler's package name since the packages were renamed before the first publish (it was the scoped name)"
     },
     "test/fixtures/arguments/ArgumentWithDescription.ts.expected.md": {
       "sha": "b36eec9c7459842b50826a3b40e9e13815e84cd6",
