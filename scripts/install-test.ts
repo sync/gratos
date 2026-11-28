@@ -12,14 +12,18 @@
 //
 //   node scripts/install-test.ts <dir> --peers min|newest|core [--keep]
 //
-// A <dir> that holds a publish-plan.json is a `changeset pack` output: the test takes the
-// tarballs that plan publishes, checks each one's integrity against the plan, and passes with
-// nothing to test when the plan publishes nothing (every version is already on the registry).
-// Any other <dir> holds the two tarballs.
+// A <dir> that holds a publish-plan.json is a `changeset pack` output (scripts/publish-plan.ts):
+// the test takes the tarballs that plan publishes, each checked against its own plan entry, and
+// passes with nothing to test when the plan publishes nothing (every version is already on the
+// registry). A plan can publish one package only: after a release that npm accepted for one
+// package and not the other, the next pack plans only the one still missing. The test then
+// installs that tarball beside the other package at its exact workspace version, from the
+// registry, which is what an app installing the release will get. Any other <dir> holds the two
+// tarballs.
 //
-// --peers picks what the project installs beside the tarballs:
-//   min     both tarballs, and each peer at the catalog's pin, the minimum its range allows
-//   newest  both tarballs, and each peer at the newest version its range allows
+// --peers picks what the project installs beside the packages:
+//   min     both packages, and each peer at the catalog's pin, the minimum its range allows
+//   newest  both packages, and each peer at the newest version its range allows
 //   core    @dblechoc/gratos-server and graphql only: no effect, no graphql-jit, no typescript
 //
 // It first inspects the tarballs (their manifests, their contents, the vendored llm-docs), then
@@ -27,7 +31,6 @@
 // every module each process loads. It uses only Node's built-ins, plus npm and the project's own
 // tsc. The project is deleted unless the test fails or --keep is passed.
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -42,12 +45,28 @@ import { tmpdir } from "node:os";
 import { join, posix, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { gunzipSync } from "node:zlib";
+
+import {
+  COMPILER,
+  isArray,
+  isRecord,
+  manifestOf,
+  parseJson,
+  readPackDir,
+  readTarball,
+  recordAt,
+  SERVER,
+  stringAt,
+} from "./publish-plan.ts";
+import type { Json, PackedRelease } from "./publish-plan.ts";
 
 const root = join(import.meta.dirname, "..");
 
-const COMPILER = "@dblechoc/gratos";
-const SERVER = "@dblechoc/gratos-server";
+/** Each package's directory in the workspace. */
+const PACKAGE_DIRS = new Map([
+  [COMPILER, join(root, "packages", "gratos")],
+  [SERVER, join(root, "packages", "gratos-server")],
+]);
 
 /** The peers the project installs in `min` and `newest`: every peer of either package. */
 const PEERS = ["effect", "@effect/platform-node", "graphql", "graphql-jit"] as const;
@@ -85,94 +104,7 @@ const stop = (message: string): never => {
 };
 
 // ---------------------------------------------------------------------------------------------
-// JSON, read without casts (Node's built-ins only, so no effect Schema or Predicate here).
-
-type Json =
-  | null
-  | boolean
-  | number
-  | string
-  | ReadonlyArray<Json>
-  | { readonly [key: string]: Json };
-
-const isRecord = (value: Json | undefined): value is { readonly [key: string]: Json } =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const recordAt = (value: Json | undefined, key: string): { readonly [key: string]: Json } => {
-  const field = isRecord(value) ? value[key] : undefined;
-  return isRecord(field) ? field : {};
-};
-
-const stringAt = (value: Json | undefined, key: string): string | undefined => {
-  const field = isRecord(value) ? value[key] : undefined;
-  return typeof field === "string" ? field : undefined;
-};
-
-/** A parsed JSON value, rebuilt with its type. */
-const toJson = (value: unknown): Json => {
-  if (
-    value === null ||
-    typeof value === "boolean" ||
-    typeof value === "number" ||
-    typeof value === "string"
-  ) {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((element: unknown) => toJson(element));
-  }
-  if (typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, toJson(inner)]));
-  }
-  return null;
-};
-
-const parseJson = (text: string): Json => toJson(JSON.parse(text));
-
-// ---------------------------------------------------------------------------------------------
 // The tarballs.
-
-/** A NUL-terminated field of a tar header. */
-const text = (block: Buffer, start: number, length: number): string => {
-  const raw = block.subarray(start, start + length).toString("utf8");
-  const end = raw.indexOf("\0");
-  return end === -1 ? raw : raw.slice(0, end);
-};
-
-/** The files of a .tgz, by path below `package/`. Regular files only. */
-const readTarball = (file: string): ReadonlyMap<string, Buffer> => {
-  const tar = gunzipSync(readFileSync(file));
-  const files = new Map<string, Buffer>();
-  let longName: string | undefined;
-  let offset = 0;
-  while (offset + 512 <= tar.length) {
-    const header = tar.subarray(offset, offset + 512);
-    if (header.every((byte) => byte === 0)) {
-      break;
-    }
-    const size = Number.parseInt(text(header, 124, 12).trim() || "0", 8);
-    const type = text(header, 156, 1);
-    const name = text(header, 0, 100);
-    const prefix = text(header, 345, 155);
-    const body = tar.subarray(offset + 512, offset + 512 + size);
-    offset += 512 + Math.ceil(size / 512) * 512;
-    if (type === "x") {
-      // A pax header: its `path` record names the next entry.
-      longName = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(body.toString("utf8"))?.[1] ?? longName;
-      continue;
-    }
-    if (type === "L") {
-      longName = text(body, 0, body.length);
-      continue;
-    }
-    const path = longName ?? (prefix === "" ? name : `${prefix}/${name}`);
-    longName = undefined;
-    if ((type === "0" || type === "") && path.startsWith("package/")) {
-      files.set(path.slice("package/".length), Buffer.from(body));
-    }
-  }
-  return files;
-};
 
 /** Every file below `dir`, by path relative to it with `/` separators. */
 const walk = (dir: string, prefix = ""): ReadonlyArray<string> =>
@@ -588,50 +520,34 @@ const copiesOf = (urls: ReadonlyArray<string>, name: string): ReadonlySet<string
 /** True when any module of `name` was loaded. */
 const loads = (urls: ReadonlyArray<string>, name: string): boolean => copiesOf(urls, name).size > 0;
 
-const PUBLISH_PLAN = "publish-plan.json";
-
-/** A release a `changeset pack` publish plan publishes, with its tarball's path below the dir. */
-interface PlannedRelease {
-  readonly name: string;
-  readonly version: string;
-  readonly tarball: string;
-}
+/** A package's version in the workspace (packages/<dir>/package.json). */
+const workspaceVersion = (name: string): string => {
+  const dir = PACKAGE_DIRS.get(name) ?? stop(`${name} is not a workspace package`);
+  return (
+    stringAt(parseJson(readFileSync(join(dir, "package.json"), "utf8")), "version") ??
+    stop(`${dir}/package.json has no version`)
+  );
+};
 
 /**
- * The releases `dir`'s publish-plan.json publishes, each tarball checked against the plan's
- * integrity (so the tarballs tested are the ones `changeset publish --from-pack-dir` publishes),
- * or undefined when `dir` holds no plan. The plan's tag-only releases have no tarball.
+ * Where the project installs a package from: its tarball, or, when a publish plan leaves the
+ * package out because the registry already has its version, the registry, at that exact version.
  */
-const publishPlan = (dir: string): ReadonlyArray<PlannedRelease> | undefined => {
-  const file = join(dir, PUBLISH_PLAN);
-  if (!existsSync(file)) {
-    return undefined;
+type Source =
+  | { readonly from: "tarball"; readonly packed: Packed }
+  | { readonly from: "registry"; readonly version: string; readonly manifest: Json };
+
+/** The registry's manifest of `name`@`version`, which must exist. */
+const registryManifest = (name: string, version: string): Json => {
+  const viewed = run(realpathSync(tmpdir()), "npm", ["view", `${name}@${version}`, "--json"]);
+  if (viewed.status !== 0) {
+    return stop(
+      `the publish plan leaves out ${name}, so ${name}@${version} must be on the registry, but npm view failed:\n${show(viewed)}`,
+    );
   }
-  const plan = parseJson(readFileSync(file, "utf8"));
-  const version = isRecord(plan) ? plan["version"] : undefined;
-  const chunks = isRecord(plan) ? plan["plan"] : undefined;
-  if (version !== 1 || !Array.isArray(chunks)) {
-    return stop(`${file} is not a version 1 publish plan`);
-  }
-  return chunks.flat().flatMap((release: Json): ReadonlyArray<PlannedRelease> => {
-    if (stringAt(release, "kind") !== "publish") {
-      return [];
-    }
-    const name = stringAt(release, "name") ?? stop(`${file} has a release with no name`);
-    const tarball = recordAt(release, "tarball");
-    const path = stringAt(tarball, "path") ?? stop(`${file} has no tarball for ${name}`);
-    const integrity =
-      stringAt(tarball, "integrity") ?? stop(`${file} has no integrity for ${name}`);
-    const actual = `sha256-${createHash("sha256")
-      .update(readFileSync(join(dir, path)))
-      .digest("base64")}`;
-    if (actual !== integrity) {
-      return stop(
-        `${path} is not the tarball ${file} names (integrity ${actual}, not ${integrity})`,
-      );
-    }
-    return [{ name, version: stringAt(release, "version") ?? "", tarball: path }];
-  });
+  const manifest = parseJson(viewed.stdout);
+  // npm view prints an array when a range matches several versions; an exact version is one.
+  return isArray(manifest) ? (manifest.at(-1) ?? null) : manifest;
 };
 
 const main = (): void => {
@@ -649,38 +565,72 @@ const main = (): void => {
 
   // The tarballs, by package name.
   const dir = resolve(tarballDir);
-  const planned = publishPlan(dir);
+  const planned = ((): ReadonlyArray<PackedRelease> | undefined => {
+    try {
+      return readPackDir(dir);
+    } catch (error) {
+      return stop(error instanceof Error ? error.message : String(error));
+    }
+  })();
   if (planned !== undefined && planned.length === 0) {
-    log(`${join(dir, PUBLISH_PLAN)} publishes nothing: there is nothing to test`);
+    log(`${dir}'s publish plan publishes nothing: there is nothing to test`);
     return;
   }
-  const tarballs =
-    planned?.map((release) => release.tarball) ??
-    readdirSync(dir).filter((file) => file.endsWith(".tgz"));
   const packed = new Map<string, Packed>();
-  for (const tarball of tarballs) {
-    const file = join(dir, tarball);
-    const files = readTarball(file);
-    const manifest = parseJson(files.get("package.json")?.toString("utf8") ?? "null");
-    const name = stringAt(manifest, "name") ?? stop(`${tarball} has no package name`);
-    packed.set(name, { name, file, manifest, files });
-  }
-  for (const release of planned ?? []) {
-    const manifest = packed.get(release.name)?.manifest;
+  if (planned === undefined) {
+    const tarballs = readdirSync(dir).filter((file) => file.endsWith(".tgz"));
+    for (const tarball of tarballs) {
+      const file = join(dir, tarball);
+      const files = readTarball(file);
+      const manifest = manifestOf(files);
+      const name = stringAt(manifest, "name") ?? stop(`${tarball} has no package name`);
+      packed.set(name, { name, file, manifest, files });
+    }
     expect(
-      manifest !== undefined && stringAt(manifest, "version") === release.version,
-      `${release.tarball} is ${release.name}@${release.version}, as the publish plan says`,
+      tarballs.length === 2 && packed.has(COMPILER) && packed.has(SERVER),
+      `${dir} holds the two tarballs only`,
+      tarballs.join("\n"),
     );
+  } else {
+    // readPackDir checked each tarball against its own plan entry, and that the plan publishes
+    // only the two packages, each once, and that the dir holds no other tarball.
+    for (const release of planned) {
+      log(`ok   ${release.path} is ${release.name}@${release.version}, as its plan entry says`);
+      packed.set(release.name, release);
+    }
   }
-  const compiler = packed.get(COMPILER) ?? stop(`no ${COMPILER} tarball in ${dir}`);
-  const server = packed.get(SERVER) ?? stop(`no ${SERVER} tarball in ${dir}`);
-  expect(packed.size === 2, `${dir} holds the two tarballs only`, tarballs.join("\n"));
+
+  // Each package the project installs, from its tarball, or from the registry when the plan
+  // leaves it out (it is never added to the plan: the plan stays what Changesets publishes).
+  const needed = mode === "core" ? [SERVER] : [COMPILER, SERVER];
+  const sources = new Map<string, Source>(
+    needed.map((name): [string, Source] => {
+      const tarball = packed.get(name);
+      if (tarball !== undefined) {
+        return [name, { from: "tarball", packed: tarball }];
+      }
+      const version = workspaceVersion(name);
+      log(`${name} is not in the publish plan: installing ${name}@${version} from the registry`);
+      return [name, { from: "registry", version, manifest: registryManifest(name, version) }];
+    }),
+  );
+  const manifestOfSource = (name: string): Json => {
+    const source = sources.get(name);
+    return source === undefined
+      ? null
+      : source.from === "tarball"
+        ? source.packed.manifest
+        : source.manifest;
+  };
 
   log("inspecting the tarballs");
-  inspect(compiler);
-  inspectCompiler(compiler);
-  inspect(server);
-  const version = stringAt(compiler.manifest, "version") ?? "";
+  for (const release of packed.values()) {
+    inspect(release);
+    if (release.name === COMPILER) {
+      inspectCompiler(release);
+    }
+  }
+  const version = stringAt(manifestOfSource(COMPILER), "version") ?? "";
 
   // The project, outside the workspace.
   const project = mkdtempSync(join(realpathSync(tmpdir()), "gratos-install-test-"));
@@ -689,19 +639,25 @@ const main = (): void => {
     `the project ${project} is outside the workspace`,
   );
   const peerRange = (name: string): string =>
-    stringAt(recordAt(compiler.manifest, "peerDependencies"), name) ??
-    stringAt(recordAt(server.manifest, "peerDependencies"), name) ??
-    stop(`no package has ${name} as a peer`);
+    needed
+      .map((pkg) => stringAt(recordAt(manifestOfSource(pkg), "peerDependencies"), name))
+      .find((range) => range !== undefined) ?? stop(`no package has ${name} as a peer`);
   const spec = (name: string): string =>
     mode === "newest" ? peerRange(name) : catalogVersion(name);
-  const dependencies: Record<string, string> =
-    mode === "core"
-      ? { [SERVER]: `file:${server.file}`, graphql: spec("graphql") }
-      : {
-          [COMPILER]: `file:${compiler.file}`,
-          [SERVER]: `file:${server.file}`,
-          ...Object.fromEntries(PEERS.map((name) => [name, spec(name)])),
-        };
+  const packageSpec = (name: string): string => {
+    const source = sources.get(name);
+    return source === undefined
+      ? stop(`no source for ${name}`)
+      : source.from === "tarball"
+        ? `file:${source.packed.file}`
+        : source.version;
+  };
+  const dependencies = {
+    ...Object.fromEntries(needed.map((name) => [name, packageSpec(name)])),
+    ...(mode === "core"
+      ? { graphql: spec("graphql") }
+      : Object.fromEntries(PEERS.map((name) => [name, spec(name)]))),
+  };
   const devDependencies: Record<string, string> =
     mode === "core"
       ? {}
@@ -735,6 +691,28 @@ const main = (): void => {
   };
   for (const name of [COMPILER, SERVER, ...PEERS, "typescript", "@types/node"]) {
     log(`installed ${name}@${installed(name) ?? "(none)"}`);
+  }
+  // Where npm took each package from, as its lockfile records it.
+  const lock = parseJson(readFileSync(join(project, "package-lock.json"), "utf8"));
+  for (const [name, source] of sources) {
+    const resolved = stringAt(
+      recordAt(recordAt(lock, "packages"), `node_modules/${name}`),
+      "resolved",
+    );
+    if (source.from === "tarball") {
+      expect(
+        resolved !== undefined && resolved.startsWith("file:"),
+        `${name} is installed from its tarball`,
+        String(resolved),
+      );
+    } else {
+      expect(
+        installed(name) === source.version &&
+          resolved !== undefined &&
+          /^https?:\/\//.test(resolved),
+        `${name}@${source.version} is installed from the registry (${String(resolved)})`,
+      );
+    }
   }
   if (mode === "min") {
     for (const name of PEERS) {
