@@ -1,6 +1,6 @@
 {
   "name": "gratos",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Grats, the GraphQL server generator for TypeScript, on the TypeScript 7 API and taught to read Effect return types.",
   "license": "MIT",
   "repository": {
