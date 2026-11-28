@@ -222,7 +222,10 @@ jobs:
           # provenance is asked for under pnpm's own name.
           PNPM_CONFIG_PROVENANCE: "true"
       - name: Create the GitHub releases, from tags on this commit only
-        if: steps.publish.outputs.published == 'true'
+        # Also after the publish step failed: a partial publish (one package out, then a failure)
+        # still pushes the published package's tag and sets `published`, and a later run's plan
+        # leaves that version out, so its release must be created here.
+        if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISHED: ${{ steps.publish.outputs.published-packages }}
@@ -239,5 +242,9 @@ jobs:
                 exit 1
               fi
               notes=$(awk -v v="$version" '/^## /{ if (found) exit; found = ($2 == v); next } found' "packages/${name#@dblechoc/}/CHANGELOG.md")
-              gh release create "$tag" --verify-tag --title "$tag" --notes "$notes"
+              # A prerelease version (0.2.0-beta.0) is a GitHub prerelease, as Changesets marks it.
+              prerelease=""
+              case "$version" in *-*) prerelease="--prerelease" ;; esac
+              # shellcheck disable=SC2086 # empty, or the one flag
+              gh release create "$tag" --verify-tag --title "$tag" --notes "$notes" $prerelease
             done
